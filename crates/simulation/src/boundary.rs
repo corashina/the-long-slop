@@ -320,6 +320,10 @@ impl StateBlock {
     pub const CHASE: u32 = 1 << 9;
     /// The storage startup frames are done.
     pub const STORAGE_READY: u32 = 1 << 10;
+    /// A save candidate restored its saved links.
+    pub const RESTORED: u32 = 1 << 11;
+    /// The world has no generation jobs and no pending work.
+    pub const WORLD_IDLE: u32 = 1 << 12;
 }
 
 /// Valve of one opening: 0 closed, 1 open.
@@ -914,6 +918,16 @@ pub struct WorldCommand {
     pub freeze: bool,
     /// A renderer failure. The world stops.
     pub failure: Option<String>,
+}
+
+/// Renderer input of one save candidate step.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CandidateCommand {
+    pub world: WorldCommand,
+    /// Prototype bytes that the candidate renderer shares with the active renderer: CPU, GPU.
+    pub shared: [usize; 2],
+    /// Fixed asset bytes that both renderers share: CPU, GPU.
+    pub fixed: [usize; 2],
 }
 
 /// Lamps the renderer admitted in its last step.

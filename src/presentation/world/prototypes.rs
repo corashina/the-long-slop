@@ -131,11 +131,6 @@ impl SourcePrototypes {
             .iter()
             .all(|e| matches!(e.state, State::Ready(_)))
     }
-    pub fn fork_shared_bytes(&self) -> (usize, usize) {
-        self.entries
-            .iter()
-            .fold((0, 0), |n, e| (n.0 + e.cpu, n.1 + e.gpu))
-    }
     pub fn shared_bytes(&self) -> (usize, usize) {
         self.entries
             .iter()

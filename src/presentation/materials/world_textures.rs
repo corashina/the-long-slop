@@ -188,23 +188,17 @@ impl WorldTextures {
         Ok(copy)
     }
     pub fn shared_bytes(&self) -> (usize, usize) {
-        self.shared_bytes_if(true)
-    }
-    pub fn fork_shared_bytes(&self) -> (usize, usize) {
-        self.shared_bytes_if(false)
-    }
-    fn shared_bytes_if(&self, shared: bool) -> (usize, usize) {
         let arrays = self
             .arrays
             .iter()
             .flatten()
-            .filter(|a| !shared || Arc::strong_count(&a.owner) > 1)
+            .filter(|a| Arc::strong_count(&a.owner) > 1)
             .fold((0, 0), |n, a| {
                 (
                     n.0 + a
                         .layers
                         .iter()
-                        .filter(|l| !shared || Arc::strong_count(&l.batches) > 1)
+                        .filter(|l| Arc::strong_count(&l.batches) > 1)
                         .map(|l| {
                             l.batches.len() * std::mem::size_of::<TextureBatchReference>()
                                 + l.batches
@@ -221,7 +215,7 @@ impl WorldTextures {
             });
         (
             arrays.0
-                + if !shared || Arc::strong_count(&self.uploads) > 1 {
+                + if Arc::strong_count(&self.uploads) > 1 {
                     queue_bytes()
                 } else {
                     0

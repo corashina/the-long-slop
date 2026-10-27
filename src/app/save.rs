@@ -3,6 +3,7 @@ use crate::presentation::save::PreparedPresentation;
 use crate::save::fresh_permit::FreshSessionPermit;
 use crate::save::{CameraSave, SaveError, SaveSnapshot, SourceHash, SourceStamp};
 use serde::{Deserialize, Serialize};
+use simulation::candidate::CandidateDriver;
 
 #[derive(Resource)]
 pub struct SaveRequests {
@@ -15,8 +16,7 @@ enum PendingPreparation {
 }
 pub(crate) struct Candidate {
     id: u32,
-    runtime: GarageRuntime,
-    camera: CameraMode,
+    driver: CandidateDriver,
     pub(crate) presentation: Option<PreparedPresentation>,
     kind: String,
     ready: bool,
@@ -179,11 +179,11 @@ fn process_request(
                 return Err(invalid("Prepared renderer is not ready"));
             }
             let candidate = requests.candidate().unwrap();
-            candidate.presentation.as_ref().unwrap().validate_commit(
-                &reference,
-                &candidate.runtime,
-                world,
-            )?;
+            candidate
+                .presentation
+                .as_ref()
+                .unwrap()
+                .validate_commit(&reference, world)?;
             let mut candidate = requests.take_candidate().unwrap();
             // The prepared commands and stable bindings make this boundary infallible.
             world.resource_scope(
@@ -201,13 +201,7 @@ fn process_request(
                     sky.reset(world)
                 },
             );
-            world.resource_scope(|world, mut drive: Mut<Drive>| {
-                candidate
-                    .presentation
-                    .take()
-                    .unwrap()
-                    .commit(&mut drive.sim.runtime, world);
-            });
+            candidate.presentation.take().unwrap().commit(world);
             let mut drive = world.resource_mut::<Drive>();
             let session = drive
                 .sim
@@ -217,7 +211,7 @@ fn process_request(
                 .map_or(1, |audio| audio.session.wrapping_add(1));
             // Assignment drops the old stream and terminates its road actor first.
             let settings = drive.sim.runtime.driving_input.settings;
-            drive.sim.runtime = candidate.runtime;
+            drive.sim.runtime = candidate.driver.runtime;
             drive.sim.runtime.driving_input.settings = settings;
             drive
                 .sim
@@ -230,15 +224,15 @@ fn process_request(
                 audio.reset(session);
                 audio.sync_lamps(&reference.lighting, &runtime.lighting);
             }
-            drive.sim.restart(candidate.camera);
+            drive.sim.restart(candidate.driver.camera);
             drive.ready = false;
             drive.sim.runtime.advance_instruments(&reference, 0., true);
-            // The new runtime starts a new frame stream: drop the old pose index and tables.
-            drive.sim.runtime.reset_structure_views();
+            // The new runtime starts a new frame stream. The candidate frames consumed its sent state.
+            drive.sim.runtime.reset_frame_outputs();
             let mut sim = SimFrameResource::default();
             super::fill(&mut drive, &reference, &mut sim);
             let state = sim.frame.state;
-            let camera = super::active_camera(&drive, &state);
+            let camera = super::frame_camera(&state, drive.view);
             let (far, fov) = (state.far_plane, state.fov_degrees);
             drop(drive);
             world.insert_resource(sim);
@@ -378,8 +372,7 @@ fn process_request(
 
             requests.pending = Some(PendingPreparation::Replacement(Candidate {
                 id: request.id,
-                runtime,
-                camera,
+                driver: CandidateDriver::new(runtime, camera),
                 presentation: None,
                 kind: request.kind.clone(),
                 ready: false,
@@ -403,7 +396,7 @@ fn advance(world: &mut World) {
                 .is_none_or(|p| p.drained(world))
             {
                 if let Some(p) = candidate.presentation.take() {
-                    p.release(&mut candidate.runtime, world);
+                    p.release(world);
                 }
                 game_save_result(candidate.id, &candidate.kind, "", "Save operation canceled");
                 return;
@@ -424,16 +417,20 @@ fn advance(world: &mut World) {
                 }
                 candidate.presentation = Some(PreparedPresentation::new(
                     &reference,
-                    &mut candidate.runtime,
+                    &candidate.driver.runtime.stream,
                     world,
                 )?);
             }
-            candidate.presentation.as_mut().unwrap().advance(
-                &reference,
-                &mut candidate.runtime,
-                candidate.camera,
-                world,
-            )
+            let presentation = candidate.presentation.as_mut().unwrap();
+            let driver = &mut candidate.driver;
+            driver.accept(presentation.take_command());
+            let active = world.resource::<Drive>().sim.runtime.stream.metrics();
+            driver.advance(&reference, active, crate::browser::local_calendar());
+            driver.fill(&reference, &mut presentation.frame.frame);
+            presentation
+                .frame
+                .apply_changes(|handle| driver.release_pose(handle));
+            presentation.advance(&reference, &driver.runtime.stream, world)
         })();
         match result {
             Ok(true) => {
