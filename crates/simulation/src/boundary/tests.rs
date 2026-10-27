@@ -43,6 +43,11 @@ fn frame_round_trips() {
                 gain: 1.,
                 ..Default::default()
             },
+            perf: PerfBlock {
+                physics_ms: 3.5,
+                frame_steps: 2,
+                ..Default::default()
+            },
         },
         hud: HudBlock {
             hp: 80.,
@@ -213,6 +218,19 @@ fn frame_round_trips() {
                 file: "level0".into(),
                 path_id: 8,
             }),
+            Change::Plates {
+                id: crate::world::GeneratedId {
+                    layer: crate::world::WorldLayer::Startup,
+                    generator: crate::reference::SourceId {
+                        file: "level0".into(),
+                        path_id: 7,
+                    },
+                    unit: [0, 0],
+                    ordinal: 1,
+                    children: Vec::new(),
+                },
+                texts: vec!["ABC 123".into()],
+            },
             Change::Failure("stream".into()),
         ],
     };

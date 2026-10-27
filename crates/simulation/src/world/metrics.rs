@@ -23,7 +23,6 @@ pub struct ResourceBudget {
 }
 
 /// Live counts and renderer reservations. Excludes retained simulation and source data.
-#[cfg(target_arch = "wasm32")]
 #[derive(Default)]
 pub struct WorldPerformance {
     pub roads: usize,

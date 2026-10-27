@@ -4,7 +4,7 @@ use super::{
     reference::ReferenceVisuals,
 };
 use crate::{
-    app::{Drive, RuntimeReference},
+    app::RuntimeReference,
     plates::layout::{GlyphMesh, layout_text, sdf_parameters},
 };
 use bevy::{
@@ -431,7 +431,9 @@ fn world_labels(
         status.world.retain(|root| instances.has_root(*root));
     }
     let reference = &world.resource::<RuntimeReference>().0;
-    let vehicles = &world.resource::<Drive>().sim.runtime.vehicles;
+    let plate_texts = &world
+        .resource::<super::sim_frame::SimFrameResource>()
+        .plates;
     let Some(material) = status.material.clone() else {
         return Ok(None);
     };
@@ -446,12 +448,7 @@ fn world_labels(
                 if plates.is_empty() || status.world.contains(&root) {
                     return None;
                 }
-                let texts = vehicles.iter().find_map(|(key, car)| match key {
-                    crate::world::ObjectKey::Generated(id) if *id == placement.id => {
-                        Some(&car.plates)
-                    }
-                    _ => None,
-                })?;
+                let texts = plate_texts.get(&placement.id)?;
                 Some((root, prototype, nodes, texts))
             })
     else {

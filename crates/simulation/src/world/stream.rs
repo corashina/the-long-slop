@@ -4972,7 +4972,6 @@ impl WorldStream {
         }
     }
     /// Bounded live counts. Does not walk spawn history, asset payloads, or change records.
-    #[cfg(target_arch = "wasm32")]
     pub fn performance_counters(&self) -> super::metrics::WorldPerformance {
         let mut counters = super::metrics::WorldPerformance {
             objects: self

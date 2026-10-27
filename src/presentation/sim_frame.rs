@@ -65,6 +65,12 @@ pub(crate) struct SimFrameResource {
     pub screen_set: Option<Vec<ItemId>>,
     /// A structure took or left a slot since the instances last read them.
     pub structures_moved: bool,
+    /// Plate texts by world car.
+    pub plates: HashMap<GeneratedId, Vec<String>>,
+    /// The simulation part of a world measurement, waiting for the renderer part.
+    pub measurements: Option<String>,
+    /// A simulation failure that the browser did not show yet.
+    pub failure: Option<String>,
 }
 
 impl SimFrameResource {
@@ -124,7 +130,11 @@ impl SimFrameResource {
                 Change::MaterialSource(source) => self.material_sources.push(source.clone()),
                 Change::Screen(view) => self.screens.push((**view).clone()),
                 Change::Screens(items) => self.screen_set = Some(items.clone()),
-                Change::Failure(_) => {}
+                Change::Plates { id, texts } => {
+                    self.plates.insert(id.clone(), texts.clone());
+                }
+                Change::Measurements(json) => self.measurements = Some(json.clone()),
+                Change::Failure(failure) => self.failure = Some(failure.clone()),
             }
         }
         let frame = &self.frame;

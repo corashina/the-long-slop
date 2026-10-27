@@ -1,5 +1,5 @@
 //! Runs the simulation from renderer commands. It owns the runtime, the input queue and the step clock.
-use crate::boundary::{LookBlock, SimCommand, SimFrame, StateBlock};
+use crate::boundary::{Change, LookBlock, SimCommand, SimFrame, StateBlock};
 use crate::reference::ReferenceManifest;
 use crate::simulation::{FIXED_DT, FrameInput, StepClock, keys};
 use crate::starting_area::GarageRuntime;
@@ -46,6 +46,11 @@ pub struct SimDriver {
     ready: bool,
     delta_seconds: f64,
     calendar: [u8; 2],
+    /// The browser asked for a world measurement.
+    measure: bool,
+    /// A failure that the next frame reports. The driver stops the storage startup after it.
+    failure: Option<String>,
+    failed: bool,
 }
 
 impl SimDriver {
@@ -76,6 +81,9 @@ impl SimDriver {
             ready: false,
             delta_seconds: 0.,
             calendar: [1, 1],
+            measure: false,
+            failure: None,
+            failed: false,
         };
         driver.reset_look();
         driver
@@ -92,6 +100,7 @@ impl SimDriver {
         self.calendar = command.calendar;
         self.ready = command.ready;
         self.accepted_seq = command.seq;
+        self.measure |= command.measure;
         if command.hold {
             clear_profile_input();
             self.drop_frame_input();
@@ -155,6 +164,16 @@ impl SimDriver {
         self.physics_ms = 0.;
         self.frame_steps = 0;
         self.render_delta_seconds = 0.;
+        if !self.ready && !self.failed {
+            // Source storage startup runs once per loading frame.
+            if let Err(error) = self
+                .runtime
+                .initialize_storage_frame(self.delta_seconds as f32)
+            {
+                self.failure = Some(error.to_string());
+                self.failed = true;
+            }
+        }
         if !self.ready || !self.runtime.started || self.runtime.paused {
             return;
         }
@@ -239,6 +258,16 @@ impl SimDriver {
         self.runtime.fill_frame(reference, alpha, frame);
         frame.seq_consumed = self.consumed_seq;
         frame.state.look = self.look;
+        frame.state.perf.physics_ms = self.physics_ms;
+        frame.state.perf.frame_steps = self.frame_steps;
+        if std::mem::take(&mut self.measure) {
+            frame.changes.push(Change::Measurements(
+                self.runtime.measurements(reference).to_string(),
+            ));
+        }
+        if let Some(failure) = self.failure.take() {
+            frame.changes.push(Change::Failure(failure));
+        }
         if self.camera == CameraMode::Chase {
             frame.state.flags |= StateBlock::CHASE;
         }
