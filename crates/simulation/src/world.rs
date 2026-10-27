@@ -43,6 +43,7 @@ pub mod metrics;
 pub use metrics::WorldMetrics;
 #[cfg(target_arch = "wasm32")]
 pub mod pipeline_ownership;
+pub mod presentation_ledger;
 #[cfg(any(target_arch = "wasm32", test))]
 pub mod renderer_pending;
 pub mod stream;
@@ -51,6 +52,7 @@ pub use stream::content_index::ContentIndex;
 pub use stream_limits::StreamLimits;
 #[cfg(any(target_arch = "wasm32", test))]
 pub mod upload_receipt;
+pub use presentation_ledger::{PresentationGrant, PresentationLedger, PresentationReport};
 pub use stream::content_boxes::BoxRelease;
 pub use stream::{
     PresentationAllocation, PublishedSupply, PublishedSurface, SurfaceKey, WorldFrame,

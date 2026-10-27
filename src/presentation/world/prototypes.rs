@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{
     reference::{ReferenceError, ReferenceManifest, SourceId, prototype_plan::PrototypePlan},
-    world::WorldStream,
+    world::{PresentationLedger, WorldStream},
 };
 use bevy::{
     asset::LoadState, ecs as bevy_ecs, mesh::skinning::SkinnedMeshInverseBindposes, prelude::*,
@@ -35,8 +35,9 @@ pub struct SourcePrototypes {
     entries: Vec<Entry>,
     next_request: u64,
     accounted_session: u64,
-    stale_cpu: usize,
-    stale_gpu: usize,
+    /// Prototype bytes of all entries, as charged to the ledger.
+    entry_cpu: usize,
+    entry_gpu: usize,
     retired_sources: Vec<SourceId>,
     io: IoLedger,
     control_cpu: usize,
@@ -140,7 +141,11 @@ impl SourcePrototypes {
             .filter(|e| matches!(&e.state, State::Ready(loaded) if Arc::strong_count(loaded)>1))
             .fold((0, 0), |n, e| (n.0 + e.cpu, n.1 + e.gpu))
     }
-    pub fn fork(&self, stream: &mut WorldStream) -> Result<Self, ReferenceError> {
+    pub fn fork(
+        &self,
+        stream: &mut WorldStream,
+        ledger: &mut PresentationLedger,
+    ) -> Result<Self, ReferenceError> {
         if !self.settled() {
             return Err(ReferenceError("Source prototype loads are pending".into()));
         }
@@ -151,9 +156,9 @@ impl SourcePrototypes {
             self.entries.len(),
             0,
         );
-        let mut allocation = stream.presentation_allocation();
+        let mut allocation = ledger.allocation();
         allocation.prototype_cpu += control_cpu;
-        stream.set_presentation_allocation(allocation)?;
+        ledger.set_allocation(allocation)?;
         let mut copy = Self {
             entries: Vec::with_capacity(self.entries.len()),
             retired_sources: Vec::with_capacity(self.entries.len()),
@@ -165,7 +170,7 @@ impl SourcePrototypes {
             let State::Ready(_) = &e.state else {
                 unreachable!()
             };
-            stream.reserve_prototype(e.source.clone(), e.cpu, e.gpu)?;
+            stream.hold_prototype(e.source.clone())?;
             stream.bind_prototype(&e.source)?;
             copy.entries.push(Entry {
                 source: e.source.clone(),
@@ -180,21 +185,22 @@ impl SourcePrototypes {
                 nodes: e.nodes.clone(),
             });
         }
-        copy.account(stream)?;
+        copy.account(stream, ledger)?;
         Ok(copy)
     }
 
     pub fn request(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
+        ledger: &mut PresentationLedger,
         source: &SourceId,
     ) -> Result<(), ReferenceError> {
         let session = stream.frame().request.session;
-        self.account(stream)?;
+        self.account(stream, ledger)?;
         if self.entries.iter().any(|e| e.source == *source) {
             return Ok(());
         }
-        if stream.metrics().pending_work >= 32 {
+        if !ledger.can_request_independent(1) {
             return Ok(());
         }
         if self.entries.len() >= 8192 {
@@ -207,10 +213,10 @@ impl SourcePrototypes {
             + source.file.len()
             + retired_capacity.saturating_sub(self.retired_sources.capacity())
                 * std::mem::size_of::<SourceId>();
-        let mut allocation = stream.presentation_allocation();
+        let mut allocation = ledger.allocation();
         allocation.prototype_cpu += extra;
         allocation.pending += 1;
-        stream.set_presentation_allocation(allocation)?;
+        ledger.set_allocation(allocation)?;
         self.io.pending += 1;
         self.next_request = self.next_request.wrapping_add(1);
         self.control_cpu += extra;
@@ -242,11 +248,12 @@ impl SourcePrototypes {
     pub fn admit_payload(
         &mut self,
         stream: &mut WorldStream,
+        ledger: &mut PresentationLedger,
         reference: &ReferenceManifest,
         server: &AssetServer,
         source: &SourceId,
     ) -> Result<bool, ReferenceError> {
-        self.account(stream)?;
+        self.account(stream, ledger)?;
         let session = stream.frame().request.session;
         let Some(entry) = self
             .entries
@@ -272,14 +279,7 @@ impl SourcePrototypes {
             .find(|a| a.id == prototype.asset)
             .ok_or_else(|| ReferenceError("Missing prototype asset".into()))?;
         let reservation = entry.state.payload_reservation()?;
-        if !reservation.fits(
-            &stream.metrics(),
-            stream.available_external_jobs(),
-            stream.available_dependency_staging_bytes(),
-            entry.cpu,
-            entry.gpu,
-            false,
-        ) {
+        if !reservation.fits(ledger, entry.cpu, entry.gpu, false) {
             return Ok(false);
         }
         let settings = SourceGltfSettings {
@@ -287,12 +287,6 @@ impl SourcePrototypes {
             buffer_bytes: plan.buffer_bytes,
             mesh_bytes: plan.mesh_bytes,
         };
-        let allocation = stream.presentation_allocation();
-        stream.set_presentation_allocation(reservation.allocation(allocation, false))?;
-        if let Err(error) = stream.resize_prototype(source, reservation.cpu, reservation.gpu) {
-            stream.set_presentation_allocation(allocation)?;
-            return Err(error);
-        }
         let asset = server
             .load_builder()
             .with_settings(move |target: &mut SourceGltfSettings| {
@@ -307,11 +301,7 @@ impl SourcePrototypes {
         entry.cpu = reservation.cpu;
         entry.gpu = reservation.gpu;
         entry.staging = reservation.staging;
-        self.io.add(IoLedger {
-            jobs: 1,
-            pending: 1,
-            staging: reservation.staging,
-        });
+        self.account(stream, ledger)?;
         Ok(true)
     }
     pub fn loaded(&self, session: u64, source: &SourceId) -> Option<&LoadedPrototype> {
@@ -467,27 +457,21 @@ impl SourcePrototypes {
             entry.retired = true;
         }
     }
-    fn account(&mut self, stream: &mut WorldStream) -> Result<(), ReferenceError> {
+    fn account(
+        &mut self,
+        stream: &WorldStream,
+        ledger: &mut PresentationLedger,
+    ) -> Result<(), ReferenceError> {
         let session = stream.frame().request.session;
         if self.accounted_session != session {
             self.io = IoLedger::default();
             self.control_cpu = 0;
-            self.stale_cpu = 0;
-            self.stale_gpu = 0;
+            self.entry_cpu = 0;
+            self.entry_gpu = 0;
             self.accounted_session = session;
         }
-        let stale_cpu = self
-            .entries
-            .iter()
-            .filter(|e| e.session != session)
-            .map(|e| e.cpu)
-            .sum::<usize>();
-        let stale_gpu = self
-            .entries
-            .iter()
-            .filter(|e| e.session != session)
-            .map(|e| e.gpu)
-            .sum::<usize>();
+        let entry_cpu = self.entries.iter().map(|e| e.cpu).sum::<usize>();
+        let entry_gpu = self.entries.iter().map(|e| e.gpu).sum::<usize>();
         let mut io = IoLedger::default();
         for entry in &self.entries {
             io.add(entry.state.io(entry.staging));
@@ -498,18 +482,18 @@ impl SourcePrototypes {
             self.retired_sources.capacity(),
             self.retired_sources.iter().map(|s| s.file.capacity()).sum(),
         ) + self.used.capacity();
-        let mut allocation = stream.presentation_allocation();
+        let mut allocation = ledger.allocation();
         allocation.prototype_cpu = allocation
             .prototype_cpu
-            .saturating_sub(self.stale_cpu + self.control_cpu)
-            + stale_cpu
+            .saturating_sub(self.entry_cpu + self.control_cpu)
+            + entry_cpu
             + control_cpu;
         allocation.prototype_gpu =
-            allocation.prototype_gpu.saturating_sub(self.stale_gpu) + stale_gpu;
+            allocation.prototype_gpu.saturating_sub(self.entry_gpu) + entry_gpu;
         allocation = io.replace(self.io, allocation);
-        stream.set_presentation_allocation(allocation)?;
-        self.stale_cpu = stale_cpu;
-        self.stale_gpu = stale_gpu;
+        ledger.set_allocation(allocation)?;
+        self.entry_cpu = entry_cpu;
+        self.entry_gpu = entry_gpu;
         self.io = io;
         self.control_cpu = control_cpu;
         Ok(())
@@ -517,6 +501,7 @@ impl SourcePrototypes {
     pub fn prepare(
         &mut self,
         stream: &mut WorldStream,
+        ledger: &mut PresentationLedger,
         reference: &ReferenceManifest,
         server: &AssetServer,
         assets: &mut Assets<SourceGltf>,
@@ -567,7 +552,6 @@ impl SourcePrototypes {
                     entry.retired = true;
                     validate_plan(plan, prototype, reference)?;
                     let cpu = retained_plan_bytes(plan);
-                    stream.resize_prototype(&entry.source, cpu, 0)?;
                     entry.cpu = cpu;
                     entry.gpu = 0;
                     entry.staging = 0;
@@ -625,7 +609,6 @@ impl SourcePrototypes {
                         + plan.scene_bytes
                         + loaded.meshes.len() * 4096;
                     let gpu = loaded.mesh_bytes + loaded.skin_bytes + loaded.meshes.len() * 8;
-                    stream.resize_prototype(&entry.source, cpu, gpu)?;
                     entry.cpu = cpu;
                     entry.gpu = gpu;
                     entry.state.complete_payload();
@@ -668,15 +651,15 @@ impl SourcePrototypes {
                 }
             }
         }
-        self.account(stream)?;
-        if stream.available_external_jobs() == 0 {
-            return Ok(());
-        }
+        self.account(stream, ledger)?;
         if let Some(entry) = self
             .entries
             .iter_mut()
             .find(|entry| !entry.retired && matches!(entry.state, State::Queued))
         {
+            if ledger.available_external_jobs() == 0 {
+                return Ok(());
+            }
             let prototype = reference
                 .world
                 .prototypes
@@ -688,24 +671,10 @@ impl SourcePrototypes {
                 .find(|a| a.id == prototype.asset)
                 .ok_or_else(|| ReferenceError("Missing prototype asset".into()))?;
             let reservation = Reservation::metadata(&reference.file_catalog, &record.path)?;
-            if !reservation.fits(
-                &stream.metrics(),
-                stream.available_external_jobs(),
-                stream.available_dependency_staging_bytes(),
-                entry.cpu,
-                entry.gpu,
-                true,
-            ) || reservation.cpu > stream.prototype_headroom(&entry.source)
+            // A full stream table waits like a full credit.
+            if !reservation.fits(ledger, entry.cpu, entry.gpu, true)
+                || stream.hold_prototype(entry.source.clone()).is_err()
             {
-                return Ok(());
-            }
-            let allocation = stream.presentation_allocation();
-            stream.set_presentation_allocation(reservation.allocation(allocation, true))?;
-            if stream
-                .reserve_prototype(entry.source.clone(), reservation.cpu, 0)
-                .is_err()
-            {
-                stream.set_presentation_allocation(allocation)?;
                 return Ok(());
             }
             let handle = load_plan(
@@ -719,8 +688,7 @@ impl SourcePrototypes {
             entry.gpu = 0;
             entry.staging = reservation.staging;
             entry.state = State::PlanLoading(handle);
-            self.io.jobs += 1;
-            self.io.staging += reservation.staging;
+            self.account(stream, ledger)?;
         }
         Ok(())
     }

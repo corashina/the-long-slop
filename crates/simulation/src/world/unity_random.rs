@@ -60,6 +60,11 @@ impl UnityRandom {
         let radius = self.value().sqrt();
         [radius * angle.cos(), radius * angle.sin()]
     }
+    /// Uniform point in the unit ball (`insideUnitSphere`). The native draw order is not checked.
+    pub fn inside_unit_sphere(&mut self) -> [f32; 3] {
+        let radius = self.value().cbrt();
+        self.on_unit_sphere().map(|v| v * radius)
+    }
     /// Native RVA ffc80 has two draws and no rejection branch.
     pub fn on_unit_sphere(&mut self) -> [f32; 3] {
         let u = self.value();

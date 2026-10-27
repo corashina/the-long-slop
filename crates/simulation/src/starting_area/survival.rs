@@ -229,12 +229,14 @@ impl GarageRuntime {
         )?;
         Ok(id)
     }
-    /// `ediblescript.Shot(onlySeparate: true)`: the item advances `n` bites without
-    /// nutrition or sound. A new piece with `n` bites spawns turned 180 degrees around Y.
+    /// `ediblescript.Shot`: the item advances `n` bites without nutrition or sound. A new
+    /// piece with `n` bites spawns turned 180 degrees around Y. Without a piece and with
+    /// `only_separate` false, the item loses one bite (`RemoveOne`).
     pub fn cut_food(
         &mut self,
         reference: &ReferenceManifest,
         item: ItemId,
+        only_separate: bool,
     ) -> Result<(), ReferenceError> {
         let Some(state) = self.area.items.get(item) else {
             return Ok(());
@@ -243,12 +245,19 @@ impl GarageRuntime {
             return Ok(());
         };
         let prototype = &reference.survival.foods[food.prototype_index];
-        if state.removed || !prototype.spawn_if_shot {
+        if state.removed {
             return Ok(());
         }
-        let Some(n) = crate::interaction::melee::cut(prototype.bites.saturating_sub(food.bite))
-        else {
-            return Ok(());
+        let n = prototype
+            .spawn_if_shot
+            .then(|| crate::interaction::melee::cut(prototype.bites.saturating_sub(food.bite)))
+            .flatten();
+        let Some(n) = n else {
+            return if only_separate {
+                Ok(())
+            } else {
+                self.remove_one(reference, item)
+            };
         };
         let mut root = *self.physics.rapier().bodies[body].position() * to_rapier(state.local_pose);
         root.rotation *= rapier3d::math::Rotation::from_rotation_y(std::f32::consts::PI);
@@ -271,6 +280,32 @@ impl GarageRuntime {
             prototype.bites - n,
             from_rapier(&root),
         )
+    }
+    /// `ediblescript.RemoveOne`: one bite without nutrition or sound.
+    fn remove_one(
+        &mut self,
+        reference: &ReferenceManifest,
+        item: ItemId,
+    ) -> Result<(), ReferenceError> {
+        let food = self
+            .area
+            .items
+            .get_mut(item)
+            .unwrap()
+            .food
+            .as_mut()
+            .unwrap();
+        let prototype = &reference.survival.foods[food.prototype_index];
+        if food.bite >= prototype.bites {
+            return Ok(());
+        }
+        food.bite += 1;
+        let end = food.bite == prototype.bites && prototype.destroy_on_end;
+        self.sync_food_colliders(reference, item);
+        if end {
+            self.remove_consumable(item)?;
+        }
+        Ok(())
     }
     /// Enabled food colliders follow the bite.
     fn sync_food_colliders(&mut self, reference: &ReferenceManifest, item: ItemId) {
