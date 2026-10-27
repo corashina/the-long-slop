@@ -160,8 +160,8 @@ pub struct StateBlock {
     pub seat_car: PoseRow,
     /// Startup roads with prepared meshes.
     pub prepared_roads: u32,
-    /// Keeps the block free of padding.
-    pub pad: u32,
+    /// Lens of the worn glasses, as `GlassesState::encode`. Read it with `StateBlock::glasses`.
+    pub glasses: u32,
     /// Player camera. The renderer adds the mouse of commands after `SimFrame::seq_consumed`.
     pub look: LookBlock,
 }
@@ -247,7 +247,37 @@ impl MouseLook {
     }
 }
 
+/// Source `szbglasscript`: the active lens of the worn glasses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GlassesState {
+    /// Index in `clothing.glasses_profiles`.
+    pub profile: u32,
+    /// Source `disableLensFlare`: the sun flare is hidden.
+    pub hide_flare: bool,
+}
+
+impl GlassesState {
+    const HIDE_FLARE: u32 = 1 << 31;
+    /// 0 is no glasses. Else bits 0-30 are `profile + 1` and bit 31 is `hide_flare`.
+    pub fn encode(state: Option<Self>) -> u32 {
+        state.map_or(0, |s| {
+            (s.profile + 1) | if s.hide_flare { Self::HIDE_FLARE } else { 0 }
+        })
+    }
+    pub fn decode(value: u32) -> Option<Self> {
+        let profile = value & !Self::HIDE_FLARE;
+        (profile != 0).then(|| Self {
+            profile: profile - 1,
+            hide_flare: value & Self::HIDE_FLARE != 0,
+        })
+    }
+}
+
 impl StateBlock {
+    /// The lens of the worn glasses.
+    pub fn glasses(&self) -> Option<GlassesState> {
+        GlassesState::decode(self.glasses)
+    }
     pub const STARTED: u32 = 1;
     pub const PAUSED: u32 = 1 << 1;
     pub const SEATED: u32 = 1 << 2;
