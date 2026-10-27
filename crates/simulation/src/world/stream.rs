@@ -5457,6 +5457,9 @@ pub mod content_trailers;
 #[path = "content_small_items.rs"]
 pub mod content_small_items;
 
+#[path = "content_ammo.rs"]
+mod content_ammo;
+
 #[path = "content_computers.rs"]
 pub mod content_computers;
 

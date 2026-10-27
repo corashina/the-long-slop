@@ -305,6 +305,11 @@ pub struct HudBlock {
     pub slots: [u32; 4],
     pub selected: u32,
     pub swap_progress: f32,
+    /// `weaponCrossHairIcon` of the gun in the hand as a `UiReference::sprites` index + 1.
+    /// 0 shows no weapon crosshair.
+    pub weapon_icon: u32,
+    /// `weaponCrossHairColor` or `weaponCrossHairColorEmpty` as RGBA8, R in the low byte.
+    pub weapon_color: u32,
 }
 
 impl HudBlock {

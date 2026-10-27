@@ -47,6 +47,7 @@ pub(crate) struct Drive {
     skip_elapsed: bool,
     pub(crate) ready: bool,
     last_inventory: Option<([u32; 4], u8, u32)>,
+    last_crosshair: Option<(u32, u32)>,
 }
 
 impl Drive {
@@ -192,6 +193,7 @@ pub fn run(
             skip_elapsed: false,
             ready: false,
             last_inventory: None,
+            last_crosshair: None,
         })
         .insert_resource(ClearColor(Color::BLACK))
         .init_resource::<crate::render_scale::SceneScaleSetting>()
@@ -1134,6 +1136,11 @@ fn update_hud(mut drive: ResMut<Drive>, mut sim: ResMut<SimFrameResource>) {
             hud.swap_progress,
         );
         drive.last_inventory = Some(stamp);
+    }
+    let crosshair = (hud.weapon_icon, hud.weapon_color);
+    if drive.last_crosshair != Some(crosshair) {
+        game_weapon_crosshair(crosshair.0, crosshair.1);
+        drive.last_crosshair = Some(crosshair);
     }
     game_survival(
         hud.hp,

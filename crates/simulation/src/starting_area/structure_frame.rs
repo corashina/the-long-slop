@@ -44,6 +44,8 @@ pub struct StructureViews {
     sources: HashMap<SourceId, u32>,
     /// Local wing pose of each bat prototype node. Reused each frame.
     wing_poses: Vec<Transform>,
+    /// Hidden gun parts of the written slot. Reused each slot.
+    gun_hidden: Vec<u32>,
 }
 
 impl GarageRuntime {
@@ -71,11 +73,20 @@ impl GarageRuntime {
             &self.vehicles,
             frame,
         );
+        // Guns with moved parts.
+        for item in self.area.interaction.guns.take_presented() {
+            if let ObjectKey::Generated(id) = self.area.items.object_key(item)
+                && let Some(&slot) = views.slots.get(&id)
+            {
+                views.selection.push(slot as usize);
+            }
+        }
         let inputs = Inputs {
             reference,
             stream: &self.stream,
             physics: &self.physics,
             items: &self.area.items,
+            guns: &self.area.interaction.guns,
             vehicles: &self.vehicles,
             powertrain: &self.powertrain,
             flyers: &self.flyers,
@@ -95,6 +106,7 @@ struct Inputs<'a> {
     stream: &'a crate::world::WorldStream,
     physics: &'a crate::vehicle::PhysicsWorld,
     items: &'a ItemStore,
+    guns: &'a crate::interaction::guns::GunState,
     vehicles: &'a BTreeMap<ObjectKey, VehicleRuntime>,
     powertrain: &'a crate::simulation::powertrain::PowertrainParts,
     flyers: &'a crate::flyers::Flyers,
@@ -449,6 +461,16 @@ impl StructureViews {
                 local(b.node, b.pose);
             }
         }
+        // weaponscript, revolverScript, bbgunscript and geppityuscript parts.
+        let gun_hidden = &mut self.gun_hidden;
+        gun_hidden.clear();
+        if let Some(item) = items.generated_item_id(id) {
+            inputs.guns.parts(
+                item,
+                |n, pose| local(n as usize, pose),
+                |n| gun_hidden.push(n),
+            );
+        }
         // The bat Animator loops the wing clip from the flyer start.
         if prototype.source == reference.sky.flyer.prefab {
             let wing = &reference.sky.flyer.wing;
@@ -558,6 +580,7 @@ impl StructureViews {
         for i in 0..prototype.nodes.len() {
             let enabled = active_food(prototype, i, appearance, reference, food)
                 && !cobwebs.contains(&i)
+                && !self.gun_hidden.contains(&(i as u32))
                 && car
                     .and_then(|(record, v)| v.node_visible(record, i as u32))
                     .or_else(|| {

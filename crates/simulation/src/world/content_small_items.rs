@@ -56,6 +56,9 @@ struct Effect {
 pub struct SmallItems {
     sprays: Vec<SprayBinding>,
     lamps: Vec<LampBinding>,
+    pub(super) ammo: Vec<super::content_ammo::AmmoBinding>,
+    /// Prototypes checked for gun ammo.
+    ammo_prototypes: std::collections::HashMap<SourceId, bool>,
     scan: Option<(u64, u64)>,
     effects: [Effect; 2],
     /// The bottle whose spray follows its hole.
@@ -105,6 +108,8 @@ impl SmallItems {
         Self {
             sprays: Vec::new(),
             lamps: Vec::new(),
+            ammo: Vec::new(),
+            ammo_prototypes: std::collections::HashMap::new(),
             scan: None,
             effects: [
                 effect(&s.spray, s.source.path_id as u64),
@@ -124,6 +129,7 @@ impl SmallItems {
     pub fn heap_bytes(&self) -> usize {
         self.sprays.capacity() * std::mem::size_of::<SprayBinding>()
             + self.lamps.capacity() * std::mem::size_of::<LampBinding>()
+            + self.ammo.capacity() * std::mem::size_of::<super::content_ammo::AmmoBinding>()
             + self.sounds.capacity() * std::mem::size_of::<(u32, f32, [f64; 3])>()
     }
     /// Spray (0) and splash (1) particles.
@@ -191,6 +197,13 @@ impl WorldStream {
                 self.small_items.lamps.swap_remove(i);
             }
         }
+        let small = &mut self.small_items;
+        small.ammo.retain(|b| {
+            self.contents
+                .active
+                .iter()
+                .any(|c| c.content.placement.id == b.parent && c.item == Some(b.item))
+        });
         let spray = &reference.small_items.spray_bottle.prototype;
         let lamp = &reference.small_items.genie_lamp.prototype;
         let mut complete = true;
@@ -200,9 +213,22 @@ impl WorldStream {
                 continue;
             };
             let prototype = &content.content.placement.prototype;
-            if (prototype != spray && prototype != lamp)
+            let ammo = if prototype == spray || prototype == lamp {
+                false
+            } else if let Some(&ammo) = self.small_items.ammo_prototypes.get(prototype) {
+                ammo
+            } else {
+                let ammo = self.ammo_prototype(reference, prototype)?;
+                let prototype = prototype.clone();
+                self.small_items.ammo_prototypes.insert(prototype, ammo);
+                ammo
+            };
+            let content = &self.contents.active[slot];
+            let prototype = &content.content.placement.prototype;
+            if (prototype != spray && prototype != lamp && !ammo)
                 || self.small_items.sprays.iter().any(|b| b.item == item)
                 || self.small_items.lamps.iter().any(|b| b.item == item)
+                || self.small_items.ammo.iter().any(|b| b.item == item)
             {
                 continue;
             }
@@ -210,7 +236,10 @@ impl WorldStream {
                 complete = false;
                 continue;
             }
-            if prototype == spray {
+            if ammo {
+                let binding = self.bind_ammo(slot, item)?;
+                self.small_items.ammo.push(binding);
+            } else if prototype == spray {
                 let binding = self.bind_spray(reference, slot, item)?;
                 interaction
                     .cleaning
@@ -637,6 +666,10 @@ impl WorldStream {
         if let Some(b) = self.small_items.sprays.iter().find(|b| b.item == item) {
             return Some(((b.ammo.count != b.initial).then_some(b.ammo.count), None));
         }
+        if let Some(b) = self.small_items.ammo.iter().find(|b| b.item == item) {
+            let count = b.ammo.ammo.count;
+            return Some(((count != b.initial).then_some(count), None));
+        }
         self.small_items
             .lamps
             .iter()
@@ -689,6 +722,7 @@ mod tests {
             glow,
             radio: None,
             detector: None,
+            gun: None,
             linear_velocity: [0.; 3],
             angular_velocity: [0.; 3],
             sleeping: false,

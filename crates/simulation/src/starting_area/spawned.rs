@@ -218,6 +218,7 @@ impl SpawnedItems {
         &self,
         reference: &ReferenceManifest,
         items: &crate::interaction::items::ItemStore,
+        guns: &crate::interaction::guns::GunState,
         origin: &crate::world::WorldOrigin,
     ) -> Vec<crate::save::SpawnedItemSnapshot> {
         let mut records: Vec<_> = self
@@ -237,6 +238,7 @@ impl SpawnedItems {
                     prototype: (&prototype.source).into(),
                     pickup: spawned.pickup as u32,
                     pose,
+                    gun: guns.snapshot(spawned.id),
                 })
             })
             .collect();

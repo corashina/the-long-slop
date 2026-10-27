@@ -68,6 +68,14 @@ impl WorldStream {
                 let saved = self.changes.get(&key).and_then(|c| c.snapshot.as_ref());
                 (saved.and_then(|s| s.ammo), saved.and_then(|s| s.glow))
             });
+            // An unbound gun keeps its saved state.
+            if interaction.guns.runtime(id).is_none() {
+                snapshot.gun = self
+                    .changes
+                    .get(&key)
+                    .and_then(|c| c.snapshot.as_ref())
+                    .and_then(|s| s.gun);
+            }
             snapshot.radio = self.radio_value(id).or_else(|| {
                 self.changes
                     .get(&key)

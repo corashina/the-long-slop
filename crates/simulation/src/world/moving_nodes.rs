@@ -27,10 +27,15 @@ impl WorldStream {
         ] {
             rules.children(world, &prototype.source, class, true, &mut scripts)?;
         }
-        // Cars move wheels, doors, needles, pedals and show or hide parts.
+        // Cars move wheels, doors, needles, pedals and show or hide parts. Guns move and hide parts.
         if !scripts.is_empty()
             || prototype.vehicle.is_some()
             || prototype.source == reference.small_items.spirit_level.prototype
+            || reference
+                .guns
+                .weapons
+                .iter()
+                .any(|w| w.prototype.0 == prototype.source)
             || world
                 .mechanisms
                 .iter()

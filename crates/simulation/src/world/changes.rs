@@ -41,8 +41,10 @@ pub struct ObjectSnapshot {
     pub lamp_broken: Option<u64>,
     /// Tuned compass bearing or clock offset (meterscript szamlap value).
     pub dial: Option<f32>,
-    /// Spray bottle ammoscript count; None at its spawn count.
+    /// Spray bottle or loose ammo ammoscript count; None at its spawn count.
     pub ammo: Option<f32>,
+    /// Gun state; None at its spawn state.
+    pub gun: Option<crate::interaction::guns::GunSnapshot>,
     /// Genie lamp ginlampscript value; None at its startup value.
     pub glow: Option<f32>,
     /// save_radioscript controls of a portable radio.
@@ -624,6 +626,7 @@ pub fn capture(
     let state = items.get(id)?;
     let mut snapshot = items.generated_snapshot(id, interaction.generated_valve(id))?;
     snapshot.mechanism = interaction.mechanisms.snapshot(id);
+    snapshot.gun = interaction.guns.snapshot(id);
     snapshot.food = state.food.map(|food| FoodSnapshot {
         source: reference.survival.foods[food.prototype_index]
             .source

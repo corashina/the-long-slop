@@ -416,6 +416,7 @@ mod tests {
             glow: None,
             radio,
             detector: None,
+            gun: None,
             linear_velocity: [0.; 3],
             angular_velocity: [0.; 3],
             sleeping: false,
