@@ -1,7 +1,7 @@
-//! Installed Neutral grading LUT. Bake once into persistent 33-cubed RGBA16F storage.
+//! Installed grading LUT with the Neutral or no tonemap. Bake into persistent 33-cubed RGBA16F storage on change.
 //! Each slice renders to a 2D texture, then copies into the 3D texture.
 //! wgpu 29 on WebGPU drops `depth_slice`, so the bake does not render into the 3D texture.
-use crate::reference::postprocessing::GradingSettings;
+use crate::reference::postprocessing::{GradingSettings, Tonemapper};
 use bevy::prelude::*;
 use bevy::render::{
     render_resource::{binding_types::*, *},
@@ -94,7 +94,9 @@ pub struct LutPass {
     slice_view: TextureView,
     _curves: Texture,
     bindings: [Binding; 33],
-    pipeline: CachedRenderPipelineId,
+    /// `KGenLut3D_NeutralTonemap` and `KGenLut3D_NoTonemap`.
+    pipelines: [CachedRenderPipelineId; 2],
+    tonemapper: Tonemapper,
 }
 impl LutPass {
     pub fn new(
@@ -204,25 +206,31 @@ impl LutPass {
                 ),
             ),
         );
-        let pipeline = cache.queue_render_pipeline(RenderPipelineDescriptor {
-            label: Some("source_neutral_lut".into()),
-            layout: vec![layout.clone()],
-            vertex: VertexState {
-                shader: shader.clone(),
-                entry_point: Some("vertex".into()),
+        let pipelines = [
+            ("source_neutral_lut", "bake"),
+            ("source_none_lut", "bake_none"),
+        ]
+        .map(|(label, entry)| {
+            cache.queue_render_pipeline(RenderPipelineDescriptor {
+                label: Some(label.into()),
+                layout: vec![layout.clone()],
+                vertex: VertexState {
+                    shader: shader.clone(),
+                    entry_point: Some("vertex".into()),
+                    ..default()
+                },
+                fragment: Some(FragmentState {
+                    shader: shader.clone(),
+                    entry_point: Some(entry.into()),
+                    targets: vec![Some(ColorTargetState {
+                        format: TextureFormat::Rgba16Float,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    })],
+                    ..default()
+                }),
                 ..default()
-            },
-            fragment: Some(FragmentState {
-                shader,
-                entry_point: Some("bake".into()),
-                targets: vec![Some(ColorTargetState {
-                    format: TextureFormat::Rgba16Float,
-                    blend: None,
-                    write_mask: ColorWrites::ALL,
-                })],
-                ..default()
-            }),
-            ..default()
+            })
         });
         let params = Params::new(settings);
         let bindings = std::array::from_fn(|i| {
@@ -248,16 +256,19 @@ impl LutPass {
             slice_view,
             _curves: curves,
             bindings,
-            pipeline,
+            pipelines,
+            tonemapper: Tonemapper::Neutral,
         })
     }
-    /// Replace the grading. Each existing slice buffer takes a queue write; bake again after this.
+    /// Replace the grading and tonemapper. Each existing slice buffer takes a queue write; bake again after this.
     pub fn set_grading(
         &mut self,
         device: &RenderDevice,
         queue: &RenderQueue,
         settings: &GradingSettings,
+        tonemapper: Tonemapper,
     ) {
+        self.tonemapper = tonemapper;
         let params = Params::new(settings);
         for binding in &mut self.bindings {
             let uniform = binding.uniform.get_mut();
@@ -272,20 +283,28 @@ impl LutPass {
         &self.view
     }
     pub fn ready(&self, cache: &PipelineCache) -> bool {
-        cache.get_render_pipeline(self.pipeline).is_some()
+        self.pipelines
+            .iter()
+            .all(|p| cache.get_render_pipeline(*p).is_some())
     }
     pub fn failure(&self, cache: &PipelineCache) -> Option<String> {
-        match cache.get_render_pipeline_state(self.pipeline) {
-            CachedPipelineState::Err(
-                bevy::shader::ShaderCacheError::ShaderNotLoaded(_)
-                | bevy::shader::ShaderCacheError::ShaderImportNotYetAvailable,
-            ) => None,
-            CachedPipelineState::Err(e) => Some(format!("Source Neutral LUT pipeline: {e}")),
-            _ => None,
-        }
+        self.pipelines
+            .iter()
+            .find_map(|p| match cache.get_render_pipeline_state(*p) {
+                CachedPipelineState::Err(
+                    bevy::shader::ShaderCacheError::ShaderNotLoaded(_)
+                    | bevy::shader::ShaderCacheError::ShaderImportNotYetAvailable,
+                ) => None,
+                CachedPipelineState::Err(e) => Some(format!("Source LUT pipeline: {e}")),
+                _ => None,
+            })
     }
     pub fn encode(&self, encoder: &mut CommandEncoder, cache: &PipelineCache) -> bool {
-        let Some(pipeline) = cache.get_render_pipeline(self.pipeline) else {
+        let index = match self.tonemapper {
+            Tonemapper::Neutral => 0,
+            Tonemapper::None => 1,
+        };
+        let Some(pipeline) = cache.get_render_pipeline(self.pipelines[index]) else {
             return false;
         };
         for (slice, binding) in self.bindings.iter().enumerate() {

@@ -190,6 +190,18 @@ Run the X01d test pass (wearables, outfit, female body, appearance editor) in th
 7. Set the model modes Off, Shadow and Visible. Shadow hides the body but keeps its shadow.
 8. Check the world view and its shadows do not draw the preview figure. Check F3 with the screen open.
 
+Run the X01e test pass (sunglasses) in the same run:
+
+1. Put on glasses with each lens color. Each lens tints the view like the original.
+2. The dark lens (profile 0) dims the view by 2 stops.
+3. Bright highlights look untonemapped, like the original.
+4. Lenses with the flare flag hide the sun flare. Other lenses keep it.
+5. Turn off "Sunglasses effects" in the display controls: the tint goes away. The flare rule stays. Reload the page: the setting stays.
+6. Take the glasses off: the tint clears. Die with them on: the tint clears and the death effect fades in.
+7. Save and load with the glasses worn: the tint comes back.
+8. If possible, compare the NoTonemap LUT kernel with the game DXBC (`KGenLut3D_NoTonemap`). The port follows the open PPv2 `Lut3DBaker.compute`.
+9. The worn lens comes from the item selector choices, matched to lens nodes by source id (X01e PR 1). Check that the tint matches the visible lens color. Read the console for a warning about more than one active lens.
+
 Run the X02 part 1 test pass (damage and breaking) in the same run:
 
 1. Re-export, then rebuild. Old exports and saves do not load (breakables, gibs, break audio; save schema 26).
@@ -231,7 +243,6 @@ Run the X03a test pass (sky traffic) in the same run:
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| X01 | Player body and appearance | XL | Sunglasses. [D06] |
 | X02 | Weapons and damage | XL | Explosions (with melee and gun tank and explosive hits) (cacti breaks only here), wounds and shots on the player, explosive fluids, SMG magazine drop on unload, AI parts of the damage model (X03). [G01, G03, G06, G09, E04, C06] |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, UFO, EMP. [H01-H06, H09-H11, B17, F21] |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |

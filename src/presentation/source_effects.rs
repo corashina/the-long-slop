@@ -30,12 +30,14 @@ struct EffectInput {
     delta_seconds: f32,
     grading_temperature: Option<f32>,
     dead_weight: f32,
+    glasses: Option<u32>,
 }
 fn snapshot_input(
     frame: Res<SourceViewFrame>,
     assets: Option<Res<LightingAssets>>,
     drive: Res<crate::app::Drive>,
     sim: Res<super::sim_frame::SimFrameResource>,
+    effects: Res<super::sunglasses::SunglassesEffects>,
     mut input: ResMut<EffectInput>,
 ) {
     if input.scene != frame.scene {
@@ -52,6 +54,10 @@ fn snapshot_input(
     input.delta_seconds = drive.sim.render_delta_seconds;
     input.grading_temperature = sim.frame.lighting.cycle.grading_temperature;
     input.dead_weight = sim.frame.state.dead_weight;
+    input.glasses = (effects.0)
+        .then(|| sim.frame.state.glasses())
+        .flatten()
+        .map(|g| g.profile);
     input.frame = frame.frame;
 }
 
@@ -116,7 +122,9 @@ impl SourceEffects {
 }
 pub fn install(app: &mut App) {
     app.init_resource::<EffectInput>()
+        .init_resource::<super::sunglasses::SunglassesEffects>()
         .add_plugins(ExtractResourcePlugin::<EffectInput>::default())
+        .add_systems(Update, super::sunglasses::poll)
         .add_systems(
             PostUpdate,
             snapshot_input.after(super::view_frame::snapshot),
@@ -258,6 +266,7 @@ fn prepare(
             extent,
             record,
             &assets.record.0.clothing.dead_profile,
+            &assets.record.0.clothing.glasses_profiles,
             layer.stop_nan,
             previous.as_mut().and_then(|old| old.chain.take()),
         )?;
@@ -372,6 +381,7 @@ fn encode_post(
             delta_seconds: input.delta_seconds,
             grading_temperature: input.grading_temperature,
             dead_weight: input.dead_weight,
+            glasses: input.glasses,
         },
         targets.colors.attachment(),
         targets.colors.resolve_target().unwrap(),

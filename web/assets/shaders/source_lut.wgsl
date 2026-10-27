@@ -17,7 +17,8 @@ fn sat3(v: vec3<f32>) -> vec3<f32> { return vec3(source_sat(v.x),source_sat(v.y)
 fn luminance(v: vec3<f32>) -> f32 {
     return dot(v, vec3(f(0x3e59c6edu), f(0x3f371437u), f(0x3d93d07du)));
 }
-// Installed KGenLut3D_NeutralTonemap, exact DXBC immediate words.
+// Installed KGenLut3D_NeutralTonemap, exact DXBC immediate words, up to the tonemap.
+// PPv2 Lut3DBaker.compute ColorGrade: LogGrade, LUT_SPACE_DECODE, LinearGrade, then max(0).
 fn grade(id: vec3<f32>) -> vec3<f32> {
     var color = fma(id, vec3(params.size.y), vec3(f(0xbed3c1dcu)));
     color = fma(color, vec3(params.hue_sat_con.z), vec3(f(0x3ce1b590u)));
@@ -60,7 +61,10 @@ fn grade(id: vec3<f32>) -> vec3<f32> {
     let rgb = rgb_scale*q.x;
     let lum = luminance(rgb);
     let sat_factor = dot(vec2(params.hue_sat_con.y),vec2(sat_mult));
-    color = positive(fma(vec3(sat_factor),fma(vec3(q.x),rgb_scale,vec3(-lum)),vec3(lum)));
+    return positive(fma(vec3(sat_factor),fma(vec3(q.x),rgb_scale,vec3(-lum)),vec3(lum)));
+}
+// Installed NeutralTonemap and the Eval max(0), exact DXBC immediate words.
+fn neutral(color: vec3<f32>) -> vec3<f32> {
     let scaled = color*f(0x3fa81d09u);
     let numerator = fma(scaled,fma(color,vec3(f(0x3e867da1u)),vec3(f(0x3d8e8a71u))),vec3(f(0x3bb24207u)));
     let denominator = fma(scaled,fma(color,vec3(f(0x3e867da1u)),vec3(f(0x3e947ae1u))),vec3(f(0x3da71de8u)));
@@ -71,5 +75,9 @@ fn grade(id: vec3<f32>) -> vec3<f32> {
     return vec4(uv*2.-1.,0.,1.);
 }
 @fragment fn bake(@builtin(position) position:vec4<f32>) -> @location(0) vec4<f32> {
+    return half4(vec4(neutral(grade(vec3(floor(position.xy),f32(params.slice.x)))),1.));
+}
+// PPv2 KGenLut3D_NoTonemap: ColorGrade without a tonemap. The Eval max(0) repeats the ColorGrade max(0).
+@fragment fn bake_none(@builtin(position) position:vec4<f32>) -> @location(0) vec4<f32> {
     return half4(vec4(grade(vec3(floor(position.xy),f32(params.slice.x))),1.));
 }
