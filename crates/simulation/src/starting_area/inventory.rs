@@ -443,6 +443,7 @@ impl GarageRuntime {
         }
         self.advance_melee(reference, input, dt);
         let gun_held = self.advance_guns(reference, input, dt, view);
+        self.run_explosions(reference, dt);
         self.area.sync_equipment(reference, &mut self.physics);
         if let Some(id) = self.area.interaction.equipment.item() {
             self.area.interaction.equipment.advance_hand(
@@ -711,6 +712,10 @@ impl GarageRuntime {
             if self.cut_food(reference, item, true).is_err() {
                 self.notice = "Cannot cut food.";
             }
+        }
+        while let Some((item, damage)) = self.area.interaction.melee.take_strike() {
+            self.try_explode_tank(item, damage, false);
+            self.try_explode_prop(item, damage);
         }
     }
     /// mainscript.PlayClipAtPoint for spray bottle clips.

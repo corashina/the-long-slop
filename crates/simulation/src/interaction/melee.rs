@@ -1,6 +1,6 @@
 //! Source melee swing: `weaponhandlingscript` (input, animator, swing sound) and
 //! `meleeweaponscript` (hand grips, hit box, force, hit particles, hit sound, digging,
-//! breakable damage, food cuts). Tank and explosive hits wait for X02 part 2 part 4.
+//! breakable damage, food cuts, tank and explosive hits).
 use super::buried::BuriedItems;
 use super::items::ItemStore;
 use crate::animation::controller::{MotionController, StateEvent};
@@ -134,6 +134,8 @@ pub struct MeleeState {
     sounds: Vec<MeleeSound>,
     /// Food items that `hurtFood` hits cut this frame.
     cuts: Vec<ItemId>,
+    /// Items hit this frame with `damageTank`: tanks and explosive props try to explode.
+    strikes: Vec<(ItemId, f32)>,
 }
 
 impl MeleeState {
@@ -205,6 +207,7 @@ impl MeleeState {
             overlaps: Vec::with_capacity(OVERLAP_CAPACITY),
             sounds: Vec::with_capacity(4),
             cuts: Vec::with_capacity(OVERLAP_CAPACITY),
+            strikes: Vec::with_capacity(OVERLAP_CAPACITY),
         })
     }
     /// The weapon whose pickup rule is the held item's rule.
@@ -232,6 +235,10 @@ impl MeleeState {
     }
     pub fn take_sounds(&mut self) -> impl Iterator<Item = MeleeSound> + '_ {
         self.sounds.drain(..)
+    }
+    /// The next hit item and `damageTank`. The caller takes every hit after each step.
+    pub fn take_strike(&mut self) -> Option<(ItemId, f32)> {
+        self.strikes.pop()
     }
     /// The next food item to cut. The caller takes every cut after each step.
     pub fn take_cut(&mut self) -> Option<ItemId> {
@@ -494,6 +501,10 @@ impl MeleeState {
             } else {
                 if let Some(target) = breakables.target_of(physics, self.overlaps[i]) {
                     breakables.try_break_melee(records, target, contact.damage, dt);
+                }
+                // tankscript.TryExplode(damageTank, add: false) and explosivescript.TryExplode.
+                if let Some(id) = item {
+                    self.strikes.push((id, contact.damage_tank));
                 }
                 // ediblescript.Shot(onlySeparate: true) on the item that owns the collider.
                 if contact.hurt_food

@@ -1,7 +1,10 @@
-//! Explosive props and tanks: raw `explosivescript` and `tankscript` explosion fields.
-//! Nothing explodes yet.
+//! Explosive props and tanks: raw `explosivescript` and `tankscript` explosion fields, and the
+//! removal of exploded items.
 use super::WorldStream;
+use crate::interaction::items::ItemStore;
+use crate::interaction::storage::StorageLocks;
 use crate::reference::{ItemId, NodeId, ReferenceError, SourceId, WorldPrototypeReference};
+use crate::vehicle::PhysicsWorld;
 use crate::world::GeneratedId;
 use crate::world::spawn_rules::*;
 
@@ -142,5 +145,18 @@ impl WorldStream {
             .iter()
             .find(|b| b.item == item)
             .map(|b| &b.explosive)
+    }
+    /// `Destroy` and `removeFromMemory` of an exploded content item. The caller first releases
+    /// it from the player. The removal is saved.
+    pub fn remove_exploded_item(
+        &mut self,
+        item: ItemId,
+        items: &mut ItemStore,
+        storage: &mut StorageLocks,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        self.small_items.explosives.retain(|b| b.item != item);
+        self.small_items.ammo.retain(|b| b.item != item);
+        self.remove_item(item, items, storage, physics)
     }
 }

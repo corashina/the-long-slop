@@ -25,6 +25,7 @@ mod audio_frame;
 mod body;
 pub mod cigarettes;
 mod computers;
+mod explosions;
 mod frame;
 mod frame_particles;
 mod guns;

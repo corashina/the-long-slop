@@ -1,5 +1,5 @@
 //! Guns in the player's hands: `fpscontroller` trigger, reload and unload, break barrel and
-//! cylinder input, and the gun outputs for save, audio and the flash light.
+//! cylinder input, and the gun outputs for save, audio, the flash light and explosive hits.
 use super::GarageRuntime;
 use crate::interaction::feedback::ItemPrompt;
 use crate::interaction::guns::{AmmoItem, HeldGun, ShotWorld, accepts};
@@ -105,6 +105,9 @@ impl GarageRuntime {
             if self.cut_food(reference, item, false).is_err() {
                 self.notice = "Cannot shoot food.";
             }
+        }
+        while let Some(strike) = self.area.interaction.guns.take_strike() {
+            self.shot_explosive(strike);
         }
         self.store_decals(dt);
         held.is_some()
