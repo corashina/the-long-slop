@@ -26,6 +26,18 @@ impl GarageRuntime {
                 self.stream.frame().failure.is_some(),
                 StateBlock::WORLD_FAILED,
             ),
+            (
+                self.stream.initial_generation_ready(),
+                StateBlock::GENERATION_READY,
+            ),
+            (
+                self.world_supported() && self.stream.required_ready(),
+                StateBlock::WORLD_READY,
+            ),
+            (
+                self.area.interaction.storage.initialization_ready(),
+                StateBlock::STORAGE_READY,
+            ),
         ] {
             if on {
                 flags |= flag;
@@ -95,8 +107,9 @@ impl GarageRuntime {
             },
             prepared_roads: self.stream.metrics().prepared_roads as u32,
             glasses: crate::boundary::GlassesState::encode(area.wear.glasses),
-            // The driver sets the look.
+            // The driver sets the look and its own counters.
             look: crate::boundary::LookBlock::default(),
+            perf: self.perf_block(),
         };
         frame.valves.clear();
         frame.valves.extend(
@@ -143,6 +156,7 @@ impl GarageRuntime {
             frame.changes.push(Change::HomeCable(aims));
         }
         self.screen_changes(frame);
+        self.plate_changes(frame);
         frame.planes.clear();
         frame
             .planes
@@ -300,5 +314,100 @@ mod tests {
             .unwrap();
             assert_eq!(row.pose(), pose);
         }
+    }
+}
+
+impl GarageRuntime {
+    fn perf_block(&self) -> crate::boundary::PerfBlock {
+        let counters = self.stream.performance_counters();
+        crate::boundary::PerfBlock {
+            render_cpu_bytes: counters.render_cpu_bytes as f64,
+            render_gpu_bytes: counters.render_gpu_bytes as f64,
+            contacts: self.vehicle.as_ref().map_or(0, |key| {
+                self.physics.wheel_contacts(key).filter(|v| *v).count() as u32
+            }),
+            bodies: self.physics.rapier().bodies.len() as u32,
+            colliders: self.physics.collider_count() as u32,
+            roads: counters.roads as u32,
+            terrain: counters.terrain as u32,
+            objects: counters.objects as u32,
+            jobs: counters.jobs as u32,
+            pending: counters.pending as u32,
+            storms: self.weather.storms().len() as u32,
+            storm_strength: self.weather.influence().strength,
+            weather_particles: self.weather.particle_count() as u32,
+            ..Default::default()
+        }
+    }
+
+    /// Sends the plate texts of each world car once.
+    fn plate_changes(&mut self, frame: &mut SimFrame) {
+        let vehicles = &self.vehicles;
+        self.plates_sent
+            .retain(|id| vehicles.contains_key(&ObjectKey::Generated(id.clone())));
+        for (key, car) in vehicles {
+            if let ObjectKey::Generated(id) = key
+                && !car.plates.is_empty()
+                && !self.plates_sent.contains(id)
+            {
+                self.plates_sent.push(id.clone());
+                frame.changes.push(Change::Plates {
+                    id: id.clone(),
+                    texts: car.plates.clone(),
+                });
+            }
+        }
+    }
+}
+
+impl GarageRuntime {
+    /// The simulation part of a world measurement.
+    pub fn measurements(&self, reference: &ReferenceManifest) -> serde_json::Value {
+        let frame = self.stream.frame();
+        let car = self.vehicle.as_ref().map(|key| {
+            let snapshot = self.physics.snapshot(key);
+            serde_json::json!({
+                "position": snapshot.pose.position, "rotation": snapshot.pose.rotation,
+                "velocity": snapshot.linear_velocity, "angular_velocity": snapshot.angular_velocity,
+                "wheel_contacts": self.physics.wheel_contacts(key).collect::<Vec<_>>(),
+            })
+        });
+        let player = &self.area.player;
+        serde_json::json!({
+            "session": frame.request.session,
+            "revision": frame.request.revision,
+            "world": self.stream.metrics(),
+            "simulation_seconds": self.simulation_seconds,
+            "vehicles": self.vehicles.keys().map(|key| serde_json::json!({
+                "key": key,
+                "active": self.physics.body_active(self.physics.chassis_handle(key)),
+                "absolute_position": self.persistent_world.absolute_vehicle_position(
+                    &self.physics, &frame.origin, key),
+            })).collect::<Vec<_>>(),
+            "retained_source_bodies": self.area.bodies.iter().filter_map(|(id, handle)| {
+                let record = reference.bodies.iter().find(|body| body.id == *id)?;
+                self.persistent_world.body_snapshot(*handle, crate::save::BodyIdentity::Source {
+                    source: crate::save::SourceKey::from(&record.source),
+                })
+            }).collect::<Vec<_>>(),
+            "player": {
+                "absolute_position": frame.origin.absolute(player.body_pose(&self.physics).position),
+                "controller": player.body_pose(&self.physics).position,
+                "body": self.physics.rapier().bodies[player.body_handle()].translation().to_array(),
+                "grounded": player.grounded(),
+            },
+            "vehicle": car,
+            "supported": self.world_supported(),
+            "required_ready": self.stream.required_ready(),
+            "failure": frame.failure,
+            "gpu_ledger": {
+                "prototype_gpu": self.stream.presentation_credit().prototype_gpu,
+                "active_gpu": self.stream.presentation_credit().active_gpu,
+            },
+            "jobs": self.stream.startup_job_audit(),
+            "physics_bodies": self.physics.rapier().bodies.len(),
+            "physics_colliders": self.physics.collider_count(),
+            "active_items": self.area.items.len(),
+        })
     }
 }
