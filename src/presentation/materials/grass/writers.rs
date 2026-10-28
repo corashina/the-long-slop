@@ -48,7 +48,10 @@ struct WriterPreparation {
     indices: Vec<u8>,
     vertex: usize,
     index: usize,
+    /// Holds a renderer job.
     running: bool,
+    /// The mesh copy is complete. The writer waits for a publication slot.
+    copied: bool,
 }
 struct WriterGpu {
     vertices: Buffer,
@@ -629,6 +632,7 @@ impl GrassWriters {
             vertex: 0,
             index: 0,
             running: false,
+            copied: false,
         });
         self.allocations.push((entity, cpu, gpu));
         Ok(())
@@ -641,59 +645,67 @@ impl GrassWriters {
         use crate::reference::ReferenceError;
         for index in 0..self.pending.len() {
             let job = &mut self.pending[index];
-            if !job.running {
-                if ledger.available_external_jobs() == 0 {
+            if !job.copied {
+                if !job.running {
+                    if ledger.available_external_jobs() == 0 {
+                        continue;
+                    }
+                    let mut a = ledger.allocation();
+                    a.jobs += 1;
+                    ledger.set_allocation(a)?;
+                    job.running = true;
+                }
+                let mesh = meshes.get(&job.mesh).ok_or_else(|| {
+                    ReferenceError("Retired displacement mesh during preparation".into())
+                })?;
+                let Some(bevy::mesh::VertexAttributeValues::Float32x3(positions)) =
+                    mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+                else {
+                    return Err(ReferenceError(
+                        "Changed displacement position stream".into(),
+                    ));
+                };
+                let end = (job.vertex + 4096).min(positions.len());
+                for position in &positions[job.vertex..end] {
+                    for value in position {
+                        job.vertices.extend_from_slice(&value.to_le_bytes());
+                    }
+                }
+                job.vertex = end;
+                let indices = mesh
+                    .indices()
+                    .ok_or_else(|| ReferenceError("Changed displacement index stream".into()))?;
+                let end = (job.index + 4096 * 3).min(indices.len());
+                match indices {
+                    bevy::mesh::Indices::U16(values) => {
+                        for value in &values[job.index..end] {
+                            job.indices
+                                .extend_from_slice(&u32::from(*value).to_le_bytes());
+                        }
+                    }
+                    bevy::mesh::Indices::U32(values) => {
+                        for value in &values[job.index..end] {
+                            job.indices.extend_from_slice(&value.to_le_bytes());
+                        }
+                    }
+                }
+                job.index = end;
+                if job.vertex != positions.len() || job.index != indices.len() {
                     continue;
                 }
+                // The copy is done. Its job goes back before the writer waits for a publication
+                // slot. The stream lends the slot only when renderer jobs finished its ready work.
+                job.running = false;
+                job.copied = true;
                 let mut a = ledger.allocation();
-                a.jobs += 1;
+                a.jobs -= 1;
                 ledger.set_allocation(a)?;
-                job.running = true;
-            }
-            let mesh = meshes.get(&job.mesh).ok_or_else(|| {
-                ReferenceError("Retired displacement mesh during preparation".into())
-            })?;
-            let Some(bevy::mesh::VertexAttributeValues::Float32x3(positions)) =
-                mesh.attribute(Mesh::ATTRIBUTE_POSITION)
-            else {
-                return Err(ReferenceError(
-                    "Changed displacement position stream".into(),
-                ));
-            };
-            let end = (job.vertex + 4096).min(positions.len());
-            for position in &positions[job.vertex..end] {
-                for value in position {
-                    job.vertices.extend_from_slice(&value.to_le_bytes());
-                }
-            }
-            job.vertex = end;
-            let indices = mesh
-                .indices()
-                .ok_or_else(|| ReferenceError("Changed displacement index stream".into()))?;
-            let end = (job.index + 4096 * 3).min(indices.len());
-            match indices {
-                bevy::mesh::Indices::U16(values) => {
-                    for value in &values[job.index..end] {
-                        job.indices
-                            .extend_from_slice(&u32::from(*value).to_le_bytes());
-                    }
-                }
-                bevy::mesh::Indices::U32(values) => {
-                    for value in &values[job.index..end] {
-                        job.indices.extend_from_slice(&value.to_le_bytes());
-                    }
-                }
-            }
-            job.index = end;
-            if job.vertex != positions.len() || job.index != indices.len() {
-                continue;
             }
             if !ledger.take_publication() {
                 continue;
             }
             let job = self.pending.remove(index);
             let mut a = ledger.allocation();
-            a.jobs -= 1;
             a.pending -= 1;
             ledger.set_allocation(a)?;
             self.writers.push(GrassWriterInput {

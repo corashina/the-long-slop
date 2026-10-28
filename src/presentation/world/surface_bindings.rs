@@ -167,6 +167,11 @@ impl SourceWorldVisuals {
             // The terrain material lives as long as its stream hold.
             let hold = crate::world::RendererFact::HoldPrototype(record.source.clone());
             if !stream.holds_prototype(&record.source) && !facts.contains(&hold) {
+                // A full stream table waits like a full credit.
+                if !stream.can_hold_prototype(&record.source) {
+                    ledger.wait_for_hold();
+                    continue;
+                }
                 facts.push(hold);
                 let mut allocation = ledger.allocation();
                 allocation.prototype_cpu += std::mem::size_of::<TerrainMaterial>() + 256 + 8192;

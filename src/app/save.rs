@@ -258,7 +258,16 @@ fn commit(world: &mut World, mut candidate: Candidate) {
         |world, mut sky: Mut<crate::presentation::sky_traffic::SkyTrafficVisuals>| sky.reset(world),
     );
     // The prepared commands and stable bindings make this boundary infallible.
-    candidate.presentation.take().unwrap().commit(world);
+    let mut presentation = candidate.presentation.take().unwrap();
+    // The candidate ledger becomes the active ledger. Its last report and the last answer of
+    // its stream were not exchanged yet. They go to the active paths, or the credit drifts.
+    let unsent = presentation.take_command().world;
+    presentation.commit(world);
+    world.resource_mut::<Drive>().world.merge(unsent);
+    if let Some(grant) = candidate.frame.grant.take() {
+        let mut sim = world.resource_mut::<SimFrameResource>();
+        sim.grant = Some(sim.grant.map_or(grant, |g| g.merge(grant)));
+    }
     // The active renderer has the candidate copy now. The world changes of this frame follow it.
     world.resource_scope(|world, sim: Mut<SimFrameResource>| {
         let reference = world.resource::<RuntimeReference>().0.world.clone();

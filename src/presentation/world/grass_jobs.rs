@@ -587,22 +587,25 @@ impl GrassJobs {
                             .output_bytes
                             .checked_mul(2)
                             .ok_or_else(|| ReferenceError("Grass output overflow".into()))?;
-                        // Output that does not fit the credit waits for a new plan.
+                        // Output that does not fit the credit keeps its plan. The worker
+                        // reports the plan again, so the next frame asks for the credit again.
                         let output = PresentationAllocation {
                             active_cpu: cpu,
                             active_gpu: plan.gpu_bytes,
                             staging_bytes: cpu,
                             ..Default::default()
                         };
-                        if !ledger.request(output)
-                            || Self::reserve_capacity(
-                                &self.worker,
-                                &mut self.actor_cpu,
-                                ledger,
-                                worker_staging,
-                                cpu,
-                            )
-                            .is_err()
+                        if !ledger.request(output) {
+                            continue;
+                        }
+                        if Self::reserve_capacity(
+                            &self.worker,
+                            &mut self.actor_cpu,
+                            ledger,
+                            worker_staging,
+                            cpu,
+                        )
+                        .is_err()
                             || pending_allocation(ledger, cpu, plan.gpu_bytes, 0).is_err()
                         {
                             self.worker.discard();

@@ -46,9 +46,9 @@ pub struct SimDriver {
     pub physics_ms: f64,
     /// Milliseconds of the last world step.
     world_ms: f64,
-    world: WorldInput,
+    pub(crate) world: WorldInput,
     /// Answer of the last world step to the renderer report.
-    grant: Option<crate::world::PresentationGrant>,
+    pub(crate) grant: Option<crate::world::PresentationGrant>,
     skip_elapsed: bool,
     /// The renderer shows the garage.
     pub(crate) ready: bool,

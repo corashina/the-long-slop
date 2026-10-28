@@ -199,7 +199,8 @@ impl StorageLocks {
     /// Binds the storage volumes and flags of a generated item of `prototype`.
     /// `item_root` is the item frame in the prototype root frame, before `scale`.
     /// `usable_item` maps a prototype node to its generated mechanism item.
-    /// `slot` maps a `partslotscript` source to the generated part slot of this item.
+    /// `slot` maps a `partslotscript` source to the generated part slot of this item. A static
+    /// control has no part slots, so its volumes bind without them.
     pub fn bind_world_volumes(
         &mut self,
         item: ItemId,
@@ -227,9 +228,6 @@ impl StorageLocks {
                 .any(|node| usable_item(*node).is_none())
             {
                 return Err(error("Missing world storage usable item"));
-            }
-            if record.slots.iter().any(|source| slot(source).is_none()) {
-                return Err(error("Missing world storage slot"));
             }
         }
         if let Some(flag) = self

@@ -117,9 +117,10 @@ impl PipelineOperation {
         cpu: usize,
         staging: usize,
     ) -> Result<Option<Self>, ReferenceError> {
-        if ledger.available_external_jobs() == 0
-            || (owns_pending && !ledger.can_request_independent(1))
-        {
+        // Both requests run, so the report asks for all missing credit at once.
+        let job = ledger.available_external_jobs() > 0;
+        let claim = !owns_pending || ledger.can_request_independent(1);
+        if !(job && claim) {
             return Ok(None);
         }
         let mut allocation = ledger.allocation();

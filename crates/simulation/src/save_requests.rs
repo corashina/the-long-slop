@@ -262,6 +262,10 @@ impl SimDriver {
         self.runtime = driver.runtime;
         // The renderer takes the candidate copy with the candidate scene.
         self.sent = driver.sent;
+        // The candidate renderer becomes the active renderer. Its input and credit answer go on.
+        // The input of the old renderer belongs to the dropped stream.
+        self.world = driver.world;
+        self.grant = driver.grant;
         self.runtime.driving_input.settings = settings;
         self.runtime
             .stream

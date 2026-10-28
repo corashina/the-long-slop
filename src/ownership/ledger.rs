@@ -3,8 +3,8 @@
 use super::renderer_pending::{PipelineContinuation, RendererOwner};
 use crate::reference::ReferenceError;
 use crate::world::{
-    GeneratedId, PresentationAllocation, PresentationGrant, PresentationReport, WorldRequest,
-    WorldStream,
+    GeneratedId, PresentationAllocation, PresentationGrant, PresentationReport, Reclaim,
+    WorldRequest,
 };
 
 /// Renderer side of the budget. Admission checks spend credit; charges always apply.
@@ -13,7 +13,9 @@ pub struct PresentationLedger {
     credit: PresentationAllocation,
     used: PresentationAllocation,
     want: PresentationAllocation,
-    reclaim: bool,
+    reclaim: Reclaim,
+    /// A stream prototype hold waits for room this frame.
+    hold_waits: bool,
     publication: bool,
 }
 
@@ -47,13 +49,10 @@ impl PresentationLedger {
         self.want.pending = self.want.pending.max(total);
         total <= self.credit.pending
     }
-    /// Free job slots. None free asks for one.
+    /// Free job slots. Asks for one more, so the report keeps a free slot in the credit.
     pub fn available_external_jobs(&mut self) -> usize {
-        let free = self.credit.jobs.saturating_sub(self.used.jobs);
-        if free == 0 {
-            self.want.jobs = self.want.jobs.max(self.used.jobs + 1);
-        }
-        free
+        self.want.jobs = self.want.jobs.max(self.used.jobs + 1);
+        self.credit.jobs.saturating_sub(self.used.jobs)
     }
     pub fn available_staging_bytes(&self) -> usize {
         self.credit
@@ -86,6 +85,11 @@ impl PresentationLedger {
         want.prototype_cpu = want.prototype_cpu.max(self.used.prototype_cpu + cpu);
         want.prototype_gpu = want.prototype_gpu.max(self.used.prototype_gpu + gpu);
         cpu <= self.available_prototype_cpu_bytes() && gpu <= self.available_prototype_gpu_bytes()
+    }
+    /// A stream prototype hold does not fit. This frame asks for no more prototype CPU, so
+    /// the stream has room for the hold.
+    pub fn wait_for_hold(&mut self) {
+        self.hold_waits = true;
     }
     /// Gives one pending claim and its credit to the stream ready queue.
     fn hand_over_pending(&mut self) -> Result<(), ReferenceError> {
@@ -147,19 +151,21 @@ impl PresentationLedger {
             .ok_or_else(|| ReferenceError("Missing renderer pending claim".into()))?;
         Ok(())
     }
-    /// The report of this frame. Unused credit goes back when the renderer is idle, or when
-    /// the stream waits for room. Idle means no wants, no pending claims and no jobs, so
-    /// work that spans frames keeps its credit.
+    /// The report of this frame. Credit above the wants of this frame goes back, and the
+    /// unused credit of the fields that stream work waits for.
     pub fn report(&mut self) -> PresentationReport {
-        let want = self.want.zip(self.used, usize::max);
-        let idle = want.zip(self.used, usize::saturating_sub) == PresentationAllocation::default()
-            && self.used.pending == 0
-            && self.used.jobs == 0;
-        let release = if idle || self.reclaim {
-            self.credit.zip(self.used, usize::saturating_sub)
-        } else {
-            PresentationAllocation::default()
-        };
+        let mut want = self.want.zip(self.used, usize::max);
+        if std::mem::take(&mut self.hold_waits) {
+            want.prototype_cpu = self.used.prototype_cpu;
+        }
+        // Credit above the wants of this frame goes back. Wanted credit stays, so work that
+        // needs several fields at once collects them.
+        let mut release = self.credit.zip(want, usize::saturating_sub);
+        release = release.zip(
+            self.reclaim
+                .take(self.credit.zip(self.used, usize::saturating_sub)),
+            usize::max,
+        );
         self.credit = self.credit.zip(release, usize::saturating_sub);
         self.want = PresentationAllocation::default();
         PresentationReport {
@@ -172,11 +178,5 @@ impl PresentationLedger {
         self.credit = self.credit.zip(grant.credit, usize::saturating_add);
         self.reclaim = grant.reclaim;
         self.publication = grant.publication;
-    }
-    /// Reports and takes the answer of `stream` in one call.
-    pub fn exchange(&mut self, stream: &mut WorldStream) {
-        let report = self.report();
-        let grant = stream.exchange_presentation(report);
-        self.grant(grant);
     }
 }

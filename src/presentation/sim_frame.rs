@@ -136,7 +136,10 @@ impl SimFrameResource {
                 }
                 Change::Measurements(json) => self.measurements = Some(json.clone()),
                 Change::Failure(failure) => self.failure = Some(failure.clone()),
-                Change::Grant(grant) => self.grant = Some(*grant),
+                // A grant waits until a renderer step takes it. Its credit is never dropped.
+                Change::Grant(grant) => {
+                    self.grant = Some(self.grant.map_or(*grant, |g| g.merge(*grant)));
+                }
                 // The save requests read these from the frame.
                 Change::SaveResult { .. } | Change::Restarted => {}
             }
