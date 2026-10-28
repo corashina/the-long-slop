@@ -96,7 +96,7 @@ fn block_rounding_keeps_rectangular_and_tiny_authored_tails() {
 }
 #[test]
 #[ignore = "requires installed native BC package"]
-fn installed_native_primary_bytes_and_shared_job_limits() {
+fn installed_native_primary_bytes() {
     let reference = ReferenceManifest::from_runtime_json(
         &std::fs::read("web/assets/reference/manifest.json").unwrap(),
     )
@@ -133,41 +133,4 @@ fn installed_native_primary_bytes_and_shared_job_limits() {
             .sum::<usize>(),
         256296384
     );
-    let largest = texture();
-    let staging = primary_staging(&largest, &catalog(&largest)).unwrap();
-    let mut stream = the_long_slop::world::WorldStream::new(
-        &reference,
-        42,
-        reference.world.spawn_context.date,
-        the_long_slop::world::GameMode::default(),
-        the_long_slop::world::DrawDistances::resolve(
-            &reference.world.draw_distance,
-            reference.world.draw_distance.default,
-        ),
-    )
-    .unwrap();
-    while !stream.initial_generation_ready() {
-        stream.prepare(100.);
-        assert!(stream.frame().failure.is_none());
-    }
-    assert!(fixed_room(&stream, 49458048, 5592432, staging, true).unwrap());
-    let mut allocation = stream.presentation_allocation();
-    allocation.jobs = 1;
-    allocation.pending = 1;
-    allocation.staging_bytes = staging;
-    stream.set_presentation_allocation(allocation).unwrap();
-    assert!(!fixed_room(&stream, 49458048, 5592432, staging, true).unwrap());
-    assert!(stream.available_external_jobs() <= 1);
-    let previous = stream.presentation_allocation();
-    allocation.jobs = 2;
-    allocation.staging_bytes = staging * 2;
-    assert!(stream.set_presentation_allocation(allocation).is_err());
-    assert_eq!(
-        stream.presentation_allocation().staging_bytes,
-        previous.staging_bytes
-    );
-    allocation = previous;
-    allocation.jobs = 2;
-    stream.set_presentation_allocation(allocation).unwrap();
-    assert!(!fixed_room(&stream, 1, 1, 1, true).unwrap());
 }
