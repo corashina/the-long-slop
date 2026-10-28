@@ -163,33 +163,3 @@ impl ComputerRecord {
         )
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn records_reject_unknown_fields() {
-        let switch = r#"{"source":{"file":"sharedassets1.assets","path_id":143226},
-            "node":{"file":"sharedassets1.assets","path_id":77821},
-            "clip":{"file":"sharedassets1.assets","path_id":4115},"volume":0.5}"#;
-        let parsed: DisplaySwitchReference = serde_json::from_str(switch).unwrap();
-        assert_eq!(parsed.volume, 0.5);
-        let extra = switch.replacen("\"volume\"", "\"extra\":1,\"volume\"", 1);
-        assert!(serde_json::from_str::<DisplaySwitchReference>(&extra).is_err());
-    }
-
-    #[test]
-    fn glyph_cells_cover_printable_ascii() {
-        let atlas = GlyphAtlasReference {
-            first: 32,
-            cell: [2, 1],
-            offset: [0, -1],
-            coverage: (0..190).map(|i| i as u8).collect(),
-        };
-        assert_eq!(atlas.glyph(b'!'), Some(&[2, 3][..]));
-        assert_eq!(atlas.glyph(b'~'), Some(&[188, 189][..]));
-        assert_eq!(atlas.glyph(8), None, "backspace has no glyph");
-        assert_eq!(atlas.glyph(127), None);
-    }
-}

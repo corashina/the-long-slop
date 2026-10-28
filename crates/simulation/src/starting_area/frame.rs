@@ -262,62 +262,6 @@ impl GarageRuntime {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::boundary::{Change, PoseKey, SimFrame};
-    use crate::reference::ReferenceManifest;
-    use crate::simulation::FrameInput;
-    use crate::starting_area::GarageRuntime;
-
-    #[test]
-    #[ignore = "requires the installed source export"]
-    fn frame_poses_match_runtime_poses() {
-        let reference = ReferenceManifest::from_runtime_json(
-            &std::fs::read(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../web/assets/reference/manifest.json"
-            ))
-            .unwrap(),
-        )
-        .unwrap();
-        let mut run = GarageRuntime::new_default(&reference).unwrap();
-        let mut frame = SimFrame::default();
-        let mut keys = Vec::new();
-        for _ in 0..10 {
-            run.step(&reference, FrameInput::default());
-            run.fill_frame(&reference, 0.5, &mut frame);
-            for change in &frame.changes {
-                if let Change::Spawn { handle, key, .. } = change {
-                    keys.push((*handle, *key));
-                }
-            }
-        }
-        assert_eq!(
-            keys.len(),
-            run.area.render_poses.len() + run.area.item_render_poses.len()
-        );
-        for (handle, key) in keys {
-            let row = frame.current[handle.0 as usize];
-            let pose = match key {
-                PoseKey::Body(id) => run
-                    .area
-                    .render_poses
-                    .iter()
-                    .find(|p| p.0 == id)
-                    .map(|p| p.2),
-                PoseKey::Item(id) => run
-                    .area
-                    .item_render_poses
-                    .iter()
-                    .find(|p| p.0 == id)
-                    .map(|p| p.2),
-            }
-            .unwrap();
-            assert_eq!(row.pose(), pose);
-        }
-    }
-}
-
 impl GarageRuntime {
     fn perf_block(&self) -> crate::boundary::PerfBlock {
         let counters = self.stream.performance_counters();

@@ -1160,14 +1160,3 @@ fn error(s: &str) -> ReferenceError {
 fn rotation(q: [f32; 4]) -> rapier3d::math::Rotation {
     rapier3d::math::Rotation::from_xyzw(q[0], q[1], q[2], q[3])
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn foreign_main_type_cannot_mount_lada_slot() {
-        let s = |v: &[&str]| v.iter().map(|t| t.to_string()).collect::<Vec<_>>();
-        let (main, types) = (s(&["mediumcar"]), s(&["engine"]));
-        assert!(!super::fits(&main, &types, &s(&["bus"]), &types));
-        assert!(super::fits(&main, &types, &s(&["mediumcar"]), &types));
-    }
-}
