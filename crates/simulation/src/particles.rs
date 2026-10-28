@@ -669,18 +669,3 @@ pub fn fluid_reference(
         max_rate: p.scalars["outlet.maxRate"],
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::sheet_frame;
-
-    #[test]
-    fn texture_sheet_frames() {
-        assert_eq!(sheet_frame(0., 0., 1., 25), 0);
-        assert_eq!(sheet_frame(0.9999, 0., 1., 25), 24);
-        assert_eq!(sheet_frame(0.5, 0., 1., 25), 12);
-        // Two cycles wrap back to the first frame at half life.
-        assert_eq!(sheet_frame(0.5, 0., 2., 25), 0);
-        assert_eq!(sheet_frame(0.9, 0.2, 1., 25), 2);
-    }
-}

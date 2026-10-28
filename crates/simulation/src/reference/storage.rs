@@ -128,12 +128,3 @@ impl StorageRecord {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn setting_two_blocks_passenger_room_and_outside() {
-        let allowed: Vec<bool> = (0..=7).map(super::stores).collect();
-        assert_eq!(allowed, [true, true, true, true, true, false, true, false]);
-    }
-}

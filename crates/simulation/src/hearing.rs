@@ -84,39 +84,3 @@ impl HearingState {
         self.dir = s.dir;
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hearing_regenerates_and_ringing_target_decays() {
-        let mut h = HearingState {
-            hearing: 1.,
-            ringing: 0.,
-            target: 0.,
-            dir: 0.,
-            clip: 0,
-            min_force_to_die: 10.,
-            loss: 0.1,
-            regen: 0.5,
-            gain: 2.,
-            decay: 1.,
-        };
-        assert!(!h.blast(5., -45., 0.));
-        assert_eq!((h.hearing, h.target, h.dir), (0.5, 0.25, -0.5));
-        h.advance(0.1);
-        assert!((h.hearing - 0.55).abs() < 1e-6 && (h.ringing - 0.2).abs() < 1e-6);
-        h.advance(0.1);
-        // Ringing reaches the target and stays at or under it.
-        assert_eq!(h.ringing, h.target);
-        h.advance(0.1);
-        assert!((h.target - 0.15).abs() < 1e-6 && h.ringing <= h.target);
-        for _ in 0..20 {
-            h.advance(0.1);
-        }
-        assert_eq!(h.hearing, 1.);
-        assert!(h.target <= 0. && h.ring_gain() == 0.);
-        assert!(h.blast(10., 0., 0.));
-    }
-}

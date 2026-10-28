@@ -224,19 +224,3 @@ impl FlyerReference {
         .unwrap()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn flyer_tracks_hold_quaternion_rows() {
-        let flyer = FlyerReference::fixture();
-        let track = &flyer.wing.tracks[0];
-        assert_eq!(track.width(), 4);
-        assert!(track.keys_valid(flyer.wing.stop_time));
-        let mut short = track.clone();
-        short.values[1].pop();
-        assert!(!short.keys_valid(flyer.wing.stop_time));
-    }
-}

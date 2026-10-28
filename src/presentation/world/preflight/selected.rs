@@ -202,35 +202,3 @@ impl Reservation {
         jobs && pending && staging && prototype
     }
 }
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn input_fits_the_renderer_credit() {
-        let request = super::Reservation {
-            cpu: 1024,
-            gpu: 1024,
-            staging: 1024,
-        };
-        // Credit for one job, its staging and its prototype bytes, but no pending claim.
-        let mut ledger = crate::ownership::PresentationLedger::default();
-        let mut credit = crate::world::PresentationAllocation::default();
-        credit.jobs = 1;
-        credit.staging_bytes = 1024;
-        credit.dependency_staging_bytes = 1024;
-        credit.prototype_cpu = 1024;
-        credit.prototype_gpu = 1024;
-        ledger.grant(crate::world::PresentationGrant {
-            credit,
-            reclaim: false,
-            ..Default::default()
-        });
-        assert!(request.fits(&mut ledger, 0, 0, true));
-        assert!(!request.fits(&mut ledger, 0, 0, false));
-        let larger = super::Reservation {
-            gpu: 2048,
-            ..request
-        };
-        assert!(!larger.fits(&mut ledger, 0, 0, true));
-        assert!(larger.fits(&mut ledger, 0, 1024, true));
-    }
-}

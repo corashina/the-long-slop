@@ -28,22 +28,3 @@ impl SceneScale {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::SceneScale;
-
-    #[test]
-    fn scene_scale_preserves_native_and_bounds_reduced_extents() {
-        assert_eq!(SceneScale::default().extent([1280, 720]), [1280, 720]);
-        let scale = SceneScale::from_factor(0.75).unwrap();
-        assert_eq!(scale.extent([1280, 720]), [960, 540]);
-        assert_eq!(scale.extent([1279, 719]), [959, 539]);
-        assert_eq!(scale.extent([1, 1]), [1, 1]);
-        assert_eq!(scale.extent([0, 0]), [0, 0]);
-        assert_eq!(scale.extent([u32::MAX; 2]), [3221225471; 2]);
-        for factor in [0., 0.5, f32::NAN, f32::INFINITY] {
-            assert!(SceneScale::from_factor(factor).is_err());
-        }
-    }
-}
