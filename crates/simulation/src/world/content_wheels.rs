@@ -111,7 +111,10 @@ pub(super) fn bind(
                 layers,
                 false,
             );
-
+            // Slots under the wheel take its pose.
+            interaction
+                .mechanisms
+                .register_generated_item(item, content.nodes[node_index]);
             item
         };
         let shapes: Vec<_> = instance
