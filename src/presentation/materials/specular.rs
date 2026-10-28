@@ -62,10 +62,11 @@ impl SpecularMaterial {
         mask: u32,
         reflected: bool,
     ) -> Result<Self, ReferenceError> {
+        // Emission is always on. A normal map is optional.
+        let normal = record.valid_keywords.iter().any(|x| x == "_NORMALMAP");
         if record.shader.name != "Standard (Specular setup)"
-            || record.valid_keywords.len() != 2
+            || record.valid_keywords.len() != 1 + usize::from(normal)
             || !record.valid_keywords.iter().any(|x| x == "_EMISSION")
-            || !record.valid_keywords.iter().any(|x| x == "_NORMALMAP")
         {
             return Err(ReferenceError("Unsupported source specular variant".into()));
         }
@@ -120,7 +121,7 @@ impl SpecularMaterial {
             number("_Cutoff")?,
         );
         uniform.scales = Vec4::new(number("_BumpScale")?, 0., number("_OcclusionStrength")?, 0.);
-        uniform.flags = UVec4::new((1 << 0) | (1 << 3), 0, 0, 0);
+        uniform.flags = UVec4::new(u32::from(normal) | (1 << 3), 0, 0, 0);
         let uv = *record
             .texture_coordinates
             .get("_MainTex")
@@ -135,6 +136,9 @@ impl SpecularMaterial {
         }
         let mut banks: Vec<(usize, Handle<Image>)> = Vec::with_capacity(4);
         for (slot, name) in [(0, "_MainTex"), (1, "_BumpMap"), (3, "_OcclusionMap")] {
+            if slot == 1 && !normal {
+                continue;
+            }
             let (binding, image) = textures
                 .binding(&record.source, name)
                 .ok_or_else(|| ReferenceError(format!("Specular texture not ready: {name}")))?;
