@@ -3386,16 +3386,20 @@ impl WorldStream {
         Ok(())
     }
     /// The renderer starts the prepared surface. It owns its claim.
+    /// The renderer reads an older frame, so the stream can drop the unreserved work first.
+    /// The renderer then retires its claim when its frame shows the drop.
     fn reserve_surface_renderer(
         &mut self,
         request: WorldRequest,
         key: SurfaceKey,
     ) -> Result<(), ReferenceError> {
-        let work = self
+        let Some(work) = self
             .ready
             .as_ref()
             .filter(|work| same_request(work.request, request) && work.published.key == key)
-            .ok_or_else(|| ReferenceError("Stale source renderer reservation".into()))?;
+        else {
+            return Ok(());
+        };
         if work.renderer_reserved {
             return Err(ReferenceError(
                 "Source renderer already owns its claim".into(),
@@ -3420,6 +3424,7 @@ impl WorldStream {
         Ok(())
     }
     /// The renderer dropped the prepared surface after its work drained.
+    /// Work that the stream dropped before the reservation arrived is already rewound.
     fn discard_surface_renderer(
         &mut self,
         request: WorldRequest,
@@ -3430,7 +3435,7 @@ impl WorldStream {
             .as_ref()
             .is_some_and(|w| same_request(w.request, request) && w.published.key == key)
         {
-            return Err(ReferenceError("Missing draining surface claim".into()));
+            return Ok(());
         }
         self.ready = None;
         if key.layer == WorldLayer::Road {
