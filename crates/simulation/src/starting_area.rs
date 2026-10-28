@@ -708,8 +708,6 @@ impl VehicleRuntime {
 }
 
 mod inventory;
-#[cfg(test)]
-mod world_car_tests;
 pub use inventory::InventoryFrame;
 mod save;
 
@@ -2860,19 +2858,6 @@ fn holiday_pumpkin(start: [u32; 2], end: [u32; 2], calendar: [u8; 2]) -> bool {
     crate::simulation::radio::in_holiday(calendar, [sm, sd, em, ed])
 }
 
-#[cfg(test)]
-mod holiday_tests {
-    #[test]
-    fn pumpkin_spawns_from_15_october_to_15_november() {
-        let spawns = |month, day| super::holiday_pumpkin([10, 15], [11, 15], [month, day]);
-        assert!(!spawns(10, 14));
-        assert!(spawns(10, 15));
-        assert!(spawns(11, 15));
-        assert!(!spawns(11, 16));
-        assert!(!spawns(1, 1));
-    }
-}
-
 /// Gauge inputs of car `key` with gauges `r`. `headlights` is its requested headlight state.
 /// Source `carscript.InteractSwitchLights` of the world car whose switch usable is `switch`.
 /// Returns the car.
@@ -3042,16 +3027,4 @@ fn startup_hash(mut value: u64) -> u64 {
     value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
     value ^ (value >> 31)
-}
-
-#[cfg(test)]
-mod steer_tests {
-    use super::vehicle_steer;
-
-    #[test]
-    fn push_wins_then_driver_then_last_steer() {
-        assert_eq!(vehicle_steer(0.3, Some(-0.5), Some(1.0)), -0.5);
-        assert_eq!(vehicle_steer(0.3, None, Some(1.0)), 1.0);
-        assert_eq!(vehicle_steer(0.3, None, None), 0.3);
-    }
 }

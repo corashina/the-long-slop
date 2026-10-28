@@ -91,6 +91,7 @@ fn assert_impulse(
 }
 
 #[test]
+#[ignore = "requires the installed source export"]
 fn g10_generated_endpoint_root() {
     use crate::reference::DragMode;
     use crate::world::{StructureRecipe, WorldOrigin};
@@ -226,6 +227,7 @@ fn g10_generated_endpoint_root() {
 }
 
 #[test]
+#[ignore = "requires the installed source export"]
 fn g10_world_sample_source_identity() {
     let reference = super::super::reference();
     let capture = reference.world.capture_library.manifest_sha256.clone();

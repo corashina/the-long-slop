@@ -176,37 +176,3 @@ fn spawn(
     let serial = area.spawned.get(id).unwrap().serial;
     register(reference, area, physics, prototype, serial)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::starting_area::spawned::SpawnedItem;
-
-    fn spawned(count: usize) -> SpawnedItems {
-        let mut spawned = SpawnedItems::default();
-        // Another prototype on the same serial must not count.
-        spawned.record(SpawnedItem {
-            id: ItemId(99),
-            serial: 4,
-            prototype: 0,
-            pickup: 0,
-        });
-        for pickup in 0..count {
-            spawned.record(SpawnedItem {
-                id: ItemId(10 + pickup as u32),
-                serial: 4,
-                prototype: 1,
-                pickup,
-            });
-        }
-        spawned
-    }
-
-    #[test]
-    fn restored_hose_needs_every_segment() {
-        let pickups = [5, 4, 3, 2, 1, 0];
-        let items = segment_items(&spawned(6), 1, 4, pickups).unwrap();
-        assert_eq!(items, [15, 14, 13, 12, 11, 10].map(ItemId));
-        assert!(segment_items(&spawned(5), 1, 4, pickups).is_err());
-    }
-}

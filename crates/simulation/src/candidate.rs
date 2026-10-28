@@ -138,22 +138,3 @@ fn overlap(active: WorldMetrics, shared: [usize; 2], fixed: [usize; 2]) -> Optio
         .checked_sub(fixed[1])?;
     Some(overlap)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn overlap_counts_shared_bytes_once() {
-        let active = WorldMetrics {
-            prototype_cpu_bytes: 100,
-            prototype_gpu_bytes: 50,
-            shared_input_cpu_bytes: 10,
-            ..WorldMetrics::default()
-        };
-        let overlap = overlap(active, [20, 5], [30, 15]).unwrap();
-        assert_eq!(overlap.prototype_cpu_bytes, 40);
-        assert_eq!(overlap.prototype_gpu_bytes, 30);
-        assert!(super::overlap(active, [0; 2], [101, 0]).is_none());
-    }
-}

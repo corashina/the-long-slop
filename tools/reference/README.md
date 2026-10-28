@@ -9,7 +9,7 @@ tools/reference/.venv/Scripts/python.exe -m pip install -r tools/reference/requi
 docker build --tag the-long-slop-toolchain --file tools/Dockerfile .
 tools/reference/.venv/Scripts/python.exe -m tools.reference.export --steam-root "C:/Program Files (x86)/Steam/steamapps/common/The Long Drive"
 tools/reference/.venv/Scripts/python.exe -m unittest discover -s tools/reference/tests
-./scripts/check.ps1 -Test reference
+./scripts/check.ps1 -Test reference_loading
 ```
 
 ## Host managed-analysis tools

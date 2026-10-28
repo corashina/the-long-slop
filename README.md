@@ -35,16 +35,16 @@ Run routine formatting and WASM compile checks:
 Run selected native tests by integration target, name filter, or both:
 
 ```powershell
-./scripts/check.ps1 -Test inventory
+./scripts/check.ps1 -Test texture_upload
 ./scripts/check.ps1 -Filter roadside_
-./scripts/check.ps1 -Test inventory -Filter inventory
+./scripts/check.ps1 -Test texture_upload -Filter refill
 ```
 
 Native test commands also check formatting and WASM compilation.
 Run selected web suites by filename stem. This command skips Docker and Rust checks:
 
 ```powershell
-./scripts/check.ps1 -WebTest input,save-bridge
+./scripts/check.ps1 -WebTest loading,save-bridge
 ```
 
 Run all retained web and native tests, formatting, and WASM compile checks only when requested or agreed:
@@ -61,6 +61,8 @@ Run a release build only when requested or at an agreed milestone:
 ```
 
 The build script writes the browser package to `web/pkg`.
+To iterate on a bug, use `./scripts/build.ps1 -Fast`. It skips LTO, wasm-opt and Brotli, so a rebuild takes about 1 minute.
+Fast packages are larger and slower. Do not use them for F3 numbers or test passes.
 It also prepares Brotli downloads in `.cache/http-compression`. Keep that directory with the server deployment.
 After replacing an export without rebuilding WASM, prepare its downloads and restart the server:
 

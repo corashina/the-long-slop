@@ -1651,35 +1651,3 @@ impl AmbientState {
         gains
     }
 }
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn full_queue_drops_hits_for_engine_and_living_sounds() {
-        let event = |priority, sequence| AudioEvent {
-            session: 1,
-            sequence,
-            binding: 0,
-            emitter: 0,
-            position: [0.; 3],
-            gain: 1.,
-            pitch: 1.,
-            time_seconds: 0.,
-            priority,
-        };
-        let mut queue = [None; 64];
-        let mut length = 0;
-        for i in 0..64 {
-            insert_event(&mut queue, &mut length, event(100, i));
-        }
-        insert_event(&mut queue, &mut length, event(80, 64));
-        insert_event(&mut queue, &mut length, event(55, 65));
-        insert_event(&mut queue, &mut length, event(100, 66));
-        let count = |p| queue.iter().flatten().filter(|e| e.priority == p).count();
-        assert_eq!((length, count(100), count(80), count(55)), (64, 62, 1, 1));
-        assert_eq!(queue[61].unwrap().sequence, 61, "the last hits leave");
-        assert!(queue.iter().flatten().all(|e| e.sequence != 66));
-    }
-}

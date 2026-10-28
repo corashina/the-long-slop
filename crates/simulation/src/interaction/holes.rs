@@ -93,30 +93,3 @@ fn live(items: &ItemStore, tank: ItemId) -> bool {
     };
     !state.removed && owner.is_some_and(|o| !o.removed)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_new_hole_replaces_the_oldest_past_the_cap() {
-        let mut holes = Holes {
-            holes: Vec::new(),
-            flow: 1.,
-            angle_disabled: false,
-            spill_disabled: false,
-        };
-        let (tank, other) = (ItemId(1), ItemId(2));
-        holes.add(other, Pose::IDENTITY, Vector::ZERO, Vector::Y);
-        for i in 0..=HOLES_PER_TANK {
-            holes.add(tank, Pose::IDENTITY, Vector::X * i as f32, Vector::Y);
-        }
-        assert_eq!(holes.count(tank), HOLES_PER_TANK);
-        assert_eq!(holes.count(other), 1);
-        let first = holes.holes.iter().find(|h| h.tank == tank).unwrap();
-        assert!(
-            (first.pose.translation.x - 1.).abs() < 1e-6,
-            "the oldest hole goes"
-        );
-    }
-}

@@ -49,5 +49,12 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+# Fast rebuilds for iteration: `scripts/build.ps1 -Fast`.
+[profile.fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
+
 [patch.crates-io]
 bevy_render = { path = "vendor/bevy_render" }

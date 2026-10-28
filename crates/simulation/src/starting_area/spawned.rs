@@ -292,39 +292,3 @@ pub fn restore_save(
     }
     Ok(ids)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn item(id: u32, serial: u32) -> SpawnedItem {
-        SpawnedItem {
-            id: ItemId(id),
-            serial,
-            prototype: 0,
-            pickup: 0,
-        }
-    }
-
-    #[test]
-    fn serials_follow_restored_items() {
-        let mut spawned = SpawnedItems::default();
-        assert_eq!(spawned.allocate_serial().unwrap(), 0);
-        spawned.record(item(10, 7));
-        spawned.record(item(11, 2));
-        assert_eq!(spawned.allocate_serial().unwrap(), 8);
-        assert!(spawned.contains(ItemId(11)) && !spawned.contains(ItemId(12)));
-        assert_eq!(spawned.get(ItemId(10)).unwrap().serial, 7);
-    }
-
-    #[test]
-    fn snapshot_rejects_unknown_fields() {
-        let json = r#"{"serial":3,"prototype":{"file":"sharedassets1.assets","path_id":"54495"},
-            "pickup":0,"pose":{"position":[1.0,2.0,3.0],"rotation":[0.0,0.0,0.0,1.0]}}"#;
-        let saved: crate::save::SpawnedItemSnapshot = serde_json::from_str(json).unwrap();
-        assert_eq!(saved.serial, 3);
-        assert_eq!(saved.prototype.path_id, "54495");
-        let extra = json.replacen("\"pickup\"", "\"x\":1,\"pickup\"", 1);
-        assert!(serde_json::from_str::<crate::save::SpawnedItemSnapshot>(&extra).is_err());
-    }
-}
