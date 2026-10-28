@@ -529,10 +529,7 @@ impl WorldStream {
                         .rules
                         .component(&self.reference, pickup_root, "pickupable")?;
                 // Car and trailer roots are items without a pickupable. Only bikes have one.
-                if pickup.is_none()
-                    && prototype.trailer.is_none()
-                    && prototype.vehicle.is_none()
-                {
+                if pickup.is_none() && prototype.trailer.is_none() && prototype.vehicle.is_none() {
                     continue;
                 }
                 (|| -> Result<(), ReferenceError> {

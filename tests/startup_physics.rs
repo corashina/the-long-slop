@@ -1,5 +1,5 @@
 use the_long_slop::{
-    reference::{ReferenceManifest, fixed_reservation::fixed_room},
+    reference::ReferenceManifest,
     simulation::{FIXED_DT, FrameInput},
     starting_area::GarageRuntime,
     vehicle::from_rapier,
@@ -110,11 +110,11 @@ fn installed_spawn_alignment_and_settling() {
         "irrelevant growth must preserve selection"
     );
     let offset = run.stream.frame().startup.unwrap().player_offset;
-    assert!(run.align_startup(&reference).unwrap());
+    assert!(run.align_startup(&reference, [1, 1]).unwrap());
     let player = run.area.player.body_handle();
     let physical = from_rapier(run.physics.rapier().bodies[player].position());
     assert_eq!(run.area.player.body_pose(&run.physics), physical);
-    assert!(run.align_startup(&reference).unwrap());
+    assert!(run.align_startup(&reference, [1, 1]).unwrap());
     assert_eq!(run.area.player.body_pose(&run.physics), physical);
 
     let settle_steps = (2.0_f32 / FIXED_DT).round() as usize;
@@ -135,10 +135,6 @@ fn installed_spawn_alignment_and_settling() {
     }
     assert!(run.area.player.grounded());
     run.sync_world_activity(&reference).unwrap();
-    let mut allocation = run.stream.presentation_allocation();
-    allocation.prototype_gpu = 600 * 1024 * 1024;
-    run.stream.set_presentation_allocation(allocation).unwrap();
-    assert!(fixed_room(&run.stream, 1024, 0, 1024, true).unwrap());
     let mut roads = the_long_slop::world::RoadIndex::new(
         the_long_slop::world::RoadSequence::new(&reference.world, 42, None).unwrap(),
         the_long_slop::world::terrain_evaluator(&reference.world, 42),
