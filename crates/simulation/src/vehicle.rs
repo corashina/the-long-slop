@@ -587,10 +587,6 @@ impl PhysicsWorld {
         self.refresh_queries();
     }
 
-    pub fn insert_mesh(&mut self, vertices: &[[f32; 3]], indices: &[[u32; 3]]) -> ColliderHandle {
-        self.insert_mesh_at(vertices, indices, [0.0; 3])
-    }
-
     pub fn insert_mesh_at(
         &mut self,
         vertices: &[[f32; 3]],
@@ -887,7 +883,7 @@ mod hit_tests {
 #[cfg(test)]
 mod source_collider_tests {
     use super::*;
-    use rapier3d::parry::query::{Ray, RayCast, ShapeCastOptions, cast_shapes};
+    use rapier3d::parry::query::{Ray, ShapeCastOptions, cast_shapes};
     use rapier3d::parry::shape::Ball;
 
     /// The heightfield must answer every query like the render triangles.

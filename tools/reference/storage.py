@@ -35,8 +35,6 @@ def check_policy(dropdown, settings_linked, mask):
     if not dropdown['useDefInt'] or dropdown['defInt']!=SETTING or not settings_linked:raise ValueError('Storage fresh default differs')
     if mask!=MASK:raise ValueError('level1:64919 storage layer mask differs')
 
-def box_shape(fields):
-    return {'center':list(convert_point(vector(fields['m_Center']))),'half_extents':[x*0.5 for x in vector(fields['m_Size'])]}
 
 def root_box(chain, fields):
     """Box centre, half extents, and rotation in the prototype root frame.

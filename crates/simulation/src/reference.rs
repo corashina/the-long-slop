@@ -26,7 +26,6 @@ pub mod shadow_cadence;
 pub mod shadow_candidates;
 pub mod shadow_frame;
 pub mod shadow_planes;
-pub mod shadow_profile;
 pub mod shadow_scene;
 pub mod shadow_splits;
 pub mod shadows;

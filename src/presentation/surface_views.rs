@@ -113,10 +113,6 @@ pub(crate) fn prepare_views(
     cache: Res<PipelineCache>,
     status: Res<RendererStateHandle>,
 ) {
-    let mut timing = super::reflection_preparation::Timer::new(
-        super::reflection_preparation::Stage::Surface,
-        &frame,
-    );
     if status.failure().is_some() {
         return;
     }
@@ -217,7 +213,6 @@ pub(crate) fn prepare_views(
         if frame.skip_probe_preparation(source.index) {
             continue;
         }
-        timing.face(source.index);
         let target = &resources.targets.views[source.index];
         let uniform = scene.for_view(
             source.shadow_fade,
@@ -247,18 +242,6 @@ pub(crate) fn prepare_views(
                 status.fail("Source glass view binding is missing".into());
                 return;
             };
-            if timing.enabled() {
-                let glass_unchanged = glass.unchanged(&glass_value);
-                let lighting_unchanged = binding.unchanged(&uniform);
-                let writes = usize::from(!glass_unchanged) + usize::from(!lighting_unchanged);
-                timing.work(2, 2 - writes, writes);
-                if !glass_unchanged {
-                    timing.upload(GlassViewUniform::min_size().get());
-                }
-                if !lighting_unchanged {
-                    timing.upload(super::source_lighting::LightingUniform::min_size().get());
-                }
-            }
             if let Err(error) = glass.write(glass_value, &device, &queue) {
                 status.fail(error.into());
                 return;

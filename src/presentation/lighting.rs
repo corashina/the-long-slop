@@ -730,15 +730,10 @@ pub(crate) fn ember_particle(
 }
 pub(crate) fn sync_control_visuals(
     sim: Res<SimFrameResource>,
-    frame: Res<super::view_frame::SourceViewFrame>,
     source: Res<SourceLighting>,
     mut poses: Query<&mut Transform>,
     mut nodes: Query<&mut Visibility>,
 ) {
-    let mut timing = super::reflection_preparation::Timer::new(
-        super::reflection_preparation::Stage::LightingControls,
-        &frame,
-    );
     for &(index, entity) in &source.control_poses {
         if let Ok(mut pose) = poses.get_mut(entity) {
             let output = &sim.frame.control_poses[index].local_pose;
@@ -747,10 +742,7 @@ pub(crate) fn sync_control_visuals(
                 rotation: Quat::from_array(output.rotation),
                 ..*pose
             };
-            let changed = pose.set_if_neq(next);
-            if timing.enabled() {
-                timing.work(1, usize::from(!changed), usize::from(changed));
-            }
+            pose.set_if_neq(next);
         }
     }
     for &(index, entity) in &source.visibility {
@@ -1081,7 +1073,6 @@ fn extract_lighting(
 }
 fn upload_lighting(
     extracted: Res<ExtractedLighting>,
-    frame: Res<super::view_frame::SourceViewFrame>,
     mut gpu: ResMut<LightingGpu>,
     images: Res<RenderAssets<GpuImage>>,
     device: Res<RenderDevice>,
@@ -1101,17 +1092,7 @@ fn upload_lighting(
     }
     gpu.source_shader = extracted.shader;
     gpu.sky_shader = extracted.sky_shader;
-    let mut timing = super::reflection_preparation::Timer::new(
-        super::reflection_preparation::Stage::LightingUpload,
-        &frame,
-    );
     let unchanged = gpu.uniform.get() == &extracted.uniform;
-    if timing.enabled() {
-        timing.work(1, usize::from(unchanged), usize::from(!unchanged));
-        if !unchanged {
-            timing.upload(LightingUniform::min_size().get());
-        }
-    }
     if !unchanged {
         gpu.uniform.set(extracted.uniform);
         gpu.uniform.write_buffer(&device, &queue);

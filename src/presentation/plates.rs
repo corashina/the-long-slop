@@ -12,7 +12,7 @@ use bevy::{
     render as bevy_render,
 };
 use bevy::{
-    asset::{AssetId, RenderAssetUsages, UntypedAssetId},
+    asset::RenderAssetUsages,
     ecs::system::SystemParamItem,
     mesh::{Indices, MeshVertexBufferLayoutRef},
     pbr::{MaterialPipeline, MaterialPipelineKey},
@@ -488,10 +488,4 @@ fn world_labels(
         material,
         labels,
     }))
-}
-pub fn plate_warmup_pairs(world: &World, pairs: &mut Vec<(AssetId<Mesh>, UntypedAssetId)>) {
-    let status = world.resource::<PlateTextStatus>();
-    if let (Some(material), Some(sample)) = (&status.material, &status.sample) {
-        pairs.push((sample.id(), material.id().untyped()));
-    }
 }

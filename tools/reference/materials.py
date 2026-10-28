@@ -6,16 +6,6 @@ from PIL import Image, ImageMath
 from .source import source_id
 
 
-def decode_normal_rgba(pixel: tuple[int, int, int, int], encoding: str) -> tuple[float, float, float]:
-    if encoding not in {'ag', 'rg', 'rag', 'rgb'}:
-        raise ValueError(f'Unknown normal encoding: {encoding}')
-    red = pixel[0] * pixel[3] / 255 if encoding == 'rag' else pixel[3 if encoding == 'ag' else 0]
-    x = red * 2 / 255 - 1
-    y = pixel[1] * 2 / 255 - 1
-    z = pixel[2] * 2 / 255 - 1 if encoding == 'rgb' else math.sqrt(max(0., 1 - x*x - y*y))
-    return x, y, z
-
-
 def decode_normal_image(image: Image.Image, encoding: str) -> Image.Image:
     if encoding not in {'ag', 'rg', 'rag', 'rgb'}:
         raise ValueError(f'Unknown normal encoding: {encoding}')
@@ -303,7 +293,6 @@ def source_mip_images(texture):
 
 
 def export_material_textures(source, owner, record, output):
-    import hashlib
     environments = dict(source.read(owner)['m_SavedProperties'].get('m_TexEnvs', []))
     dependencies = {}
     cache = getattr(source, 'material_texture_cache', None)

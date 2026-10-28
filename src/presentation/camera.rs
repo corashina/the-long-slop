@@ -42,11 +42,3 @@ pub fn pose(mode: CameraMode, car: VehiclePose) -> Transform {
         }
     }
 }
-
-pub fn sleep_pose(
-    camera: crate::sleep::SleepCamera,
-    origin: &crate::world::WorldOrigin,
-) -> Transform {
-    Transform::from_translation(Vec3::from_array(origin.local(camera.absolute_position)))
-        .with_rotation(Quat::from_array(camera.rotation))
-}

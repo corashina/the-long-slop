@@ -140,9 +140,6 @@ pub struct GaugePartReference {
     pub counters: Vec<OdometerReference>,
 }
 impl GaugePartReference {
-    pub fn digit_count(&self) -> usize {
-        self.counters.iter().map(|c| c.digits.len()).sum()
-    }
     /// Every material that the gauge can show on renderer node `node`.
     pub fn renderer_materials(&self, node: u32) -> impl Iterator<Item = &MaterialLink> {
         let lamps = self

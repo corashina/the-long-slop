@@ -659,10 +659,6 @@ pub(crate) fn sync_conditions(world: &mut World) {
             apply_spray(receivers, color, visuals.bank, world, false);
         }
         visuals.apply_visibility(world);
-        let mut timing = super::reflection_preparation::Timer::new(
-            super::reflection_preparation::Stage::ConditionTools,
-            world.resource::<super::view_frame::SourceViewFrame>(),
-        );
         for (index, (_, model, _)) in visuals.tools.iter().enumerate() {
             let Some(model) = model else { continue };
             let pose = world.resource::<SimFrameResource>().frame.brush_poses[index].pose();
@@ -684,10 +680,7 @@ pub(crate) fn sync_conditions(world: &mut World) {
                     rotation: local.rotation,
                     ..*transform
                 };
-                let changed = transform.set_if_neq(next);
-                if timing.enabled() {
-                    timing.work(1, usize::from(!changed), usize::from(changed));
-                }
+                transform.set_if_neq(next);
             }
         }
     });

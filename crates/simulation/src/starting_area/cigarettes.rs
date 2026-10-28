@@ -99,12 +99,6 @@ impl CigaretteRuntime {
             show_stats: !consumable.dont_show_stats,
         })
     }
-    pub fn ember_particles(&self, id: ItemId) -> &[crate::particles::ParticleOutput] {
-        self.embers
-            .iter()
-            .find(|(i, _)| *i == id)
-            .map_or(&[], |(_, p)| p.particles())
-    }
     pub fn embers(&self) -> impl Iterator<Item = (ItemId, &[crate::particles::ParticleOutput])> {
         self.embers.iter().map(|(id, p)| (*id, p.particles()))
     }

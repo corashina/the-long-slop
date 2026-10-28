@@ -382,25 +382,6 @@ impl StorageLocks {
     pub fn locked_body(&self, item: ItemId) -> Option<RigidBodyHandle> {
         self.locked.iter().find(|l| l.item == item).map(|l| l.body)
     }
-    /// True if the collider belongs to a locked item or to an item that rides on one.
-    pub fn owns_collider(&self, user_data: u128, items: &ItemStore) -> bool {
-        if self.locked.is_empty() {
-            return false;
-        }
-        let Some(mut id) = collider_item(user_data) else {
-            return false;
-        };
-        for _ in 0..items.len() {
-            match items.get(id).map(|i| i.location) {
-                Some(ItemLocation::Locked { .. }) => return true,
-                _ => match items.parent(id) {
-                    Some(parent) => id = parent,
-                    None => return false,
-                },
-            }
-        }
-        false
-    }
     /// Keep an item out of every volume.
     pub fn exclude(&mut self, item: ItemId) {
         self.dont_mount.insert(item);

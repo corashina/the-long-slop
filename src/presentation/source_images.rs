@@ -1,59 +1,10 @@
 //! Shared assembly of authored PNG mip levels. Runs only during asset loading.
-use crate::reference::{SamplerRecord, TextureMip};
+use crate::reference::SamplerRecord;
 use bevy::{
-    asset::RenderAssetUsages,
     image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
     prelude::*,
 };
 
-pub fn assemble_mips(
-    levels: &[Handle<Image>],
-    mips: &[TextureMip],
-    settings: &SamplerRecord,
-    images: &mut Assets<Image>,
-) -> Result<(Image, usize), String> {
-    if levels.len() != mips.len() || mips.is_empty() || mips.len() != settings.mip_count as usize {
-        return Err("Invalid authored mip count".into());
-    }
-    let byte_count =
-        crate::reference::fixed_reservation::png_pixels(mips).map_err(|e| e.to_string())?;
-    for (handle, mip) in levels.iter().zip(mips) {
-        let image = images
-            .get(handle)
-            .ok_or_else(|| format!("Missing decoded mip {}", mip.file))?;
-        if image.width() != mip.width
-            || image.height() != mip.height
-            || image.data.as_ref().map(Vec::len)
-                != Some(mip.width as usize * mip.height as usize * 4)
-        {
-            return Err(format!("Invalid decoded mip {}", mip.file));
-        }
-    }
-    let mut bytes = Vec::with_capacity(byte_count);
-    let mut assembled = None;
-    for (handle, mip) in levels.iter().zip(mips) {
-        let mut image = images
-            .remove(handle.id())
-            .ok_or_else(|| format!("Missing decoded mip {}", mip.file))?;
-        let expected = mip.width as usize * mip.height as usize * 4;
-        if image.width() != mip.width
-            || image.height() != mip.height
-            || image.data.as_ref().map(Vec::len) != Some(expected)
-        {
-            return Err(format!("Invalid decoded mip {}", mip.file));
-        }
-        bytes.append(image.data.as_mut().expect("checked pixels"));
-        if assembled.is_none() {
-            assembled = Some(image);
-        }
-    }
-    let mut image = assembled.expect("validated mip count");
-    image.data = Some(bytes);
-    image.texture_descriptor.mip_level_count = settings.mip_count;
-    image.asset_usage = RenderAssetUsages::RENDER_WORLD;
-    apply_sampler(&mut image, settings);
-    Ok((image, byte_count))
-}
 pub(crate) fn wrap(value: u8) -> ImageAddressMode {
     match value {
         0 => ImageAddressMode::Repeat,

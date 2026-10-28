@@ -1050,9 +1050,6 @@ impl PlayerState {
     pub fn yaw_degrees(&self) -> f32 {
         self.yaw
     }
-    pub fn pitch_degrees(&self) -> f32 {
-        self.pitch
-    }
     pub fn sweep_shape(&self) -> &PlayerSweepShape {
         &self.sweep
     }

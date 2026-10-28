@@ -168,17 +168,6 @@ impl Breakables {
         };
         self.try_break(records, target, force);
     }
-    /// Source breakablescript.TryBreak(Rigidbody).
-    pub fn try_break_body(
-        &mut self,
-        records: &[BreakableReference],
-        target: usize,
-        speed: f32,
-        mass: f32,
-    ) {
-        let force = body_force(&records[self.targets[target].record], speed, mass);
-        self.try_break(records, target, force);
-    }
     /// Source breakablescript.TryBreakShoot.
     pub fn try_break_shoot(&mut self, records: &[BreakableReference], target: usize, force: f32) {
         let t = &mut self.targets[target];

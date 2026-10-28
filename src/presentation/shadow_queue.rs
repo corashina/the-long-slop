@@ -10,7 +10,6 @@ use super::{
     surface_views::SourceSurfaceView,
     view_frame::SourceViewFrame,
 };
-use crate::reference::shadow_profile;
 use bevy::material::{
     MaterialProperties,
     key::{ErasedMaterialPipelineKey, ErasedMeshPipelineKey},
@@ -187,12 +186,7 @@ fn base_pipeline(
     Ok(Some((base, indexed, cache_key)))
 }
 pub fn queue(world: &mut World) {
-    let mut timing = super::reflection_preparation::Timer::new(
-        super::reflection_preparation::Stage::Queue,
-        world.resource::<SourceViewFrame>(),
-    );
     world.resource_scope(|world, mut state: Mut<ShadowQueues>| {
-        let mut shadow_timing = shadow_profile::Timer::new(shadow_profile::Stage::Queue);
         state.ready = [false; VIEW_COUNT];
         state.instances = [[0; 4]; VIEW_COUNT];
         state.revision += 1;
@@ -259,7 +253,6 @@ pub fn queue(world: &mut World) {
                         let Some((entity, retained, key)) = view else {
                             continue;
                         };
-                        timing.face(index);
                         if state.retained[index] != Some(retained) {
                             if let Some(previous) = state.retained[index].replace(retained) {
                                 phases.remove(&previous);
@@ -299,7 +292,6 @@ pub fn queue(world: &mut World) {
                             if mask == 0 {
                                 continue;
                             }
-                            shadow_timing.items(1);
                             let main = MainEntity::from(main);
                             let previous = state.queued[index].get(&main).cloned();
                             let base = match base_pipeline(
@@ -379,13 +371,6 @@ pub fn queue(world: &mut World) {
                                 );
                             }
                             if let Some(previous) = state.queued[index].get_mut(&main) {
-                                if previous.key == next.key
-                                    && previous.mesh == next.mesh
-                                    && previous.input == next.input
-                                    && previous.batchable == next.batchable
-                                {
-                                    shadow_timing.hit();
-                                }
                                 *previous = next;
                             } else {
                                 state.queued[index].insert(main, next);
@@ -468,17 +453,12 @@ pub fn write_cascades(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
 ) {
-    let mut timing = super::reflection_preparation::Timer::new(
-        super::reflection_preparation::Stage::Cascades,
-        &frame,
-    );
     if scene.frame == 0 || scene.frame != frame.frame {
         return;
     }
     let (Some(assets), Some(live)) = (assets, live.0) else {
         return;
     };
-    let mut shadow_timing = shadow_profile::Timer::new(shadow_profile::Stage::Cascades);
     let light = &assets.record.lights[0];
     let rotation = live.sun_rotation;
     let h = |v: Vec3| Vec3::new(v.x, v.y, -v.z);
@@ -491,7 +471,6 @@ pub fn write_cascades(
         if frame.skip_probe_preparation(view.index) {
             continue;
         }
-        timing.face(view.index);
         let key = super::shadow_preparation::CascadeKey {
             view: scene.view_revision(view.index, &frame),
             cadence: cadence.revision,
@@ -515,7 +494,6 @@ pub fn write_cascades(
         );
         // SourceSurfaceView is extracted again each frame. Always restore its fade values.
         if slots.shadow_key == Some(key) {
-            shadow_timing.hit();
             continue;
         }
         slots.shadow_key = Some(key);

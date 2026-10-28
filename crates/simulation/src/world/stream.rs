@@ -3931,10 +3931,6 @@ impl WorldStream {
             self.next_geometry = 0;
         }
     }
-    pub fn recovery_window(&self) -> Option<WorldBounds> {
-        self.recovery
-            .map(|pending| window(pending.target.position, 24.0))
-    }
     pub fn recovery_target(
         &mut self,
         point: [f64; 3],

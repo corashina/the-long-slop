@@ -544,14 +544,6 @@ impl WorldStream {
             }
         }
     }
-    pub fn lamp_button_pose(&self, parent: &GeneratedId, node: &SourceId) -> Option<Transform> {
-        self.lamp_bindings
-            .iter()
-            .filter(|b| &b.parent == parent)
-            .filter_map(|b| b.button.as_ref())
-            .find(|b| &b.node == node)
-            .map(|b| b.pose)
-    }
     /// Source `headlightscript` and `rearlights` outputs of the car copy `parent`.
     pub fn set_car_lights(
         &mut self,

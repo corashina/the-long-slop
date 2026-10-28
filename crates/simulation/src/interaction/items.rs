@@ -204,9 +204,6 @@ impl ItemStore {
     pub fn generated_item_id(&self, id: &GeneratedId) -> Option<ItemId> {
         self.generated.get(id).copied()
     }
-    pub fn generated_item(&self, id: &GeneratedId) -> Option<&ItemState> {
-        self.generated.get(id).and_then(|item| self.get(*item))
-    }
     pub fn retained_binding_bytes(&self) -> usize {
         use super::memory::{map, platform_map, set, strings, vector};
         set(&self.dirty)
