@@ -360,26 +360,24 @@ impl SourceMaterials {
                 {
                     continue;
                 }
-                if ledger.available_external_jobs() == 0 {
-                    break;
-                }
-                if !ledger.can_request_independent(1) {
-                    continue;
-                }
                 let staging = texture.input_staging;
                 if staging > 32 * 1024 * 1024 {
                     return Err(ReferenceError(
                         "Primary input overlap exceeds staging cap".into(),
                     ));
                 }
-                if !ledger.request_staging(staging) {
-                    continue;
-                }
+                // Every request runs, so the report asks for all credit of the load at once.
+                let job = ledger.available_external_jobs() > 0;
+                let claim = ledger.can_request_independent(1);
+                let input = ledger.request_staging(staging);
                 let decoded = texture_cpu_reservation(texture);
-                if !ledger.request_prototype(decoded, 0)
-                    && (self.textures.iter().any(|t| pending_texture_cpu(t) != 0)
-                        || self.world_primary.jobs < ledger.allocation().jobs)
-                {
+                let prototype = ledger.request_prototype(decoded, 0)
+                    || !(self.textures.iter().any(|t| pending_texture_cpu(t) != 0)
+                        || self.world_primary.jobs < ledger.allocation().jobs);
+                if !job {
+                    break;
+                }
+                if !(claim && input && prototype) {
                     continue;
                 }
                 // All reads belong to this one job. Reserve the largest sequential input.

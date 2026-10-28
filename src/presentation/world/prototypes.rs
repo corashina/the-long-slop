@@ -672,9 +672,11 @@ impl SourcePrototypes {
                 .ok_or_else(|| ReferenceError("Missing prototype asset".into()))?;
             let reservation = Reservation::metadata(&reference.file_catalog, &record.path)?;
             // A full stream table waits like a full credit.
-            if !reservation.fits(ledger, entry.cpu, entry.gpu, true)
-                || !stream.can_hold_prototype(&entry.source)
-            {
+            if !stream.can_hold_prototype(&entry.source) {
+                ledger.wait_for_hold();
+                return Ok(());
+            }
+            if !reservation.fits(ledger, entry.cpu, entry.gpu, true) {
                 return Ok(());
             }
             facts.push(crate::world::RendererFact::HoldPrototype(

@@ -53,7 +53,7 @@ pub use stream::renderer_world::{
 };
 pub use stream::{
     PresentationAllocation, PresentationGrant, PresentationReport, PublishedSupply,
-    PublishedSurface, SurfaceKey, WorldFrame, WorldRequest, WorldStream,
+    PublishedSurface, Reclaim, SurfaceKey, WorldFrame, WorldRequest, WorldStream,
 };
 pub use stream_limits::StreamLimits;
 mod start_car;

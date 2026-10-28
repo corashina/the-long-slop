@@ -117,9 +117,10 @@ impl PipelineOperation {
         cpu: usize,
         staging: usize,
     ) -> Result<Option<Self>, ReferenceError> {
-        if ledger.available_external_jobs() == 0
-            || (owns_pending && !ledger.can_request_independent(1))
-        {
+        // Both requests run, so the report asks for all missing credit at once.
+        let job = ledger.available_external_jobs() > 0;
+        let claim = !owns_pending || ledger.can_request_independent(1);
+        if !(job && claim) {
             return Ok(None);
         }
         let mut allocation = ledger.allocation();
@@ -775,7 +776,6 @@ mod batch_tests {
         };
         ledger.grant(PresentationGrant {
             credit,
-            reclaim: false,
             ..Default::default()
         });
         let receipt_bytes = UploadReceipt::allocation_bytes();
@@ -802,8 +802,12 @@ mod batch_tests {
         let used = ledger.allocation();
         assert_eq!((used.jobs, used.pending, used.staging_bytes), (0, 0, 0));
         assert_eq!(used.prototype_cpu, receipt_bytes);
-        // This frame still asked for more. The next idle report gives the credit back.
-        assert_eq!(ledger.report().release, PresentationAllocation::default());
-        assert_eq!(ledger.report().release.jobs, 1);
+        // This frame still asked for a job and a claim, so their credit stays. The next
+        // report gives them back.
+        let first = ledger.report().release;
+        let second = ledger.report().release;
+        assert_eq!((first.jobs, first.pending), (0, 0));
+        assert_eq!((second.jobs, second.pending), (1, 1));
+        assert_eq!(first.staging_bytes + second.staging_bytes, staging);
     }
 }

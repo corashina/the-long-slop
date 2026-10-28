@@ -221,7 +221,6 @@ mod tests {
         credit.prototype_gpu = 1024;
         ledger.grant(crate::world::PresentationGrant {
             credit,
-            reclaim: false,
             ..Default::default()
         });
         assert!(request.fits(&mut ledger, 0, 0, true));

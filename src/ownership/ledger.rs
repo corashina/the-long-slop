@@ -3,8 +3,8 @@
 use super::renderer_pending::{PipelineContinuation, RendererOwner};
 use crate::reference::ReferenceError;
 use crate::world::{
-    GeneratedId, PresentationAllocation, PresentationGrant, PresentationReport, WorldRequest,
-    WorldStream,
+    GeneratedId, PresentationAllocation, PresentationGrant, PresentationReport, Reclaim,
+    WorldRequest,
 };
 
 /// Renderer side of the budget. Admission checks spend credit; charges always apply.
@@ -13,7 +13,9 @@ pub struct PresentationLedger {
     credit: PresentationAllocation,
     used: PresentationAllocation,
     want: PresentationAllocation,
-    reclaim: bool,
+    reclaim: Reclaim,
+    /// A stream prototype hold waits for room this frame.
+    hold_waits: bool,
     publication: bool,
 }
 
@@ -47,13 +49,10 @@ impl PresentationLedger {
         self.want.pending = self.want.pending.max(total);
         total <= self.credit.pending
     }
-    /// Free job slots. None free asks for one.
+    /// Free job slots. Asks for one more, so the report keeps a free slot in the credit.
     pub fn available_external_jobs(&mut self) -> usize {
-        let free = self.credit.jobs.saturating_sub(self.used.jobs);
-        if free == 0 {
-            self.want.jobs = self.want.jobs.max(self.used.jobs + 1);
-        }
-        free
+        self.want.jobs = self.want.jobs.max(self.used.jobs + 1);
+        self.credit.jobs.saturating_sub(self.used.jobs)
     }
     pub fn available_staging_bytes(&self) -> usize {
         self.credit
@@ -86,6 +85,11 @@ impl PresentationLedger {
         want.prototype_cpu = want.prototype_cpu.max(self.used.prototype_cpu + cpu);
         want.prototype_gpu = want.prototype_gpu.max(self.used.prototype_gpu + gpu);
         cpu <= self.available_prototype_cpu_bytes() && gpu <= self.available_prototype_gpu_bytes()
+    }
+    /// A stream prototype hold does not fit. This frame asks for no more prototype CPU, so
+    /// the stream has room for the hold.
+    pub fn wait_for_hold(&mut self) {
+        self.hold_waits = true;
     }
     /// Gives one pending claim and its credit to the stream ready queue.
     fn hand_over_pending(&mut self) -> Result<(), ReferenceError> {
@@ -147,19 +151,21 @@ impl PresentationLedger {
             .ok_or_else(|| ReferenceError("Missing renderer pending claim".into()))?;
         Ok(())
     }
-    /// The report of this frame. Unused credit goes back when the renderer is idle, or when
-    /// the stream waits for room. Idle means no wants, no pending claims and no jobs, so
-    /// work that spans frames keeps its credit.
+    /// The report of this frame. Credit above the wants of this frame goes back, and the
+    /// unused credit of the fields that stream work waits for.
     pub fn report(&mut self) -> PresentationReport {
-        let want = self.want.zip(self.used, usize::max);
-        let idle = want.zip(self.used, usize::saturating_sub) == PresentationAllocation::default()
-            && self.used.pending == 0
-            && self.used.jobs == 0;
-        let release = if idle || self.reclaim {
-            self.credit.zip(self.used, usize::saturating_sub)
-        } else {
-            PresentationAllocation::default()
-        };
+        let mut want = self.want.zip(self.used, usize::max);
+        if std::mem::take(&mut self.hold_waits) {
+            want.prototype_cpu = self.used.prototype_cpu;
+        }
+        // Credit above the wants of this frame goes back. Wanted credit stays, so work that
+        // needs several fields at once collects them.
+        let mut release = self.credit.zip(want, usize::saturating_sub);
+        release = release.zip(
+            self.reclaim
+                .take(self.credit.zip(self.used, usize::saturating_sub)),
+            usize::max,
+        );
         self.credit = self.credit.zip(release, usize::saturating_sub);
         self.want = PresentationAllocation::default();
         PresentationReport {
@@ -173,12 +179,6 @@ impl PresentationLedger {
         self.reclaim = grant.reclaim;
         self.publication = grant.publication;
     }
-    /// Reports and takes the answer of `stream` in one call.
-    pub fn exchange(&mut self, stream: &mut WorldStream) {
-        let report = self.report();
-        let grant = stream.exchange_presentation(report);
-        self.grant(grant);
-    }
 }
 
 #[cfg(test)]
@@ -186,7 +186,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn credit_gates_admission_and_idle_credit_returns() {
+    fn credit_gates_admission_and_unused_credit_returns() {
         let mut ledger = PresentationLedger::default();
         assert!(!ledger.can_request_independent(1));
         assert_eq!(ledger.available_external_jobs(), 0);
@@ -197,20 +197,50 @@ mod tests {
         credit.jobs = 1;
         ledger.grant(PresentationGrant {
             credit,
-            reclaim: false,
             ..Default::default()
         });
         assert!(ledger.can_request_independent(1));
         let mut used = ledger.allocation();
         used.pending = 1;
         ledger.set_allocation(used).unwrap();
-        // A claim in flight keeps the credit.
+        // The claim keeps its use. The unused job goes back.
         let report = ledger.report();
-        assert_eq!(report.release, PresentationAllocation::default());
-        // With nothing in flight and nothing wanted, all credit goes back.
+        assert_eq!((report.used.pending, report.release.jobs), (1, 1));
+        assert_eq!(report.release.pending, 0);
+        // A freed claim gives its credit back at the next report.
         ledger.release_pending().unwrap();
+        assert_eq!(ledger.report().release.pending, 1);
+    }
+
+    #[test]
+    fn reclaim_gives_back_the_unused_credit_of_the_waited_field() {
+        let mut credit = PresentationAllocation::default();
+        credit.jobs = 2;
+        credit.staging_bytes = 64;
+        let mut ledger = PresentationLedger::default();
+        ledger.grant(PresentationGrant {
+            credit,
+            reclaim: Reclaim {
+                jobs: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        assert_eq!(ledger.available_external_jobs(), 2);
+        assert!(ledger.request_staging(64));
+        // Both are still wanted. The stream waits for jobs only.
         let report = ledger.report();
-        assert_eq!((report.release.jobs, report.release.pending), (1, 1));
+        assert_eq!((report.release.jobs, report.release.staging_bytes), (2, 0));
+    }
+
+    #[test]
+    fn waiting_hold_asks_for_no_prototype_cpu() {
+        let mut ledger = PresentationLedger::default();
+        assert!(!ledger.request_prototype(64, 0));
+        ledger.wait_for_hold();
+        assert_eq!(ledger.report().want.prototype_cpu, 0);
+        assert!(!ledger.request_prototype(64, 0));
+        assert_eq!(ledger.report().want.prototype_cpu, 64);
     }
 
     #[test]

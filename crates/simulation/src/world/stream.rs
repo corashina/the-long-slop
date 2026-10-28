@@ -98,11 +98,51 @@ impl PresentationReport {
     }
 }
 
-/// The stream answer: added credit, and whether the stream waits for room.
+/// Renderer fields that own stream work waited for this step. The stream grants none of them,
+/// and the renderer gives back their unused credit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Reclaim {
+    pub jobs: bool,
+    pub pending: bool,
+    /// Staging and dependency staging.
+    pub staging: bool,
+}
+impl Reclaim {
+    const JOBS: u8 = 1;
+    const PENDING: u8 = 2;
+    const STAGING: u8 = 4;
+    fn from_bits(bits: u8) -> Self {
+        Self {
+            jobs: bits & Self::JOBS != 0,
+            pending: bits & Self::PENDING != 0,
+            staging: bits & Self::STAGING != 0,
+        }
+    }
+    /// `allocation` without the fields own work waited for.
+    fn keep(self, mut allocation: PresentationAllocation) -> PresentationAllocation {
+        if self.jobs {
+            allocation.jobs = 0;
+        }
+        if self.pending {
+            allocation.pending = 0;
+        }
+        if self.staging {
+            allocation.staging_bytes = 0;
+            allocation.dependency_staging_bytes = 0;
+        }
+        allocation
+    }
+    /// Only the fields of `allocation` that own work waited for.
+    pub fn take(self, allocation: PresentationAllocation) -> PresentationAllocation {
+        allocation.zip(self.keep(allocation), usize::saturating_sub)
+    }
+}
+
+/// The stream answer: added credit, and the fields own work waits for.
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PresentationGrant {
     pub credit: PresentationAllocation,
-    pub reclaim: bool,
+    pub reclaim: Reclaim,
     /// The stream lends its publication slot of this frame.
     pub publication: bool,
 }
@@ -258,8 +298,8 @@ pub struct WorldStream {
     overlap: WorldMetrics,
     dependency_staging_reserve: usize,
     dependency_metadata: usize,
-    /// Own work waited for room this frame: the renderer gives back unused credit.
-    reclaim: std::sync::atomic::AtomicBool,
+    /// Fields that own work waited for this step, as `Reclaim` bits.
+    reclaim: std::sync::atomic::AtomicU8,
     changes: super::ChangeRecords,
     replay_roots: Vec<Placement>,
     replay_indices: Vec<super::changes::ChangeRecordIndex>,
@@ -346,6 +386,10 @@ pub struct WorldStream {
     publication_available: bool,
     /// The renderer holds the publication slot of this frame.
     publication_lent: bool,
+    /// Renderer want of the last report above its covered use.
+    presentation_want: PresentationAllocation,
+    /// Renderer use of the last report above its credit. The grant credits it back.
+    presentation_cover: PresentationAllocation,
     failure: Option<String>,
     last_road_work: usize,
 }
@@ -877,7 +921,7 @@ impl WorldStream {
             overlap: WorldMetrics::default(),
             dependency_staging_reserve: 0,
             dependency_metadata: 0,
-            reclaim: std::sync::atomic::AtomicBool::new(false),
+            reclaim: std::sync::atomic::AtomicU8::new(0),
             terrain_layer: *terrain_layer as u8,
             road_layers,
             reference: Arc::clone(world),
@@ -985,6 +1029,8 @@ impl WorldStream {
             shared_cpu_bytes: Some(shared_cpu_bytes),
             publication_available: false,
             publication_lent: false,
+            presentation_want: PresentationAllocation::default(),
+            presentation_cover: PresentationAllocation::default(),
             failure: None,
             last_road_work: 0,
         })
@@ -1014,51 +1060,65 @@ impl WorldStream {
         Ok(())
     }
 
-    /// Takes the renderer report and answers with added credit.
-    /// Use above the credit must fit the limits, or the stream fails as before.
-    pub fn exchange_presentation(&mut self, report: PresentationReport) -> PresentationGrant {
+    /// Takes the renderer report before own work: given-back credit returns and use is
+    /// covered. Use above the credit must fit the limits, or the stream fails as before.
+    pub fn take_presentation_report(&mut self, report: PresentationReport) {
         let credit = self.presentation.zip(report.release, usize::saturating_sub);
-        let covered = credit.zip(report.used, usize::max);
-        let reclaim = self
-            .reclaim
-            .swap(false, std::sync::atomic::Ordering::Relaxed);
+        let mut covered = credit.zip(report.used, usize::max);
+        // Dependency staging is part of the staging credit. Per-field give-backs can leave
+        // more dependency credit than staging credit.
+        covered.dependency_staging_bytes = covered
+            .dependency_staging_bytes
+            .min(covered.staging_bytes)
+            .max(report.used.dependency_staging_bytes);
         // With no renderer-ready work to publish, the renderer takes this frame's publication slot.
         // A prepared surface without its renderer receipt cannot publish. The renderer work that
         // finishes the receipt can itself wait for the slot.
         self.publication_lent = self.failure.is_none()
             && self.ready.as_ref().is_none_or(|work| !work.renderer_ready)
             && self.ready_structures.is_empty();
-        let publication = self.publication_lent;
         if let Err(error) = self.set_presentation_allocation(covered) {
             self.presentation = credit;
             self.failure.get_or_insert(error.0);
+        }
+        self.presentation_cover = self.presentation_cover.zip(
+            covered.zip(credit, usize::saturating_sub),
+            usize::saturating_add,
+        );
+        self.presentation_want = report.want.zip(covered, usize::saturating_sub);
+    }
+    /// Answers the last report after own work. The renderer gets the credit for its covered
+    /// use, and the room that own work left, but no field that own work waited for.
+    pub fn grant_presentation(&mut self) -> PresentationGrant {
+        let reclaim =
+            Reclaim::from_bits(self.reclaim.swap(0, std::sync::atomic::Ordering::Relaxed));
+        let want = reclaim.keep(std::mem::take(&mut self.presentation_want));
+        if self.failure.is_some() {
             return PresentationGrant {
-                credit: PresentationAllocation::default(),
                 reclaim,
-                publication: false,
+                ..Default::default()
             };
         }
-        let mut target = covered;
-        // Own work waits for room: it gets the given-back credit first.
-        if !reclaim {
-            let want = report.want.zip(covered, usize::saturating_sub);
-            target = covered.zip(want.zip(self.presentation_room(), usize::min), |a, b| {
-                a.saturating_add(b)
-            });
-            // Dependency staging is part of the staging credit.
-            target.dependency_staging_bytes = target
-                .dependency_staging_bytes
-                .min(target.staging_bytes)
-                .max(covered.dependency_staging_bytes);
-            if self.set_presentation_allocation(target).is_err() {
-                target = covered;
-                self.presentation = covered;
-            }
+        let covered = self.presentation;
+        let mut target = covered.zip(want.zip(self.presentation_room(), usize::min), |a, b| {
+            a.saturating_add(b)
+        });
+        // Dependency staging is part of the staging credit.
+        target.dependency_staging_bytes = target
+            .dependency_staging_bytes
+            .min(target.staging_bytes)
+            .max(covered.dependency_staging_bytes);
+        if self.set_presentation_allocation(target).is_err() {
+            target = covered;
+            self.presentation = covered;
         }
+        let cover = std::mem::take(&mut self.presentation_cover);
         PresentationGrant {
-            credit: target.zip(credit, usize::saturating_sub),
+            credit: target
+                .zip(covered, usize::saturating_sub)
+                .zip(cover, usize::saturating_add),
             reclaim,
-            publication,
+            publication: self.publication_lent,
         }
     }
     /// Free room of each renderer field next to the current credit.
@@ -1216,7 +1276,7 @@ impl WorldStream {
             ));
             return false;
         }
-        self.wait_for_room(bytes <= self.available_staging_bytes())
+        self.wait_for_room(bytes <= self.available_staging_bytes(), Reclaim::STAGING)
     }
     // Retained generation may wait for resources. Keep one checked input window free.
     // Grass and synchronous published bindings drain without further resource loads.
@@ -1271,13 +1331,13 @@ impl WorldStream {
             .checked_add(self.overlap.pending_work)
             .and_then(|count| count.checked_add(claims))
             .is_some_and(|count| count <= MAX_PENDING);
-        self.wait_for_room(fits)
+        self.wait_for_room(fits, Reclaim::PENDING)
     }
-    /// Asks the renderer for unused credit when own work does not fit.
-    fn wait_for_room(&self, fits: bool) -> bool {
+    /// Keeps `field` from the next renderer grant when own work does not fit.
+    fn wait_for_room(&self, fits: bool, field: u8) -> bool {
         if !fits {
             self.reclaim
-                .store(true, std::sync::atomic::Ordering::Relaxed);
+                .fetch_or(field, std::sync::atomic::Ordering::Relaxed);
         }
         fits
     }
@@ -1292,7 +1352,7 @@ impl WorldStream {
                 + usize::from(self.road_work.is_some())
                 + usize::from(self.contents.has_replay()),
         );
-        self.wait_for_room(free > 0);
+        self.wait_for_room(free > 0, Reclaim::JOBS);
         free
     }
     pub fn startup_job_audit(&self) -> serde_json::Value {
@@ -4094,14 +4154,20 @@ impl WorldStream {
         let fixed_decoration = self.fixed_decoration(placement);
         let (binding_reservation, binding_objects) =
             self.binding_reservation(prototype, &placement.id, fixed_decoration)?;
-        if binding_reservation > self.available_dependency_staging_bytes()
-            || self
-                .metrics()
-                .active_cpu_bytes
-                .saturating_add(binding_reservation)
-                .saturating_add(self.recipes[&placement.prototype].instance_bytes())
-                .saturating_add(super::contents::placement_heap(placement))
-                > self.limits.active_cpu
+        // Renderer staging credit is transient. The publication waits for it to come back.
+        if !self.wait_for_room(
+            binding_reservation <= self.available_dependency_staging_bytes(),
+            Reclaim::STAGING,
+        ) {
+            return Ok(());
+        }
+        if self
+            .metrics()
+            .active_cpu_bytes
+            .saturating_add(binding_reservation)
+            .saturating_add(self.recipes[&placement.prototype].instance_bytes())
+            .saturating_add(super::contents::placement_heap(placement))
+            > self.limits.active_cpu
             || self
                 .metrics()
                 .generated_objects

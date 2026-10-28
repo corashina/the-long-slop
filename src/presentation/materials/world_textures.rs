@@ -596,9 +596,8 @@ impl WorldTextures {
             if selected.is_empty() {
                 return Ok(());
             }
-            if !ledger.can_request_independent(selected.len()) {
-                return Ok(());
-            }
+            // Every request runs, so the report asks for all credit of the batches at once.
+            let claims = ledger.can_request_independent(selected.len());
             let shared = if let Some((owner, _, _, _)) = &current {
                 let path = &queue
                     .jobs
@@ -635,10 +634,11 @@ impl WorldTextures {
                 .available_staging_bytes()
                 .min(cpu_available.saturating_sub(metadata + queue.ownership.bytes()));
             let requested = selected.iter().map(|s| s.4).sum::<usize>();
-            if requested > available {
-                // Short credit waits. The report asks the stream for the rest.
-                ledger.request_staging(requested);
-                ledger.request_prototype(requested, 0);
+            // Short credit waits. The report asks the stream for the rest.
+            ledger.request_staging(requested);
+            ledger.request_prototype(requested, 0);
+            if !claims {
+                return Ok(());
             }
             let admission = if refill {
                 queue

@@ -42,9 +42,10 @@ impl GarageRuntime {
     ) -> Result<Option<PresentationGrant>, ReferenceError> {
         let mut command = std::mem::take(&mut input.pending);
         self.stream.apply_renderer_facts(&mut command.facts)?;
-        let grant = command
-            .report
-            .map(|report| self.stream.exchange_presentation(report));
+        // Own work runs on the given-back credit first. The renderer gets the room it leaves.
+        if let Some(report) = command.report {
+            self.stream.take_presentation_report(report);
+        }
         self.advance_world(
             reference,
             &input.views,
@@ -52,7 +53,7 @@ impl GarageRuntime {
             input.lamps.as_deref(),
             budget_ms,
         )?;
-        Ok(grant)
+        Ok(command.report.map(|_| self.stream.grant_presentation()))
     }
     /// Applies the renderer facts, publishes the renderer-ready work, then prepares the next work.
     /// `admitted_lights` are the lamps the renderer admitted in its last step.
