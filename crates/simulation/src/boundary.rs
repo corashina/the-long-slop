@@ -694,6 +694,20 @@ pub struct PlaneRow {
     pub heading: [f32; 4],
 }
 
+/// One rabbit in physics space. The renderer samples the blend tree at `phase` and `value`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct CreatureRow {
+    pub id: u32,
+    /// `PoseRow::VISIBLE`.
+    pub flags: u32,
+    pub position: [f32; 3],
+    pub rotation: [f32; 4],
+    pub scale: f32,
+    pub phase: f32,
+    pub value: f32,
+}
+
 /// One bullet hole in stream space. `kind` indexes `GunsReference::decals`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -896,6 +910,7 @@ pub struct SimFrame {
     /// Live bullet holes, oldest first.
     pub decals: Vec<DecalRow>,
     pub planes: Vec<PlaneRow>,
+    pub creatures: Vec<CreatureRow>,
     pub conditions: Vec<ConditionRow>,
     /// 1 when the wash shows, in `ConditionRecord::washes` order.
     pub washes: Vec<u8>,
@@ -1113,6 +1128,7 @@ fn write(frame: &SimFrame, out: &mut Vec<u8>) {
     put_rows(out, &frame.particles);
     put_rows(out, &frame.decals);
     put_rows(out, &frame.planes);
+    put_rows(out, &frame.creatures);
     put_rows(out, &frame.conditions);
     put_rows(out, &frame.washes);
     put_rows(out, &frame.brush_poses);
@@ -1164,6 +1180,7 @@ fn read(rest: &mut &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     take_rows(rest, &mut frame.particles)?;
     take_rows(rest, &mut frame.decals)?;
     take_rows(rest, &mut frame.planes)?;
+    take_rows(rest, &mut frame.creatures)?;
     take_rows(rest, &mut frame.conditions)?;
     take_rows(rest, &mut frame.washes)?;
     take_rows(rest, &mut frame.brush_poses)?;

@@ -89,6 +89,15 @@ impl GarageRuntime {
         }
         for sound in interaction.guns.take_sounds() {
             if let Some(audio) = &mut self.audio {
+                // `PlayClipAtPoint` destroys the copy after the clip length.
+                let seconds = audio
+                    .reference
+                    .clips
+                    .iter()
+                    .find(|c| c.id == sound.clip)
+                    .map_or(0., |c| c.source_duration_seconds as f32);
+                self.creatures
+                    .sound(sound.position, sound.gain, self.simulation_seconds, seconds);
                 audio.survival_event(crate::audio::SurvivalAudioEvent {
                     session: audio.session,
                     emitter: 0,

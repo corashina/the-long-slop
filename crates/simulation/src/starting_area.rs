@@ -721,6 +721,7 @@ pub struct GarageRuntime {
     weather_bindings: weather::WeatherBindings,
     sky: crate::sky_traffic::SkyTraffic,
     pub flyers: crate::flyers::Flyers,
+    pub creatures: crate::creatures::Creatures,
     pub urine: crate::interaction::fluid_contact::FluidContact,
     urine_reference: crate::reference::FluidParticleReference,
     urine_emission: [f32; 2],
@@ -898,6 +899,7 @@ impl GarageRuntime {
             weather_bindings,
             sky: crate::sky_traffic::SkyTraffic::new(&reference.sky, seed as u64),
             flyers: crate::flyers::Flyers::new(seed as u64),
+            creatures: crate::creatures::Creatures::new(reference, seed as u64, 0.)?,
             survival: crate::survival::SurvivalState::new(&reference.survival),
             hearing: crate::hearing::HearingState::new(reference)?,
             sleep: crate::sleep::SleepState::new(&reference.sleep),
@@ -1519,6 +1521,7 @@ impl GarageRuntime {
         self.advance_weather(reference, FIXED_DT);
         self.advance_sky(reference, FIXED_DT);
         self.advance_flyers(reference, FIXED_DT);
+        self.advance_creatures(reference, FIXED_DT);
         self.area
             .interaction
             .mechanisms
@@ -1721,6 +1724,7 @@ impl GarageRuntime {
             }));
             self.urine.rebase(shift);
             self.flyers.rebase(shift);
+            self.creatures.rebase(shift);
             if let Some(audio) = &mut self.audio {
                 audio.rebase(std::array::from_fn(|i| {
                     (self.area.origin[i] - old_origin[i]) as f32
@@ -1814,6 +1818,36 @@ impl GarageRuntime {
                 },
             );
         }
+    }
+
+    /// Rabbits run in every state. Source `aispawn` sits on the Player.
+    fn advance_creatures(&mut self, reference: &ReferenceManifest, dt: f32) {
+        let player = &self.area.player;
+        let body = crate::vehicle::to_rapier(player.body_pose(&self.physics));
+        let head = rapier3d::math::Vector::from_array(player.focus_position(&self.physics));
+        let (stream, origin) = (&self.stream, self.stream.origin);
+        let supports = |p: rapier3d::math::Vector| {
+            let p = origin.absolute(p.to_array());
+            stream.supports(crate::world::WorldBounds {
+                min: p.map(|v| v - 2.),
+                max: p.map(|v| v + 2.),
+            })
+        };
+        self.creatures.step(
+            &reference.creatures.rabbit,
+            &mut self.physics,
+            &crate::creatures::StepInput {
+                now: self.simulation_seconds,
+                dt,
+                player: crate::creatures::spawner::Player {
+                    position: body.translation,
+                    rotation: body.rotation,
+                },
+                head: (head, player.body_handle()),
+                origin: &origin,
+                supports: &supports,
+            },
+        );
     }
 
     pub fn sky(&self) -> &crate::sky_traffic::SkyTraffic {

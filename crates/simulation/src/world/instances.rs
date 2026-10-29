@@ -341,7 +341,7 @@ impl StructureInstance {
     }
 }
 
-fn scaled_geometry(
+pub fn scaled_geometry(
     source: &crate::reference::ColliderGeometry,
     scale: [f32; 3],
 ) -> crate::reference::ColliderGeometry {
