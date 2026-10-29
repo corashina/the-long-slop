@@ -197,7 +197,7 @@ fn a_shot_hole_facing_down_leaks_a_tank() {
 }
 
 /// Save and load `run` the way the browser does.
-fn save_and_load(
+pub(super) fn save_and_load(
     run: &crate::starting_area::GarageRuntime,
     reference: &crate::reference::ReferenceManifest,
 ) -> crate::starting_area::GarageRuntime {

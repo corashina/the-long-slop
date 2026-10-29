@@ -193,7 +193,7 @@ fn reload_and_unload_keep_round_totals() {
         let start = total(&guns, &other);
         let mut loads = 0;
         while guns.can_reload(item, &other) {
-            guns.reload(item, &mut other, false, [0.; 3]);
+            guns.reload(item, &mut other, false, false, [0.; 3]);
             assert_eq!(total(&guns, &other), start, "a reload keeps the rounds");
             loads += 1;
             assert!(loads < 1000, "each reload moves rounds");
@@ -208,7 +208,7 @@ fn reload_and_unload_keep_round_totals() {
             );
         }
         while guns.can_unload(item, &other) {
-            guns.reload(item, &mut other, true, [0.; 3]);
+            guns.reload(item, &mut other, true, false, [0.; 3]);
             assert_eq!(total(&guns, &other), start, "an unload keeps the rounds");
             loads += 1;
             assert!(loads < 2000, "each unload moves rounds");
@@ -248,7 +248,7 @@ fn magazine_swap_saves_and_reloads() {
         is_mag: true,
     };
     assert!(guns.can_reload(item, &mag), "a magazine fits its gun");
-    let used = guns.reload(item, &mut mag, false, [0.; 3]);
+    let used = guns.reload(item, &mut mag, false, false, [0.; 3]).used;
     let rt = guns.runtime(item).unwrap();
     assert_eq!(used, !had, "a gun without a magazine uses the item up");
     assert!(rt.has_mag);
@@ -265,4 +265,87 @@ fn magazine_swap_saves_and_reloads() {
     let mut restored = GunState::new(&reference).unwrap();
     assert!(restored.bind(item, index, Some(loaded), Some(5.)));
     assert_eq!(restored.runtime(item).unwrap().snapshot(), saved);
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn x02_leftovers_smg_unload_drops_the_magazine() {
+    let (reference, mut run) = super::garage_controls::load_garage();
+    settle(&mut run, &reference, 1.);
+    let smg = reference
+        .guns
+        .weapons
+        .iter()
+        .find(|w| matches!(w.kind, GunKind::Magazine { .. }))
+        .expect("magazine gun");
+    let GunKind::Magazine { mag_prefab, .. } = &smg.kind else {
+        unreachable!()
+    };
+    let prototype = reference
+        .item_prototypes
+        .iter()
+        .position(|p| &p.source == mag_prefab)
+        .expect("magazine item prototype");
+    let gun = equip(&mut run, &reference, smg);
+    run.area
+        .interaction
+        .guns
+        .runtime_mut(gun)
+        .unwrap()
+        .ammo
+        .count = 17.;
+    let pose = run.area.player.body_pose(&run.physics);
+    let loose = crate::starting_area::spawned::spawn_prototype(
+        &reference,
+        &mut run.area,
+        &mut run.physics,
+        prototype,
+        pose,
+    )
+    .unwrap()[0];
+    let full = run.area.spawned.ammo(loose).unwrap().ammo.count;
+    let mags = |run: &GarageRuntime| -> Vec<ItemId> {
+        run.area
+            .spawned
+            .iter()
+            .filter(|s| s.prototype == prototype)
+            .map(|s| s.id)
+            .collect()
+    };
+
+    // E at loose ammo: the magazine drops with the gun rounds.
+    run.reload_gun(&reference, gun, loose, true);
+    let rt = run.area.interaction.guns.runtime(gun).unwrap();
+    assert!(!rt.has_mag && rt.ammo.count == 0., "the gun is empty");
+    assert_eq!(run.area.spawned.ammo(loose).unwrap().ammo.count, full);
+    let dropped = *mags(&run)
+        .iter()
+        .find(|id| **id != loose)
+        .expect("a dropped magazine");
+    assert_eq!(run.area.spawned.ammo(dropped).unwrap().ammo.count, 17.);
+
+    // R at the dropped magazine: it goes into the gun and is used up.
+    run.reload_gun(&reference, gun, dropped, false);
+    let rt = run.area.interaction.guns.runtime(gun).unwrap();
+    assert!(rt.has_mag && rt.ammo.count == 17.);
+    assert!(
+        !run.area.spawned.contains(dropped),
+        "the used magazine is gone"
+    );
+
+    // A dropped magazine saves its rounds.
+    run.reload_gun(&reference, gun, loose, true);
+    let dropped = *mags(&run).iter().find(|id| **id != loose).unwrap();
+    let pose = run.area.items.get(dropped).unwrap().pose;
+    let loaded = super::explosions::save_and_load(&run, &reference);
+    let counts: Vec<f32> = mags(&loaded)
+        .iter()
+        .filter_map(|id| loaded.area.spawned.ammo(*id))
+        .map(|a| a.ammo.count)
+        .collect();
+    assert!(
+        counts.contains(&17.),
+        "the dropped magazine keeps 17 rounds after load"
+    );
+    assert!(pose.position.iter().all(|v| v.is_finite()));
 }
