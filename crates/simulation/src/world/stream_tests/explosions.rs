@@ -195,3 +195,94 @@ fn a_shot_hole_facing_down_leaks_a_tank() {
     settle(&mut run, &reference, 3.);
     assert!(amount(&run) < before, "the fluid leaks through the hole");
 }
+
+/// Save and load `run` the way the browser does.
+fn save_and_load(
+    run: &crate::starting_area::GarageRuntime,
+    reference: &crate::reference::ReferenceManifest,
+) -> crate::starting_area::GarageRuntime {
+    let stamp = super::roadside_stamp(reference);
+    let saved = run
+        .capture_save(reference, &stamp, "2026-10-29T12:00:00Z")
+        .unwrap();
+    let saved: crate::save::SaveSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    let mut loaded = crate::starting_area::GarageRuntime::from_save(
+        reference,
+        &stamp,
+        &saved,
+        crate::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
+    for _ in 0..2000 {
+        super::prepare_ready(&mut loaded, reference);
+        if loaded.advance_saved_restore(reference).unwrap() && !loaded.restore_pending() {
+            break;
+        }
+    }
+    assert!(!loaded.restore_pending());
+    loaded.started = true;
+    loaded.paused = false;
+    settle(&mut loaded, reference, 1.);
+    loaded
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn x02_leftovers_garage_can_explodes_and_stays_removed() {
+    let (reference, mut run) = super::garage_controls::load_garage();
+    settle(&mut run, &reference, 1.);
+    let interaction = &run.area.interaction;
+    let fluids = interaction.explosions.explosive_fluids();
+    let can = reference
+        .tanks
+        .iter()
+        .filter(|t| t.role == crate::reference::TankRole::Portable)
+        .map(|t| t.item)
+        .find(|&id| {
+            let state = run.area.items.get(id).unwrap();
+            interaction.tank_explosion(id).is_some_and(|e| {
+                crate::interaction::explosions::tank_factor(
+                    e,
+                    state.fluid.as_ref().unwrap(),
+                    fluids,
+                    1e6,
+                )
+                .is_some()
+            })
+        })
+        .expect("an explosive garage can");
+    let on_body: Vec<ItemId> = {
+        let body = run.area.items.get(can).unwrap().body;
+        run.area
+            .items
+            .iter()
+            .filter(|s| s.body == body)
+            .map(|s| s.id)
+            .collect()
+    };
+    run.shot_explosive(Strike {
+        item: can,
+        force: 1e6,
+        explode: true,
+        hole: None,
+    });
+    run.run_explosions(&reference, FIXED_DT);
+    settle(&mut run, &reference, 0.1);
+    for id in &on_body {
+        let state = run.area.items.get(*id).unwrap();
+        assert!(
+            state.removed && state.body.is_none(),
+            "the can and its cap are gone"
+        );
+    }
+    let loaded = save_and_load(&run, &reference);
+    for id in &on_body {
+        let state = loaded.area.items.get(*id).unwrap();
+        assert!(
+            state.removed && state.body.is_none(),
+            "the can stays gone after load"
+        );
+    }
+}

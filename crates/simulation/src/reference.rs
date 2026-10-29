@@ -585,6 +585,7 @@ pub struct TankReference {
     pub no_fill_from: bool,
     pub slow_oil: bool,
     pub role: TankRole,
+    pub explosion: crate::world::TankExplosion,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

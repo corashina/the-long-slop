@@ -196,6 +196,13 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
                     'sensor':value['m_IsTrigger'],'enabled':bool(value['m_Enabled']) and (nodes[node-1]['active'] or food_geometry),'membership':1<<layer,'filter':matrix[layer],
                     'friction':friction,'restitution':restitution,'geometry':geometry(source,exporter,reader,node_readers[node],owner['pose'],owner['dynamic']),
                     'step_surface':step_surface(source,objects[node]['game_object']),'tag':collider_tag(source,objects[node]['game_object'])})
+    def tank_explosion(source,reader,full):
+        # tankscript.TryExplode destroys parentDest too. The runtime removes only the tank item.
+        dest=source.resolve(reader,full['parentDest'])
+        if dest is not None and by_source.get(key(dest))!=node_of(reader):raise ValueError(f'Tank parentDest outside the tank: {key(reader)}')
+        return {'never_explode':bool(full['neverExplode']),'always_explode':bool(full['alwaysExplode']),'always_explode_force':full['alwaysExplodeForce'],
+            'force_needed':full['explosionForceNeededToExplode'],'explosion_type':full['explosionType'],'no_shoot_hole':bool(full['noShootHole']),
+            'no_shoot_explode':bool(full['noShootExplode']),'parent_dest':None}
     tanks=[];openings=[]
     for node,group in components.items():
         if not nodes[node-1]['active']:continue
@@ -204,7 +211,7 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
             owner=body_for(node)
             tanks.append({'item':item_components[key(reader)],'source':source_id(reader),'capacity_liters':value['maxC'],'fluids':fluid_entries(value),'openings':[],
                 'no_drink':bool(full['noDrink']),'no_fill_this':bool(full['noFillThis']),'no_fill_from':bool(full['noFillFrom']),'slow_oil':bool(full['slowOil']),
-                'role':'portable' if bodies[owner-1]['dynamic'] else 'fixed'})
+                'role':'portable' if bodies[owner-1]['dynamic'] else 'fixed','explosion':tank_explosion(source,reader,full)})
     for node,group in components.items():
         if not nodes[node-1]['active']:continue
         for reader in group.get('tankcapscript',[]):

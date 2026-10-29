@@ -40,6 +40,7 @@ mod survival;
 pub mod wear;
 mod weather;
 mod world_step;
+pub use explosions::explosive_imported;
 pub use survival::DrinkResult;
 pub use survival::active_part as active_food_part;
 pub use survival::saved_food;

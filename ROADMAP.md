@@ -40,7 +40,7 @@ All tasks are done.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| X02 | Weapons and damage | L | Starting-area tanks (garage fuel can) explode and leak, cacti breaks, SMG magazine drop on unload, AI parts of the damage model (X03). |
+| X02 | Weapons and damage | L | Cacti breaks, SMG magazine drop on unload, AI parts of the damage model (X03). |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters (attacks hurt the player), UFO, EMP. |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. |
@@ -254,6 +254,12 @@ Prepare once:
 4. Shoot a tank that does not explode with a shotgun. Holes leak fluid when they face down. Check the fluid amount falls.
 5. Stand near a blast: sound goes dull, an ear ring plays from the blast side, and both fade. Save and load keeps the ringing. Stand close: the player dies with the ragdoll.
 6. Check F3 during a chain of blasts. Compare with the frame rate rule.
+
+### X02 leftovers
+
+1. Run `cargo test --lib x02_leftovers -- --ignored`.
+2. Shoot the full 20 L garage fuel can. It explodes, and the can and its cap go away. Save and load: they stay gone.
+3. Shoot the garage water tank with a shotgun. Holes that face down leak.
 
 ### Sky traffic and bats (X03a)
 
