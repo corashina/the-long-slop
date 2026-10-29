@@ -251,9 +251,20 @@ Run the X03a test pass (sky traffic) in the same run:
 5. Save and load near the bats (save schema 27). Old saves do not load.
 6. Check F3 next to the bats. Compare with the frame rate rule.
 
+Run the player movement test pass (vehicle carry, air momentum, wall jump) in the same run:
+
+1. Re-export, then rebuild. Old exports do not load. Old saves do not load (save schema 32).
+2. Park a bus on a slope, release the handbrake and stand inside while it rolls. The player rides inside.
+3. Stand on a trailer bed or the Lada roof while it moves fast: you slide off. While it moves slowly: you ride.
+4. Jump inside a moving bus: you land in the same place.
+5. Run, jump, release W: you keep flying forward. Standing jump: straight up. Keys in the air turn you slowly.
+6. Jump at a wall: one extra push. Jump at a ledge: a second push. Hold jump below the ledge: you grip and stop falling, then jump up.
+7. Save mid-air and load: the jump continues.
+8. Check F3 walking and in a bus. Compare with the frame rate rule.
+
 Run the X10 test pass (car camera modes) in the same run:
 
-1. Re-export, then rebuild. Old exports and saves do not load (save schema 32).
+1. Re-export, then rebuild. Old exports and saves do not load (save schema 33).
 2. Sit in the Lada driver seat. Tap C: the outside view orbits the car with the mouse. Pitch stops at about 89 degrees.
 3. Hold Q and move the mouse: the view pans up to 1.5 m. Shift+Q pans forward and back.
 4. Scroll: zoom from 1 to 30 m. Hold Tab: the view goes back to 5 m and the default angle.

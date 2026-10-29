@@ -11,6 +11,37 @@ pub struct PlayerSphereReference {
     pub filter: u32,
 }
 
+/// A Y axis trigger capsule in the player body frame.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayerCapsuleReference {
+    pub source: SourceId,
+    pub a: [f32; 3],
+    pub b: [f32; 3],
+    pub radius: f32,
+    pub membership: u32,
+    pub filter: u32,
+}
+
+/// Source `canwalljump` (wall) and `canwalljump2` (ledge) `sens` triggers.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayerWallSensorsReference {
+    pub wall: PlayerCapsuleReference,
+    pub ledge: PlayerSphereReference,
+}
+
+/// Source `interiorsens` (`sens2`): an overlap sphere at the head.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayerInteriorSensorReference {
+    pub source: SourceId,
+    pub radius: f32,
+    pub mask: u32,
+    /// Position in the head frame.
+    pub local_position: [f32; 3],
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlayerClearanceReference {
@@ -132,6 +163,36 @@ impl PlayerReference {
                 && p.sensor_hold_steps == 3
                 && sphere(&p.feet, "level1", 57258, 12, 4_172_190_207, 0.3),
             "player posture geometry",
+        )?;
+        let w = &self.wall_sensors.wall;
+        require(
+            same(self.air_force, 20000.0)
+                && same(self.grip_multiplier, 0.5)
+                && same(self.wall_jump_multiplier, 1.0)
+                && same(self.ledge_jump_multiplier, 1.25)
+                && same(self.grip_loose, 0.0)
+                && same(self.max_grip_fall_speed, 5.0)
+                && w.source.file == "level1"
+                && w.source.path_id == 58453
+                && finite(&w.a)
+                && finite(&w.b)
+                && same(w.radius, 0.2)
+                && w.membership == 1 << 14
+                && w.filter == 4_037_970_431
+                && sphere(
+                    &self.wall_sensors.ledge,
+                    "level1",
+                    57383,
+                    14,
+                    4_037_970_431,
+                    0.2,
+                )
+                && self.interior_sensor.source.file == "level1"
+                && self.interior_sensor.source.path_id == 80121
+                && same(self.interior_sensor.radius, 0.05)
+                && self.interior_sensor.mask == 8192
+                && finite(&self.interior_sensor.local_position),
+            "player wall jump and interior sensors",
         )?;
         let low = p.prone_head.translation;
         let distance = p
