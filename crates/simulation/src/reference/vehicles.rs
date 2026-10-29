@@ -563,6 +563,17 @@ pub struct EngineAudioReference {
     pub idle_pitch: [f32; 2],
     /// `minMotorPitch`, `maxMotorPitch`.
     pub motor_pitch: [f32; 2],
+    /// The `stimulscript` that reads the `SAlap` and `SMotor` volumes. Positions are in the engine part frame.
+    pub stimulus: Option<SoundStimulusReference>,
+}
+
+/// A `stimulscript` whose `CheckAudioSources` sets its threat to the loudest playing volume
+/// times `max_sound_value`, every 0.5 s. `offset` is in the owner frame.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SoundStimulusReference {
+    pub offset: [f32; 3],
+    pub max_sound_value: f32,
 }
 
 /// Source `carscript` and `talajnezo` sounds of a car. Positions are in the chassis frame.
@@ -612,6 +623,8 @@ pub struct HornReference {
     pub pitch: [f32; 2],
     pub temperature: [f32; 2],
     pub attack_release_rate: f32,
+    /// The `stimulscript` of `SHornSound`, in the chassis frame.
+    pub stimulus: Option<SoundStimulusReference>,
 }
 
 /// Source `talajnezo` GroundSource, SpringSource and SlideSource of one wheel.
@@ -1141,7 +1154,7 @@ pub fn engine_audio_fixture() -> serde_json::Value {
         "starter": {"voice": 3, "clip": 7, "gain": 0.6, "position": [0.0, 0.0, 0.0]},
         "stop": {"voice": 3, "clip": 8, "gain": 0.6, "position": [0.0, 0.0, 0.0]},
         "idle_rpm": [600.0, 1400.0], "motor_rpm": [500.0, 1300.0],
-        "idle_gain": 0.7, "motor_gain": 0.8,
+        "idle_gain": 0.7, "motor_gain": 0.8, "stimulus": null,
         "idle_pitch": [0.9, 1.2], "motor_pitch": [0.8, 1.5]
     })
 }
