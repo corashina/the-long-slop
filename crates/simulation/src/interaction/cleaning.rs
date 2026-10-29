@@ -386,8 +386,8 @@ impl CleaningTools {
     pub fn bind_world_condition(&mut self, handle: ColliderHandle, id: ConditionId) {
         self.world_conditions.insert(handle, id);
     }
-    pub fn unbind_world_condition(&mut self, handle: ColliderHandle) {
-        self.world_conditions.remove(&handle);
+    pub fn unbind_world_condition(&mut self, id: ConditionId) {
+        self.world_conditions.retain(|_, v| *v != id);
     }
     pub fn sync_wash_colliders(&self, conditions: &ConditionStore, physics: &mut PhysicsWorld) {
         let mut changed = false;

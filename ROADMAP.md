@@ -43,9 +43,9 @@ All tasks are done.
 | X02 | Weapons and damage | L | Starting-area tanks (garage fuel can) explode and leak, cacti breaks, SMG magazine drop on unload, AI parts of the damage model (X03). |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters (attacks hurt the player), UFO, EMP. |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. |
-| X05 | Save every remaining state | XL | Save and unload of world part conditions (`save_partcondition`); live repair and paint are done. Other fields grow with their features. |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. |
 | X09 | Car crash damage | L | `carscript.DamageStuff`: parts fall off by crash speed and condition, horn, blood, death on hard crashes; blasts call it with power x 5. |
+| X11 | Loot repair and paint tools | M | Brushes, sponges and spray paint in loot work as tools. Today only the garage ones do. |
 
 Not planned: multiplayer, VR, stereo 3D, mod events, Steam features, developer tools.
 
@@ -158,12 +158,13 @@ Prepare once:
 
 ### World part repair and paint (X05 part 2)
 
-1. Run `cargo test --lib lada_part_paint_and_repair -- --ignored`.
+1. Run `cargo test --lib lada_part_paint_and_repair -- --ignored`. It also saves and loads the painted part.
 2. Brush rust off a Lada part and a roadside car part. Rub dirt off with the sponge. The material changes at once.
 3. Paint a Lada door and a loose part with spray paint. The color changes while you spray.
 4. Repair a tire. The HUD condition and the wheel grip follow it.
 5. A state change binds a new material. Check the part does not blink for a frame.
 6. Check F3 while spraying and near many roadside cars. Compare with the frame rate rule.
+7. Paint and brush a roadside car part. Drive away until it unloads, come back: the part keeps its look. Save and load: it still keeps it.
 
 ### Save slots and autosave (X04b)
 

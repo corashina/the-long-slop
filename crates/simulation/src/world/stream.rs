@@ -4342,7 +4342,7 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
-        if let Err(error) = self.sync_condition_appearance(interaction) {
+        if let Err(error) = self.sync_condition_appearance(items, interaction) {
             self.binding_reserved = 0;
             return Err(error);
         }

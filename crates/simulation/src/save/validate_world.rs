@@ -224,6 +224,15 @@ impl SaveSnapshot {
             if let Some(m) = &s.mechanism {
                 data(finite(&m.degrees) && unit(m.slide), "Generated mechanism")?;
             }
+            for (i, c) in s.conditions.iter().enumerate() {
+                data(
+                    c.state <= 4
+                        && c.color.iter().all(|v| v.is_finite())
+                        && c.repair_progress.is_finite()
+                        && !s.conditions[..i].iter().any(|o| o.source == c.source),
+                    "Generated part condition",
+                )?;
+            }
             if s.held {
                 links(
                     held.replace(key).is_none() && s.attachment.is_none(),

@@ -786,6 +786,7 @@ impl ItemStore {
     ) -> Option<crate::world::ObjectSnapshot> {
         let state = self.get(id)?;
         Some(crate::world::ObjectSnapshot {
+            conditions: Vec::new(),
             lamp: None,
             lamp_broken: None,
             dial: None,

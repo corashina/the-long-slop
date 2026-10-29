@@ -1332,6 +1332,7 @@ fn replay_placement(source: &SourceId, ordinal: u32, position: [f64; 3]) -> Plac
 }
 fn replay_snapshot(position: [f64; 3]) -> super::super::ObjectSnapshot {
     super::super::ObjectSnapshot {
+        conditions: Vec::new(),
         pose: AbsolutePose {
             position,
             rotation: [0., 0., 0., 1.],
