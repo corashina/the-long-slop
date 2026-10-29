@@ -426,6 +426,11 @@ impl StructureViews {
                 local(leaf.node, leaf.pose);
             }
         }
+        if let Some(followers) = stream.followers(id) {
+            for (node, pose) in followers {
+                local(node, pose);
+            }
+        }
         if let Some(trailer) = stream.trailer(id) {
             for (node, pose) in trailer.graphics() {
                 local(node, pose);

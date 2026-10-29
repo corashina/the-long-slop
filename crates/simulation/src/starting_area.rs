@@ -1546,6 +1546,7 @@ impl GarageRuntime {
         self.stream
             .step_sleds(&mut self.physics, sled_seat, driving_output.controls);
         self.stream.step_trailers(&mut self.physics);
+        self.stream.step_followers(&self.physics);
         self.advance_urine(reference, FIXED_DT);
         self.advance_ambient(reference, FIXED_DT);
         self.advance_weather(reference, FIXED_DT);

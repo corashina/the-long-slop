@@ -15,7 +15,7 @@ use rapier3d::math::{Pose, Rotation, Vector};
 
 /// The trailer of one spawned world item.
 pub struct TrailerBinding {
-    parent: GeneratedId,
+    pub(super) parent: GeneratedId,
     prototype: usize,
     item: ItemId,
     /// `utanfutoscript.brake`: the flashlightscript that sets the brake. None: no brake.
@@ -41,6 +41,8 @@ struct WheelGraphic {
     scale: [f32; 3],
     /// The `T` pose in its parent frame after the last wheel step.
     pose: Transform,
+    /// The `T` position in the unscaled root frame after the last wheel step.
+    root: Vector,
 }
 impl TrailerBinding {
     pub fn heap_bytes(&self) -> usize {
@@ -50,6 +52,10 @@ impl TrailerBinding {
             + self.torques.capacity() * std::mem::size_of::<WheelTorques>()
             + self.steer.capacity() * std::mem::size_of::<f32>()
             + self.graphics.capacity() * std::mem::size_of::<WheelGraphic>()
+    }
+    /// The `T` position of each wheel in the unscaled root frame.
+    pub fn graphic_positions(&self) -> impl Iterator<Item = Vector> + '_ {
+        self.graphics.iter().map(|g| g.root)
     }
     /// The `T` node of each wheel and its pose in its parent frame.
     pub fn graphics(&self) -> impl Iterator<Item = (usize, Transform)> + '_ {
@@ -73,7 +79,7 @@ fn spawned_child(child: &GeneratedId, parent: &GeneratedId, source: &SourceId) -
 
 /// WheelCollider.GetWorldPose in the parent frame of `T`: the wheel center below its connection,
 /// turned by steer, then by the roll angle.
-fn graphic_pose(g: &WheelGraphic, wheel: &crate::vehicle::WheelState) -> Transform {
+fn graphic_pose(g: &WheelGraphic, wheel: &crate::vehicle::WheelState) -> (Transform, Vector) {
     let center = wheel.connection - Vector::Y * wheel.suspension_length;
     let rotation = g.collider_rotation
         * Rotation::from_rotation_y(wheel.steering)
@@ -82,11 +88,12 @@ fn graphic_pose(g: &WheelGraphic, wheel: &crate::vehicle::WheelState) -> Transfo
     // Prototype node frames are unscaled.
     let unscaled = Vector::from_array(std::array::from_fn(|i| root.translation[i] / g.scale[i]));
     let local = g.parent_inverse * Pose::from_parts(unscaled, root.rotation);
-    Transform {
+    let pose = Transform {
         translation: local.translation.to_array(),
         rotation: local.rotation.to_array(),
         scale: g.pose.scale,
-    }
+    };
+    (pose, unscaled)
 }
 
 impl WorldStream {
@@ -342,6 +349,9 @@ impl WorldStream {
                         * frame(w.node as usize).rotation,
                     scale,
                     pose: prototype.nodes[node].transform,
+                    root: Vector::from_array(
+                        crate::world::placement::node_pose(prototype, node).translation,
+                    ),
                 }
             })
             .collect();
@@ -392,7 +402,7 @@ impl WorldStream {
             }
             physics.step_wheel_set(&mut b.wheels, &b.torques, &b.steer);
             for (g, wheel) in b.graphics.iter_mut().zip(b.wheels.wheels()) {
-                g.pose = graphic_pose(g, wheel);
+                (g.pose, g.root) = graphic_pose(g, wheel);
             }
         }
     }

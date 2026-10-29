@@ -44,6 +44,12 @@ pub(super) fn moving_nodes_of(
     for body in &prototype.bodies {
         moving[body.node as usize] = true;
     }
+    // Follower nodes: Bus02 springs, axles and rams.
+    if let Some(followers) = &prototype.followers {
+        for f in &followers.followers {
+            moving[f.node() as usize] = true;
+        }
+    }
     // wheelgraphicsscript.T of trailer wheels.
     if let Some(trailer) = &prototype.trailer {
         for &node in &trailer.graphics {
