@@ -251,6 +251,17 @@ Run the X03a test pass (sky traffic) in the same run:
 5. Save and load near the bats (save schema 27). Old saves do not load.
 6. Check F3 next to the bats. Compare with the frame rate rule.
 
+Run the player movement test pass (vehicle carry, air momentum, wall jump) in the same run:
+
+1. Re-export, then rebuild. Old exports do not load. Old saves do not load (save schema 32).
+2. Park a bus on a slope, release the handbrake and stand inside while it rolls. The player rides inside.
+3. Stand on a trailer bed or the Lada roof while it moves fast: you slide off. While it moves slowly: you ride.
+4. Jump inside a moving bus: you land in the same place.
+5. Run, jump, release W: you keep flying forward. Standing jump: straight up. Keys in the air turn you slowly.
+6. Jump at a wall: one extra push. Jump at a ledge: a second push. Hold jump below the ledge: you grip and stop falling, then jump up.
+7. Save mid-air and load: the jump continues.
+8. Check F3 walking and in a bus. Compare with the frame rate rule.
+
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X02 | Weapons and damage | L | Starting-area tanks (garage fuel can) explode and leak, cacti breaks, SMG magazine drop on unload, AI parts of the damage model (X03). [G01, G03, G06, C06] |

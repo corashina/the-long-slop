@@ -680,6 +680,20 @@ pub struct PlayerReference {
     pub max_fall_speed: f32,
     /// Unity `Physics.defaultMaxDepenetrationVelocity`.
     pub max_depenetration_velocity: f32,
+    /// Source `FairM`: air force from the move keys.
+    pub air_force: f32,
+    /// Source `FGripM`: speed multiplier while gripping a ledge.
+    pub grip_multiplier: f32,
+    /// Source `FwallJumpM`: jump force multiplier of the wall jump.
+    pub wall_jump_multiplier: f32,
+    /// Source `FwallJumpM2`: jump force multiplier of the ledge jump.
+    pub ledge_jump_multiplier: f32,
+    /// Source `FGripLoose`: slowest fall speed while gripping.
+    pub grip_loose: f32,
+    /// Source `FmaxGripFallSpeed`: grip only below this speed.
+    pub max_grip_fall_speed: f32,
+    pub wall_sensors: PlayerWallSensorsReference,
+    pub interior_sensor: PlayerInteriorSensorReference,
     pub source: SourceId,
     pub capsule_source: SourceId,
     pub camera_source: SourceId,
