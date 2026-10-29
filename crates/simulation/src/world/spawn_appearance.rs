@@ -132,117 +132,132 @@ impl SpawnEvaluation<'_> {
                 if self.rules.root(self.reference, &state.source)? == &content.placement.prototype {
                     content.condition = 1. - state.states[0] as f32 / 4.;
                 }
-                let record = self.rules.get(self.reference, &state.source)?;
-                let f = record.fields;
-                let mut material = None;
-                let mut color = None;
-                let mut color_material = None;
-                let kind = if flag(f, "useOnlyMaterialTipusForMaterial")? {
-                    text(f, "materialTipus")?
-                } else {
-                    &state.kind
-                };
-                let main = self.rules.get(
+                condition_appearance(
                     self.reference,
-                    &SourceId {
-                        file: "level1".into(),
-                        path_id: 64919,
-                    },
+                    self.rules,
+                    &state.source,
+                    &state.kind,
+                    state.states,
+                    state.color,
+                    &mut content.appearance,
                 )?;
-                let common = array(main.fields, "conditionmaterials")?
-                    .iter()
-                    .find_map(|v| {
-                        let row = fields(v).ok()?;
-                        (text(row, "tipus").ok()? == kind).then_some(row)
-                    });
-                let disable = flag(f, "disableColor")?;
-                if flag(f, "UseMesList")? && !array(f, "MesList")?.is_empty() {
-                    return Err(ReferenceError(
-                        "Supported condition requires a checked mesh variant recipe".into(),
-                    ));
-                }
-                if flag(f, "UseMatList")? {
-                    if let Some(value) = array(f, "MatList")?.get(state.states[0] as usize) {
-                        material = Some(value_link(value)?.clone());
-                    }
-                    if flag(f, "forceColor")? && !disable {
-                        color = Some(state.color);
-                    }
-                }
-                if !flag(f, "DontUseWorn")? && (0..5).contains(&state.states[0]) {
-                    let names = ["New", "Used", "Middle", "Old", "Rusty"];
-                    material = if let Some(row) = common {
-                        optional(row, names[state.states[0] as usize])?.cloned()
-                    } else {
-                        optional(
-                            f,
-                            ["defNew", "defUsed", "defMiddle", "defOld", "defRusty"]
-                                [state.states[0] as usize],
-                        )?
-                        .cloned()
-                    };
-                    if !disable {
-                        if state.states[0] < 3 || flag(f, "forceColor")? {
-                            color = Some(state.color);
-                        } else {
-                            color_material = if let Some(row) = common {
-                                optional(row, "Rusty")?.cloned()
-                            } else {
-                                optional(f, "defRusty")?.cloned()
-                            };
-                        }
-                    }
-                }
-                if material.is_none() && !disable {
-                    let value = array(common.unwrap_or(f), "colors")?
-                        .get(state.states[0] as usize)
-                        .ok_or_else(|| ReferenceError("Source condition color index".into()))?;
-                    let f = fields(value)?;
-                    color = Some([
-                        number(f, "r")?,
-                        number(f, "g")?,
-                        number(f, "b")?,
-                        number(f, "a")?,
-                    ]);
-                }
-                for renderer in array(f, "renderers")? {
-                    content.appearance.push(NodeAppearance {
-                        primary: None,
-                        node: self
-                            .rules
-                            .root(self.reference, value_link(renderer)?)?
-                            .clone(),
-                        active: None,
-                        material: material.clone(),
-                        color,
-                        color_material: color_material.clone(),
-                        rotation: None,
-                        scale: None,
-                    });
-                }
-                if flag(f, "UseGoList")? {
-                    let objects = array(f, "GoList")?;
-                    if !objects.is_empty() && state.states[2] as usize >= objects.len() {
-                        return Err(ReferenceError("Source condition object index".into()));
-                    }
-                    for (i, object) in objects.iter().enumerate() {
-                        content.appearance.push(NodeAppearance {
-                            primary: None,
-                            node: self
-                                .rules
-                                .root(self.reference, value_link(object)?)?
-                                .clone(),
-                            active: Some(i == state.states[2] as usize),
-                            material: None,
-                            color: None,
-                            color_material: None,
-                            rotation: None,
-                            scale: None,
-                        });
-                    }
-                }
             }
         }
         Ok(())
     }
+}
+
+/// Source `partconditionscript.Refresh` appearance of one condition: renderer materials and colors, then `GoList` activity.
+pub fn condition_appearance(
+    reference: &crate::reference::WorldReference,
+    rules: &SourceRules,
+    source: &SourceId,
+    kind: &str,
+    states: [i32; 3],
+    paint: [f32; 4],
+    out: &mut Vec<NodeAppearance>,
+) -> Result<(), ReferenceError> {
+    let record = rules.get(reference, source)?;
+    let f = record.fields;
+    let mut material = None;
+    let mut color = None;
+    let mut color_material = None;
+    let kind = if flag(f, "useOnlyMaterialTipusForMaterial")? {
+        text(f, "materialTipus")?
+    } else {
+        kind
+    };
+    let main = rules.get(
+        reference,
+        &SourceId {
+            file: "level1".into(),
+            path_id: 64919,
+        },
+    )?;
+    let common = array(main.fields, "conditionmaterials")?
+        .iter()
+        .find_map(|v| {
+            let row = fields(v).ok()?;
+            (text(row, "tipus").ok()? == kind).then_some(row)
+        });
+    let disable = flag(f, "disableColor")?;
+    if flag(f, "UseMesList")? && !array(f, "MesList")?.is_empty() {
+        return Err(ReferenceError(
+            "Supported condition requires a checked mesh variant recipe".into(),
+        ));
+    }
+    if flag(f, "UseMatList")? {
+        if let Some(value) = array(f, "MatList")?.get(states[0] as usize) {
+            material = Some(value_link(value)?.clone());
+        }
+        if flag(f, "forceColor")? && !disable {
+            color = Some(paint);
+        }
+    }
+    if !flag(f, "DontUseWorn")? && (0..5).contains(&states[0]) {
+        let names = ["New", "Used", "Middle", "Old", "Rusty"];
+        material = if let Some(row) = common {
+            optional(row, names[states[0] as usize])?.cloned()
+        } else {
+            optional(
+                f,
+                ["defNew", "defUsed", "defMiddle", "defOld", "defRusty"][states[0] as usize],
+            )?
+            .cloned()
+        };
+        if !disable {
+            if states[0] < 3 || flag(f, "forceColor")? {
+                color = Some(paint);
+            } else {
+                color_material = if let Some(row) = common {
+                    optional(row, "Rusty")?.cloned()
+                } else {
+                    optional(f, "defRusty")?.cloned()
+                };
+            }
+        }
+    }
+    if material.is_none() && !disable {
+        let value = array(common.unwrap_or(f), "colors")?
+            .get(states[0] as usize)
+            .ok_or_else(|| ReferenceError("Source condition color index".into()))?;
+        let f = fields(value)?;
+        color = Some([
+            number(f, "r")?,
+            number(f, "g")?,
+            number(f, "b")?,
+            number(f, "a")?,
+        ]);
+    }
+    for renderer in array(f, "renderers")? {
+        out.push(NodeAppearance {
+            primary: None,
+            node: rules.root(reference, value_link(renderer)?)?.clone(),
+            active: None,
+            material: material.clone(),
+            color,
+            color_material: color_material.clone(),
+            rotation: None,
+            scale: None,
+        });
+    }
+    if flag(f, "UseGoList")? {
+        let objects = array(f, "GoList")?;
+        if !objects.is_empty() && states[2] as usize >= objects.len() {
+            return Err(ReferenceError("Source condition object index".into()));
+        }
+        for (i, object) in objects.iter().enumerate() {
+            out.push(NodeAppearance {
+                primary: None,
+                node: rules.root(reference, value_link(object)?)?.clone(),
+                active: Some(i == states[2] as usize),
+                material: None,
+                color: None,
+                color_material: None,
+                rotation: None,
+                scale: None,
+            });
+        }
+    }
+    Ok(())
 }
