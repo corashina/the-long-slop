@@ -206,7 +206,7 @@ impl WeatherReference {
             "storm particle roles",
         )?;
         for p in &self.particles {
-            particles::validate_particle(p)?;
+            particles::validate_particle(p, 2)?;
         }
         self.tumbleweeds.validate(m)
     }

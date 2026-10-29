@@ -263,12 +263,15 @@ pub(super) fn validate_particles(m: &ReferenceManifest) -> Result<(), ReferenceE
         }
     }
     for p in &m.particles {
-        validate_particle(p)?;
+        validate_particle(p, 2)?;
     }
     Ok(())
 }
-/// Checks one particle record that the runtime simulates in custom space.
-pub(super) fn validate_particle(p: &ParticleReference) -> Result<(), ReferenceError> {
+/// Checks one particle record that the runtime simulates in `simulation_space`.
+pub(super) fn validate_particle(
+    p: &ParticleReference,
+    simulation_space: u8,
+) -> Result<(), ReferenceError> {
     p.validate_motion()?;
     let check = |valid: bool, field: &str| {
         if valid {
@@ -404,7 +407,7 @@ pub(super) fn validate_particle(p: &ParticleReference) -> Result<(), ReferenceEr
             )?;
         }
     }
-    p.validate_data(2)
+    p.validate_data(simulation_space)
 }
 /// Checks the fields of an enabled shape module.
 fn validate_shape(
@@ -412,8 +415,15 @@ fn validate_shape(
     check: &impl Fn(bool, &str) -> Result<(), ReferenceError>,
     scalar: &impl Fn(&str) -> Result<f32, ReferenceError>,
 ) -> Result<(), ReferenceError> {
-    // Checked storm systems use shape type 2. Other selected systems use type 4.
-    let shape = if p.role.starts_with("storm_") { 2. } else { 4. };
+    // Checked storm and coolant steam systems use a hemisphere (2), food bites a sphere (0).
+    // Other selected systems use a cone (4).
+    let shape = if p.role.starts_with("storm_") || p.role.starts_with("coolant_steam_") {
+        2.
+    } else if p.role.starts_with("food_") {
+        0.
+    } else {
+        4.
+    };
     check(scalar("ShapeModule.type")? == shape, "ShapeModule.type")?;
     for name in ["ShapeModule.m_Rotation", "ShapeModule.m_Scale"] {
         check(p.vectors.contains_key(name), name)?;

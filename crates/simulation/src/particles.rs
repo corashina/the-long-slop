@@ -39,9 +39,16 @@ struct Modules {
     /// Trigger module with the Kill inside action: the ball radius scale.
     kill_inside: Option<f32>,
 }
+/// Source `ShapeModule.type`: 0 sphere, 2 hemisphere, 4 cone.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Shape {
+    Sphere,
+    Hemisphere,
+    Cone,
+}
 #[derive(Debug)]
 struct Emission {
-    hemisphere: bool,
+    shape: Shape,
     cos_angle: f32,
     radius_thickness: f32,
     shape_radius: f32,
@@ -147,7 +154,11 @@ impl Modules {
         let shape_scalar = |field: &str, off: f32| if shape { r.scalars[field] } else { off };
         let shape_vector = |field: &str, off: [f32; 3]| if shape { r.vectors[field] } else { off };
         let emission = (r.flags.get("gameObject.active") == Some(&true)).then(|| Emission {
-            hemisphere: shape_scalar("ShapeModule.type", 4.) == 2.,
+            shape: match shape_scalar("ShapeModule.type", 4.) {
+                0. => Shape::Sphere,
+                2. => Shape::Hemisphere,
+                _ => Shape::Cone,
+            },
             cos_angle: shape_scalar("ShapeModule.angle", 0.).to_radians().cos(),
             radius_thickness: shape_scalar("ShapeModule.radiusThickness", 1.),
             shape_radius: shape_scalar("ShapeModule.radius.value", 0.),
@@ -377,10 +388,10 @@ impl ParticleState {
         let phase = self.elapsed / m.duration;
         for _ in 0..count.min(m.capacity - self.particles.len()) {
             let a = random.unit() * std::f32::consts::TAU;
-            let z = if e.hemisphere {
-                random.unit()
-            } else {
-                e.cos_angle + (1. - e.cos_angle) * random.unit()
+            let z = match e.shape {
+                Shape::Sphere => 2. * random.unit() - 1.,
+                Shape::Hemisphere => random.unit(),
+                Shape::Cone => e.cos_angle + (1. - e.cos_angle) * random.unit(),
             };
             let radial = (1. - z * z).sqrt();
             // Source +Z is converted to -Z.
@@ -388,7 +399,7 @@ impl ParticleState {
             let inner = (1. - e.radius_thickness).powi(3);
             let shape_radius = e.shape_radius * self.radius_scale;
             let radius = shape_radius * (inner + (1. - inner) * random.unit()).cbrt();
-            let mut position = if e.hemisphere {
+            let mut position = if e.shape != Shape::Cone {
                 direction * radius
             } else {
                 Vector::new(a.cos(), a.sin(), 0.) * shape_radius * random.unit().sqrt()

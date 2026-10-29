@@ -189,7 +189,7 @@ impl SkyReference {
                     c.role.starts_with("sky_") && c.role.ends_with("_contrail"),
                     "sky contrail role",
                 )?;
-                particles::validate_particle(c)?;
+                particles::validate_particle(c, 2)?;
             }
         }
         self.flyer.validate(m)
