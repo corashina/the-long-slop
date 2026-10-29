@@ -55,7 +55,7 @@ impl Cobwebs {
                 duration: e.particle.duration,
                 elapsed: None,
                 emitter: [0.; 3],
-                clip: super::content_small_items::clip_id(reference, &e.clip),
+                clip: reference.clip_id(&e.clip),
                 volume: e.volume,
             })
             .collect();

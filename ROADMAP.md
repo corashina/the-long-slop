@@ -310,3 +310,9 @@ Prepare once:
 6. Save and load with blood in the Lada and in a world car. The blood stays. Drive away from the world car and back: the blood stays.
 7. Blow up a tank next to a car. Parts fall off.
 8. Check F3 while you drive past many roadside cars. Compare with the frame rate rule.
+
+### Small effects
+
+1. Run `cargo test --lib tumbleweed_breaks -- --ignored` and `cargo test --lib spawned_copy_takes -- --ignored`.
+2. Hit a tumbleweed hard with the car, a shot and a melee swing. It breaks with its gib and sound. Save and load: it stays gone.
+3. Drop and throw food and cut food pieces. Each makes its hit sound.

@@ -27,7 +27,7 @@ fn register(
 ) -> Result<(), ReferenceError> {
     for (bone, pickup) in bones.iter().zip(&r.ragdoll.pickups) {
         let pose = from_rapier(physics.rapier().bodies[bone.body].position());
-        items.insert_spawned(bone.item, "", pose, bone.body)?;
+        items.insert_spawned(bone.item, "", pose, bone.body, None)?;
         interaction.register_spawned(bone.item, pickup.clone(), &bone.colliders);
     }
     Ok(())

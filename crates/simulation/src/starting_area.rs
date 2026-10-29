@@ -2524,8 +2524,13 @@ impl GarageRuntime {
 
     /// Source breakablescript: contacts and hazard triggers of this step, then Break in break order.
     fn break_targets(&mut self, reference: &ReferenceManifest) {
-        self.stream
-            .step_breakables(reference, &self.area.items, &mut self.physics, FIXED_DT);
+        self.stream.step_breakables(
+            reference,
+            &self.area.items,
+            &self.area.spawned,
+            &mut self.physics,
+            FIXED_DT,
+        );
         while let Some((kind, record)) = self.stream.take_break() {
             let rules = &reference.breakables[record];
             let item = match kind {
@@ -2589,7 +2594,10 @@ impl GarageRuntime {
                     std::array::from_fn(|i| origin[i] + f64::from(pose.position[i])),
                 );
             }
-            if !rules.no_destroy {
+            if !rules.no_destroy && self.area.spawned.contains(item) {
+                // A spawned copy leaves the spawned list, so its save and the tumbleweed list drop it.
+                spawned::despawn(&mut self.area, &mut self.physics, item).expect("spawned copy");
+            } else if !rules.no_destroy {
                 self.stream
                     .remove_broken_item(
                         reference,

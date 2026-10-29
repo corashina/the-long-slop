@@ -1,9 +1,11 @@
 //! Runtime copies of exported item prototypes. One item owns each prototype pickup body.
 use super::StartingArea;
 use crate::interaction::guns::AmmoItem;
+use crate::interaction::items::HitSound;
 use crate::interaction::spray::Ammo;
 use crate::reference::{ItemId, ItemPrototype, ReferenceError, ReferenceManifest};
 use crate::vehicle::{PhysicsWorld, VehiclePose, collider_builder, from_rapier, to_rapier};
+use crate::world::stream::content_bindings::hit_events;
 use rapier3d::prelude::{Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -139,6 +141,14 @@ pub fn spawn_body(
         return Err(ReferenceError("Nonfinite spawned item pose".into()));
     }
     let body = prototype_body(record, pickup);
+    let hit = rule
+        .collision_clip
+        .as_ref()
+        .and_then(|clip| reference.clip_id(clip))
+        .map(|clip| HitSound {
+            clip,
+            gain: rule.collision_gain,
+        });
     let id = area.items.allocate_item_id()?;
     let builder = if body.dynamic {
         RigidBodyBuilder::dynamic()
@@ -160,6 +170,7 @@ pub fn spawn_body(
             .enabled(c.enabled)
             .solver_groups(crate::vehicle::solver_groups(c.enabled))
             .density(0.)
+            .active_events(hit_events(hit))
             .collision_groups(InteractionGroups::new(
                 Group::from_bits_truncate(c.membership),
                 Group::from_bits_truncate(c.filter),
@@ -178,7 +189,7 @@ pub fn spawn_body(
             c.membership,
         ));
     }
-    area.items.insert_spawned(id, "", pose, handle)?;
+    area.items.insert_spawned(id, "", pose, handle, hit)?;
     area.interaction
         .register_spawned(id, rule.pickup.clone(), &colliders);
     area.item_render_poses.push((id, pose, pose));

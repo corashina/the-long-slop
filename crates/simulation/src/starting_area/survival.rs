@@ -3,6 +3,7 @@ use crate::fluids::{contact_drink_transfer, drink_transfer};
 use crate::interaction::items::ItemLocation;
 use crate::reference::{ConsumptionEffect, ItemId, NodeId, ReferenceError, ReferenceManifest};
 use crate::vehicle::{PhysicsWorld, VehiclePose, collider_builder, from_rapier, to_rapier};
+use crate::world::stream::content_bindings::{hit_events, hit_sound};
 use rapier3d::prelude::{Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder};
 
 /// A runtime food copy at `bite`. It saves in the world.
@@ -24,6 +25,7 @@ pub fn spawn_consumable(
         return Err(ReferenceError("Duplicate food item".into()));
     }
     let root = to_rapier(super::node_pose(reference, prototype.root)?);
+    let hit = hit_sound(&reference.world, &prototype.pickup.source);
     let body = physics.insert_body(
         RigidBodyBuilder::dynamic()
             .pose(to_rapier(pose))
@@ -39,6 +41,7 @@ pub fn spawn_consumable(
             .sensor(record.sensor)
             .enabled(record.enabled && active_part(reference, record.node, &prototype.parts, bite))
             .density(0.)
+            .active_events(hit_events(hit))
             .collision_groups(InteractionGroups::new(
                 Group::from_bits_truncate(record.membership),
                 Group::from_bits_truncate(record.filter),
@@ -55,7 +58,7 @@ pub fn spawn_consumable(
         handles.push(physics.insert_collider_with_parent(collider, body));
     }
     area.items
-        .insert_consumable(id, prototype_index, prototype, bite, pose, body)?;
+        .insert_consumable(id, prototype_index, prototype, bite, pose, body, hit)?;
     area.interaction
         .register_consumable(id, prototype, &handles);
     area.item_render_poses.push((id, pose, pose));
