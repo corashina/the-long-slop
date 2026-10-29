@@ -122,6 +122,7 @@ impl WorldStream {
                 .position(|n| &n.source == root)
                 .ok_or_else(|| ReferenceError("Generated lamp controller root missing".into()))?;
             let baseline = ObjectSnapshot {
+                conditions: Vec::new(),
                 pose: instance.placement.pose,
                 food: None,
                 temperature: None,
@@ -652,6 +653,7 @@ mod tests {
                 moving: true,
             }),
             baseline: ObjectSnapshot {
+                conditions: Vec::new(),
                 pose: AbsolutePose {
                     position: [0.; 3],
                     rotation: [0., 0., 0., 1.],

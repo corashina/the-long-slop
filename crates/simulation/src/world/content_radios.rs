@@ -400,6 +400,7 @@ mod tests {
 
     fn snapshot(radio: Option<RadioSnapshot>) -> ObjectSnapshot {
         ObjectSnapshot {
+            conditions: Vec::new(),
             pose: AbsolutePose {
                 position: [1., 2., 3.],
                 rotation: [0., 0., 0., 1.],

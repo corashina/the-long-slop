@@ -61,6 +61,7 @@ impl GarageRuntime {
                 continue;
             }
             let snapshot = crate::world::ObjectSnapshot {
+                conditions: Vec::new(),
                 pose: crate::world::AbsolutePose {
                     position: item.pose.position,
                     rotation: item.pose.rotation,
