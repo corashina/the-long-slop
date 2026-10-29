@@ -242,6 +242,13 @@ Run the X02 part 4 test pass (explosions) in the same run:
 6. Stand near a blast: sound goes dull, an ear ring plays from the blast side, and both fade. Save and load keeps the ringing. Stand close: the player dies with the ragdoll.
 7. Check F3 during a chain of blasts. Compare with the frame rate rule.
 
+Run the X02 leftovers test pass in the same run:
+
+1. Re-export, then rebuild. The tank records have explosion fields now. Old saves do not load (save schema 32).
+2. Run `cargo test --lib x02_leftovers -- --ignored`.
+3. Shoot the full 20 L garage fuel can. It explodes, and the can and its cap go away. Save and load: they stay gone.
+4. Shoot the garage water tank with a shotgun. Holes that face down leak.
+
 Run the X03a test pass (sky traffic) in the same run:
 
 1. Re-export, then rebuild. Old exports do not load (X03a added the sky record and the sky plane scenes).
@@ -253,7 +260,7 @@ Run the X03a test pass (sky traffic) in the same run:
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| X02 | Weapons and damage | L | Starting-area tanks (garage fuel can) explode and leak, cacti breaks, SMG magazine drop on unload, AI parts of the damage model (X03). [G01, G03, G06, C06] |
+| X02 | Weapons and damage | L | Cacti breaks, SMG magazine drop on unload, AI parts of the damage model (X03). [G01, G03, G06, C06] |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters (attacks hurt the player), vultures, sandworm, UFO, EMP. [H01-H06, H09-H11, B17, F21] |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |
 | X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. [M13] |

@@ -51,7 +51,9 @@ impl SaveSnapshot {
                 )?;
             } else {
                 links(
-                    item.food.is_none() && !item.removed,
+                    item.food.is_none()
+                        && (!item.removed
+                            || crate::starting_area::explosive_imported(reference, id)),
                     "Unexpected removed item or food progress",
                 )?;
             }

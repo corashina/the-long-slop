@@ -281,8 +281,7 @@ struct TankRules {
     no_fill_this: bool,
     no_fill_from: bool,
     slow_oil: bool,
-    /// Generated tanks only. Imported tanks have no explosion export.
-    explosion: Option<crate::world::TankExplosion>,
+    explosion: crate::world::TankExplosion,
 }
 
 impl InteractionState {
@@ -634,7 +633,7 @@ impl InteractionState {
                             no_fill_this: tank.no_fill_this,
                             no_fill_from: tank.no_fill_from,
                             slow_oil: tank.slow_oil,
-                            explosion: None,
+                            explosion: tank.explosion,
                         },
                     )
                 })
@@ -992,6 +991,10 @@ impl InteractionState {
         self.supplies.remove(&id);
         self.source_supply_emission.remove(&id);
         self.tank_rules.remove(&id);
+        self.forget_openings(id);
+    }
+    /// Forget the holes and openings of a removed tank or cap.
+    fn forget_openings(&mut self, id: ItemId) {
         self.holes.forget(id);
         self.openings
             .retain(|opening| opening.reference.tank != id && opening.reference.cap != id);
@@ -1303,7 +1306,7 @@ impl InteractionState {
             no_fill_this: definition.no_fill_this,
             no_fill_from: definition.no_fill_from,
             slow_oil: number(tank_record, "slowOil")? != 0.0,
-            explosion: Some(definition.explosion),
+            explosion: definition.explosion,
         };
         // Subtract in f64 before conversion, so distant bindings retain local precision.
         let relative = VehiclePose {
@@ -1356,9 +1359,9 @@ impl InteractionState {
         self.kinds.insert(tank, ItemKind::Container);
         Ok(())
     }
-    /// tankscript explosion fields of a generated tank.
+    /// tankscript explosion fields of a tank.
     pub fn tank_explosion(&self, tank: ItemId) -> Option<&crate::world::TankExplosion> {
-        self.tank_rules.get(&tank)?.explosion.as_ref()
+        self.tank_rules.get(&tank).map(|r| &r.explosion)
     }
     pub fn bind_generated_cap(&mut self, handle: ColliderHandle, cap: ItemId) {
         let binding = self

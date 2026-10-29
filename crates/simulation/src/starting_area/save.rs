@@ -478,6 +478,11 @@ impl GarageRuntime {
         }
         candidate.area.update_glasses(&candidate.stream);
         let starter = reference.survival.starter_food;
+        for tank in &reference.tanks {
+            if candidate.area.items.get(tank.item).is_some_and(|i| i.removed) {
+                candidate.remove_imported_item(tank.item);
+            }
+        }
         if candidate.area.items.get(starter).is_some_and(|i| i.removed) {
             candidate.area.items.get_mut(starter).unwrap().removed = false;
             candidate.remove_consumable(starter)?;
@@ -772,15 +777,10 @@ impl StartingArea {
             if record.parent_body.is_some() {
                 continue;
             }
-            if reference
-                .items
-                .iter()
-                .any(|i| i.body == record.id && i.id == reference.survival.starter_food)
-                && self
-                    .items
-                    .get(reference.survival.starter_food)
-                    .is_some_and(|i| i.removed)
-            {
+            // An eaten food or an exploded tank has no body.
+            if reference.items.iter().any(|i| {
+                i.body == record.id && self.items.get(i.id).is_some_and(|s| s.removed)
+            }) {
                 continue;
             }
             let handle = *self
