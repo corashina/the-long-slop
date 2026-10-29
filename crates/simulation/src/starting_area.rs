@@ -2502,6 +2502,19 @@ impl GarageRuntime {
             let rules = &reference.breakables[record];
             let item = match kind {
                 crate::damage::BreakKind::Item(item) => item,
+                // Cacti has no tosaveitemscript: source Break throws at tosave.PreDestroy, after
+                // the gib spawns. The prop stays and does not break again.
+                crate::damage::BreakKind::Prop { parent } => {
+                    let Some(pose) = self.stream.prop_pose(&parent) else {
+                        continue;
+                    };
+                    let pose = crate::vehicle::VehiclePose {
+                        position: self.stream.origin.local(pose.position),
+                        rotation: pose.rotation,
+                    };
+                    self.spawn_gib(reference, rules, pose, false);
+                    continue;
+                }
                 // Lamp triggers have no gib.
                 crate::damage::BreakKind::Lamp { parent, control } => {
                     let position = self
@@ -2538,33 +2551,7 @@ impl GarageRuntime {
             else {
                 continue;
             };
-            // Source Break spawns Gib at the object pose. No reduced-gibs setting exists here.
-            if let Some(gib) = rules.gib.as_ref().filter(|_| !rules.no_gib) {
-                let prototype = reference
-                    .item_prototypes
-                    .iter()
-                    .position(|p| &p.id == gib)
-                    .expect("validated gib prototype");
-                let gibs = spawned::spawn_prototype(
-                    reference,
-                    &mut self.area,
-                    &mut self.physics,
-                    prototype,
-                    pose,
-                )
-                .expect("validated gib prototype");
-                // A buried object makes its gib buried.
-                if buried {
-                    for gib in &gibs {
-                        crate::interaction::buried::bury(
-                            *gib,
-                            &mut self.area.items,
-                            &mut self.physics,
-                        );
-                    }
-                }
-                self.area.gibs.spawn(prototype, gibs, pose);
-            }
+            self.spawn_gib(reference, rules, pose, buried);
             if let Some(clip) = self.stream.pick_break_clip(rules)
                 && let Some(audio) = &mut self.audio
             {
@@ -2588,6 +2575,39 @@ impl GarageRuntime {
             }
         }
         self.step_gibs(reference);
+    }
+
+    /// Source Break spawns Gib at the object pose. No reduced-gibs setting exists here.
+    fn spawn_gib(
+        &mut self,
+        reference: &ReferenceManifest,
+        rules: &crate::reference::BreakableReference,
+        pose: crate::vehicle::VehiclePose,
+        buried: bool,
+    ) {
+        let Some(gib) = rules.gib.as_ref().filter(|_| !rules.no_gib) else {
+            return;
+        };
+        let prototype = reference
+            .item_prototypes
+            .iter()
+            .position(|p| &p.id == gib)
+            .expect("validated gib prototype");
+        let gibs = spawned::spawn_prototype(
+            reference,
+            &mut self.area,
+            &mut self.physics,
+            prototype,
+            pose,
+        )
+        .expect("validated gib prototype");
+        // A buried object makes its gib buried.
+        if buried {
+            for gib in &gibs {
+                crate::interaction::buried::bury(*gib, &mut self.area.items, &mut self.physics);
+            }
+        }
+        self.area.gibs.spawn(prototype, gibs, pose);
     }
 
     /// Gib starts after the breaks of this step, then gib updates and removals.

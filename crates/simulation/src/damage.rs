@@ -91,6 +91,8 @@ pub enum BreakKind {
         parent: GeneratedId,
         control: LightControlId,
     },
+    /// A static prop structure, such as Cacti. Its trigger colliders are bound.
+    Prop { parent: GeneratedId },
 }
 
 /// One bound breakablescript. `record` is an index in `ReferenceManifest::breakables`.
@@ -108,7 +110,7 @@ pub struct BreakTarget {
 /// Break targets of active content and the breaks of this step.
 pub struct Breakables {
     targets: Vec<BreakTarget>,
-    /// Lamp trigger colliders and their target.
+    /// Lamp and prop colliders and their target.
     colliders: Vec<(ColliderHandle, usize)>,
     queue: VecDeque<usize>,
     scan: Option<[u64; 4]>,
@@ -193,9 +195,9 @@ impl Breakables {
             self.queue.push_back(target);
         }
     }
-    /// Run after the physics step. Source breakablescript.OnCollisionEnter for started contacts
-    /// and playerdeathtriggerscript.OnTriggerStay for item bodies in hazard triggers.
-    /// Source OnTriggerEnter is not bound: only Cacti has `no_trigger` false, and it binds no target.
+    /// Run after the physics step. Source breakablescript.OnCollisionEnter for started contacts,
+    /// OnTriggerEnter of a body in a bound trigger collider, and
+    /// playerdeathtriggerscript.OnTriggerStay for item bodies in hazard triggers.
     pub fn step_hits(
         &mut self,
         records: &[BreakableReference],
@@ -215,6 +217,33 @@ impl Breakables {
                 if let Some(force) =
                     collision_force(&records[self.targets[target].record], hit.speed)
                 {
+                    self.try_break(records, target, force);
+                }
+            }
+        }
+        // OnTriggerEnter: `TryBreak(c.attachedRigidbody)` unless noTrigger.
+        for pair in physics.trigger_enters() {
+            for (sensor, other) in [(pair[0], pair[1]), (pair[1], pair[0])] {
+                let Some(target) = self
+                    .colliders
+                    .iter()
+                    .find(|(c, _)| *c == sensor)
+                    .map(|(_, t)| *t)
+                else {
+                    continue;
+                };
+                let rules = &records[self.targets[target].record];
+                let rapier = physics.rapier();
+                let Some(body) = rapier
+                    .colliders
+                    .get(other)
+                    .and_then(|c| c.parent())
+                    .and_then(|b| rapier.bodies.get(b))
+                else {
+                    continue;
+                };
+                if !rules.no_trigger {
+                    let force = body_force(rules, body.linvel().length(), body.mass());
                     self.try_break(records, target, force);
                 }
             }
@@ -337,5 +366,89 @@ impl Breakables {
         self.colliders
             .iter()
             .any(|(c, t)| *c == collider && self.targets[*t].removed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rapier3d::math::Vector;
+    use rapier3d::prelude::{ActiveEvents, ColliderBuilder, RigidBodyBuilder};
+
+    /// The Cacti breakablescript.
+    fn cacti() -> BreakableReference {
+        let source = SourceId {
+            file: "sharedassets1.assets".into(),
+            path_id: 154437,
+        };
+        BreakableReference {
+            source,
+            owners: Vec::new(),
+            health: 64.,
+            shoot_health: 10.,
+            shoot_different: true,
+            explosion_health: 2.,
+            explosion_different: true,
+            no_shoot: false,
+            decrease_after_attack: true,
+            only_decrease_above: false,
+            decrease_above_health: 0.,
+            only_velocity: false,
+            mass_modifier: 1.,
+            child_modifier: 1.,
+            children: Vec::new(),
+            no_trigger: false,
+            no_collider: false,
+            no_gib: false,
+            no_destroy: false,
+            gib: None,
+            reduced_gib: None,
+            clips: Vec::new(),
+            lamp: None,
+        }
+    }
+
+    /// Breaks of a 100 kg body that moves through a fixed trigger at `speed`.
+    fn drive_through(speed: f32) -> usize {
+        let records = [cacti()];
+        let mut physics = PhysicsWorld::empty_for_tests();
+        let sensor = physics.insert_collider(
+            ColliderBuilder::ball(0.5)
+                .sensor(true)
+                .active_events(ActiveEvents::COLLISION_EVENTS),
+        );
+        let body = physics.insert_body(
+            RigidBodyBuilder::dynamic()
+                .translation(Vector::new(-2., 0., 0.))
+                .linvel(Vector::new(speed, 0., 0.)),
+        );
+        physics.insert_collider_with_parent(ColliderBuilder::ball(0.3).mass(100.), body);
+        let mut breakables = Breakables::default();
+        let parent = GeneratedId {
+            layer: crate::world::WorldLayer::Prop,
+            generator: records[0].source.clone(),
+            unit: [0, 0],
+            ordinal: 0,
+            children: Vec::new(),
+        };
+        breakables.bind(BreakKind::Prop { parent }, 0, &records[0]);
+        breakables.bind_collider(sensor, 0);
+        let mut breaks = 0;
+        for _ in 0..200 {
+            physics.step_physics();
+            breakables.step_hits(&records, &physics, &TriggerRoles::default(), |_| None, 0.02);
+            while breakables.take_break().is_some() {
+                breaks += 1;
+            }
+        }
+        breaks
+    }
+
+    #[test]
+    fn x02_leftovers_cactus_trigger_breaks_once() {
+        // TryBreak(RB): 0.25 * 100 kg * 4 m/s = 100 >= 64. The prop is destroyed after one break.
+        assert_eq!(drive_through(4.), 1);
+        // 0.25 * 100 kg * 2 m/s = 50 < 64 only lowers the health.
+        assert_eq!(drive_through(2.), 0);
     }
 }

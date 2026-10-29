@@ -83,7 +83,7 @@ fn revolver_shot_breaks_a_bottle() {
         .enumerate()
         .filter_map(|(i, t)| match t.kind {
             BreakKind::Item(item) => Some((i, t.record, item)),
-            BreakKind::Lamp { .. } => None,
+            _ => None,
         })
         .filter(|(_, record, item)| {
             let r = &records[*record];

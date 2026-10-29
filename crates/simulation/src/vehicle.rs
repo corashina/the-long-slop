@@ -85,20 +85,33 @@ pub struct HitContact {
 }
 const HIT_CAPACITY: usize = 64;
 
-/// Records started contacts of colliders with `ActiveEvents::COLLISION_EVENTS`.
-/// A full buffer drops new hits.
-pub struct HitCollector(std::sync::Mutex<Vec<HitContact>>);
+/// Records started contacts and started sensor intersections (`OnTriggerEnter`: the sensor
+/// and the other collider in event order) of colliders with `ActiveEvents::COLLISION_EVENTS`.
+/// A full buffer drops new events.
+pub struct HitCollector {
+    hits: std::sync::Mutex<Vec<HitContact>>,
+    enters: std::sync::Mutex<Vec<[ColliderHandle; 2]>>,
+}
 impl Default for HitCollector {
     fn default() -> Self {
-        Self(std::sync::Mutex::new(Vec::with_capacity(HIT_CAPACITY)))
+        Self {
+            hits: std::sync::Mutex::new(Vec::with_capacity(HIT_CAPACITY)),
+            enters: std::sync::Mutex::new(Vec::with_capacity(HIT_CAPACITY)),
+        }
     }
 }
 impl HitCollector {
     /// Moves the recorded hits into `out` without allocation.
     pub fn take(&self, out: &mut Vec<HitContact>) {
-        let mut hits = self.0.lock().unwrap();
+        let mut hits = self.hits.lock().unwrap();
         out.clear();
         std::mem::swap(out, &mut *hits);
+    }
+    /// Moves the recorded sensor intersections into `out` without allocation.
+    pub fn take_enters(&self, out: &mut Vec<[ColliderHandle; 2]>) {
+        let mut enters = self.enters.lock().unwrap();
+        out.clear();
+        std::mem::swap(out, &mut *enters);
     }
 }
 impl EventHandler for HitCollector {
@@ -109,6 +122,15 @@ impl EventHandler for HitCollector {
         event: CollisionEvent,
         pair: Option<&ContactPair>,
     ) {
+        if let CollisionEvent::Started(a, b, flags) = event
+            && flags.contains(rapier3d::prelude::CollisionEventFlags::SENSOR)
+        {
+            let mut enters = self.enters.lock().unwrap();
+            if enters.len() < HIT_CAPACITY {
+                enters.push([a, b]);
+            }
+            return;
+        }
         let (CollisionEvent::Started(a, b, _), Some(pair)) = (event, pair) else {
             return;
         };
@@ -132,7 +154,7 @@ impl EventHandler for HitCollector {
                 .and_then(|h| bodies.get(h))
                 .map_or(Vector::ZERO, |body| body.velocity_at_point(point))
         };
-        let mut hits = self.0.lock().unwrap();
+        let mut hits = self.hits.lock().unwrap();
         if hits.len() < HIT_CAPACITY {
             hits.push(HitContact {
                 colliders: [a, b],
@@ -198,6 +220,7 @@ pub struct PhysicsWorld {
     vehicles: HashMap<ObjectKey, VehicleBody>,
     hit_collector: HitCollector,
     hits: Vec<HitContact>,
+    trigger_enters: Vec<[ColliderHandle; 2]>,
     ignored: mutations::IgnoredCollisions,
 }
 
@@ -215,6 +238,7 @@ impl PhysicsWorld {
             vehicles: HashMap::with_capacity(vehicles),
             hit_collector: HitCollector::default(),
             hits: Vec::with_capacity(HIT_CAPACITY),
+            trigger_enters: Vec::with_capacity(HIT_CAPACITY),
             ignored: Default::default(),
             inactive_bodies: std::collections::HashSet::with_capacity(bodies),
         };
@@ -242,6 +266,7 @@ impl PhysicsWorld {
             vehicles: HashMap::new(),
             hit_collector: Default::default(),
             hits: Vec::new(),
+            trigger_enters: Vec::new(),
             ignored: Default::default(),
         }
     }
@@ -390,6 +415,10 @@ impl PhysicsWorld {
     pub fn hits(&self) -> &[HitContact] {
         &self.hits
     }
+    /// Started sensor intersections of the last step, as collider pairs in either order.
+    pub fn trigger_enters(&self) -> &[[ColliderHandle; 2]] {
+        &self.trigger_enters
+    }
 
     pub fn body_active(&self, handle: RigidBodyHandle) -> bool {
         !self.inactive_bodies.contains(&handle)
@@ -403,6 +432,7 @@ impl PhysicsWorld {
         self.physics
             .step_with_events(&self.ignored, &self.hit_collector);
         self.hit_collector.take(&mut self.hits);
+        self.hit_collector.take_enters(&mut self.trigger_enters);
         for body in self.physics.islands.active_bodies() {
             self.query_bounds.mark_simulated_body(body);
             self.presentation_bodies.mark(body);
