@@ -84,6 +84,10 @@ impl GarageRuntime {
             let particles = interaction.explosions.particles(source);
             out.owner(ParticleGroupRow::EXPLOSION, 0, source, particles);
         }
+        for source in 0..reference.survival.food_particles.len() {
+            let particles = self.food_particles.particles(source);
+            out.owner(ParticleGroupRow::FOOD, 0, source, particles);
+        }
         let cigarettes = &area.cigarettes;
         out.owner(
             ParticleGroupRow::EXHALE,

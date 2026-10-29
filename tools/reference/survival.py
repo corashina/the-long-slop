@@ -66,6 +66,8 @@ def food_record(source, kind, root, manifest):
     nodes={(n['source']['file'],n['source']['path_id']):n for n in manifest['nodes']}
     edible=component(source,root,'ediblescript');data=source.read(edible)
     if data['continous'] or not data['destroyOnEnd']:raise ValueError('Selected food consumption contract differs')
+    # ediblescript.Start sets a null particlePos to the food root. The runtime emits at the root.
+    if data['particlePos']['m_PathID']:raise ValueError(f'{key(edible)}: food particle position is not the root')
     groups=part_groups(source,edible)
     rigid=source.read(component(source,root,'Rigidbody'))
     pose=world_pose(source,root);pose['scale']=[1.,1.,1.]
@@ -89,7 +91,7 @@ def food_record(source, kind, root, manifest):
         'linear_damping':rigid['m_Drag'],'angular_damping':rigid['m_AngularDrag'],
         'pickup':recover_pickup(source,component(source,root,'pickupable')),
         'parts':[[nodes[key(part)]['id'] for part in group] for group in groups],
-        'colliders':colliders,'particle_type':data['particleType'],'min_particle':data['minParticle'],'max_particle':data['maxParticle'],
+        'colliders':colliders,'has_particle':bool(data['hasParticle']),'particle_type':data['particleType'],'min_particle':data['minParticle'],'max_particle':data['maxParticle'],
         'sound':data['sound'],'text':data['text']}
 
 def recover_survival(source: LibrarySource, roots: dict, output: Path) -> dict:
@@ -177,6 +179,7 @@ def validate_survival_export(record: dict, manifest: dict) -> None:
     if {f['kind'] for f in record['foods']}!={*(k for k,_ in FOOD_FIELDS),'turd'} or len(record['foods'])!=len(FOOD_FIELDS)+1:raise ValueError('Duplicate or missing prototype kind')
     assets={a['id']:a for a in manifest['assets']}
     for food in record['foods']:
+        if not 0<=food['particle_type']<5:raise ValueError(f"Food {food['kind']} particle type")
         if not 0<=food['index']<food['bites'] or food['bites']!=len(food['parts']):raise ValueError('Exhausted food index')
         if assets.get(food['asset'],{}).get('usage')!='food_prototype' or nodes.get(food['root'],{}).get('asset')!=food['asset']:raise ValueError('Missing food prototype')
         if food['mass_kg']<=0 or not food['colliders']:raise ValueError('Invalid food geometry')

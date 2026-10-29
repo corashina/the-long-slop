@@ -742,6 +742,7 @@ pub struct GarageRuntime {
     pub sleep: crate::sleep::SleepState,
     ambient: crate::audio::AmbientState,
     horror: crate::horror::HorrorSound,
+    pub food_particles: crate::food_particles::FoodParticles,
     pub weather: crate::weather::WeatherState,
     weather_bindings: weather::WeatherBindings,
     sky: crate::sky_traffic::SkyTraffic,
@@ -922,6 +923,10 @@ impl GarageRuntime {
             urine_emission: [0.; 2],
             ambient: crate::audio::AmbientState::new(&reference.ambient),
             horror: crate::horror::HorrorSound::new(seed as u64),
+            food_particles: crate::food_particles::FoodParticles::new(
+                &reference.survival.food_particles,
+                0x666f_6f64,
+            ),
             weather: crate::weather::WeatherState::new(&reference.weather, seed as u64),
             weather_bindings,
             sky: crate::sky_traffic::SkyTraffic::new(&reference.sky, seed as u64),
@@ -1789,6 +1794,8 @@ impl GarageRuntime {
             .expect("persistent world bindings");
         self.advance_light_fades(reference, FIXED_DT);
         self.advance_cigarettes();
+        self.food_particles
+            .advance(FIXED_DT, self.stream.origin.offset, &self.physics);
         self.advance_needs(reference, FIXED_DT, factors.need_scale);
         let was_sleeping = self.sleeping();
         let output = self.sleep.step(

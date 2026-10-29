@@ -797,6 +797,8 @@ impl ParticleGroupRow {
     pub const TRACER: u32 = 13;
     /// `explosionscript.particle`; source is the explosion type.
     pub const EXPLOSION: u32 = 14;
+    /// `mainscript.FoodParticles`; source is the food particle type.
+    pub const FOOD: u32 = 15;
     /// Car systems in `a`.
     pub const CAR_EXHAUST: u32 = 0;
     /// Wheel effects: source is wheel * 8 + system (0 dust, 1.. grass).

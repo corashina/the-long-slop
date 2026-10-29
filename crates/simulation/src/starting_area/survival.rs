@@ -357,6 +357,17 @@ impl GarageRuntime {
         } else {
             crate::audio::AudioKind::Eat
         });
+        // mainscript.FoodParticle at particlePos: the food root for every selected food.
+        if prototype.has_particle {
+            let pose = self.area.items.get(item).unwrap().pose;
+            let rotation = rapier3d::math::Rotation::from_array(pose.rotation);
+            self.food_particles.bite(
+                prototype.particle_type.into(),
+                [prototype.min_particle as i32, prototype.max_particle as i32],
+                self.stream.origin.absolute(pose.position),
+                rotation * rapier3d::math::Vector::NEG_Z,
+            );
+        }
         let bite = {
             let state = self.area.items.get_mut(item).unwrap();
             state.food.as_mut().unwrap().bite += 1;
