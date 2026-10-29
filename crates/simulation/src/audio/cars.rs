@@ -1,9 +1,10 @@
 //! Car and engine part sounds. Every car copy plays through this one path.
 //! Source `enginescript` loops and clips, `carscript` horn and switch, `talajnezo` wheels.
 use super::{AudioAction, inverse_lerp};
+use crate::creatures::stimuli::SoundStimulus;
 use crate::reference::{
     CarAudioReference, CarShotReference, CarSoundReference, CarVoiceReference,
-    EngineAudioReference, ItemId, SkidReference,
+    EngineAudioReference, ItemId, SkidReference, SoundStimulusReference,
 };
 use crate::world::ObjectKey;
 use rapier3d::math::{Pose, Vector};
@@ -16,6 +17,8 @@ pub const CAR_ROUTE: u32 = 0x6000_0000;
 const CAR_INSTANCE: u32 = 0x80_0000;
 /// Signal capacity: the loops of many cars in range.
 const CAPACITY: usize = 256;
+/// Sound stimulus keys of cars. Engine parts use their item ids.
+const CAR_STIMULUS: u64 = 1 << 32;
 
 /// One car voice frame (a loop) or one clip (a one-shot) for the browser.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -115,6 +118,8 @@ pub struct CarSounds {
     pub events: Vec<CarSignal>,
     /// `(instance, mixer)` of each routed car and engine part this step.
     pub routes: Vec<(u32, u32)>,
+    /// `stimulscript` values of the engine and horn sounds of this step.
+    pub stimuli: Vec<SoundStimulus>,
 }
 
 impl Default for CarSounds {
@@ -127,6 +132,7 @@ impl Default for CarSounds {
             loops: Vec::with_capacity(CAPACITY),
             events: Vec::with_capacity(64),
             routes: Vec::with_capacity(32),
+            stimuli: Vec::with_capacity(32),
         }
     }
 }
@@ -144,6 +150,7 @@ impl CarSounds {
         self.origin = origin;
         self.loops.clear();
         self.routes.clear();
+        self.stimuli.clear();
         for e in &mut self.engines {
             e.seen = false;
         }
@@ -179,6 +186,13 @@ impl CarSounds {
                 position: self.absolute(pose, sound.position),
             });
         }
+    }
+    fn push_stimulus(&mut self, key: u64, s: &SoundStimulusReference, volume: f32, pose: Pose) {
+        self.stimuli.push(SoundStimulus {
+            key,
+            position: pose * Vector::from_array(s.offset),
+            value: volume * s.max_sound_value,
+        });
     }
     fn push_shot(&mut self, instance: u32, shot: &CarShotReference, pose: Pose) {
         if self.events.len() < self.events.capacity() {
@@ -222,24 +236,27 @@ impl CarSounds {
             self.routes.push((instance, mixer));
         }
         if input.running {
-            let (gain, pitch) = idle_voice(a, input.rpm);
+            let (idle, pitch) = idle_voice(a, input.rpm);
             self.push_loop(
                 instance,
                 &a.idle,
                 template_clip(templates, a.idle.voice),
-                gain,
+                idle,
                 pitch,
                 input.pose,
             );
-            let (gain, pitch) = motor_voice(a, input.rpm, input.max_rpm);
+            let (motor, pitch) = motor_voice(a, input.rpm, input.max_rpm);
             self.push_loop(
                 instance,
                 &a.motor,
                 template_clip(templates, a.motor.voice),
-                gain,
+                motor,
                 pitch,
                 input.pose,
             );
+            if let Some(s) = &a.stimulus {
+                self.push_stimulus(u64::from(instance), s, idle.max(motor), input.pose);
+            }
         }
         if self.engines[index].running
             && !input.running
@@ -312,6 +329,9 @@ impl CarSounds {
                     input.ambient_temperature,
                 );
                 let pitch = h.pitch[0] + (h.pitch[1] - h.pitch[0]) * t;
+                if let Some(s) = &h.stimulus {
+                    self.push_stimulus(CAR_STIMULUS | u64::from(instance), s, gain, input.pose);
+                }
                 self.push_loop(
                     instance,
                     &h.sound,

@@ -2,14 +2,18 @@
 //! carry, and `nyulscript.Die` plays a die clip. Evil rabbit clips and attack triggers.
 use super::GarageRuntime;
 use crate::creatures::ragdoll::Bone;
+use crate::creatures::stimuli::SoundStimulus;
 use crate::interaction::InteractionState;
 use crate::interaction::items::ItemStore;
 use crate::reference::{ItemId, RabbitReference, ReferenceError, ReferenceManifest};
 use crate::save::RabbitSnapshot;
-use crate::vehicle::from_rapier;
+use crate::vehicle::{from_rapier, to_rapier};
+use rapier3d::math::Vector;
 
 /// Audio instances of rabbit clips. Flyers share the voice and use item ids.
 const AUDIO_INSTANCE: u32 = 1 << 31;
+/// Sound stimulus keys of radio voices: the item id and the voice.
+const RADIO_STIMULUS: u64 = 2 << 32;
 
 fn allocate(r: &RabbitReference, items: &mut ItemStore) -> Result<Vec<ItemId>, ReferenceError> {
     (0..r.ragdoll.bodies.len())
@@ -34,6 +38,47 @@ fn register(
 }
 
 impl GarageRuntime {
+    /// `stimulscript.CheckAudioSources` inputs: engine and horn loops of this step and the
+    /// radio voices. Without audio there are none.
+    pub(super) fn bind_rabbit_sounds(&mut self) {
+        let bound = self.creatures.bound_sounds();
+        bound.clear();
+        let Some(audio) = &self.audio else {
+            return;
+        };
+        bound.extend_from_slice(&audio.cars.stimuli);
+        let cutoff = audio.reference.radio.electronics_cutoff;
+        for (item, script, state, output, _) in self.stream.portable_radios() {
+            let Some(pose) = self
+                .area
+                .items
+                .get(item)
+                .filter(|i| state.on && i.inactive_pose.is_none())
+                .map(|i| i.pose)
+            else {
+                continue;
+            };
+            let frame = audio
+                .broadcasts
+                .frame(state, audio.game_seconds, output, cutoff);
+            // `SradioSoundStatic`, `SradioSound` and `SradioSound2`.
+            let gains = [frame.static_gain, frame.primary.gain, frame.secondary.gain];
+            let pose = to_rapier(pose);
+            for s in audio
+                .reference
+                .radio_stimuli
+                .iter()
+                .filter(|s| &s.radio == script)
+            {
+                bound.push(SoundStimulus {
+                    key: RADIO_STIMULUS | u64::from(item.0) << 2 | u64::from(s.voice),
+                    position: pose * Vector::from_array(s.offset),
+                    value: gains[s.voice as usize] * s.max_sound_value,
+                });
+            }
+        }
+    }
+
     /// Turns the rabbits that died this step into ragdolls, plays the evil rabbit clips and
     /// updates the attack trigger roles.
     pub(super) fn settle_rabbits(&mut self, reference: &ReferenceManifest) {

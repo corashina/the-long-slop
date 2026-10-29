@@ -1870,6 +1870,7 @@ impl GarageRuntime {
 
     /// Rabbits run in every state. Source `aispawn` sits on the Player.
     fn advance_creatures(&mut self, reference: &ReferenceManifest, dt: f32) {
+        self.bind_rabbit_sounds();
         let player = &self.area.player;
         let body = crate::vehicle::to_rapier(player.body_pose(&self.physics));
         let head = rapier3d::math::Vector::from_array(player.focus_position(&self.physics));
