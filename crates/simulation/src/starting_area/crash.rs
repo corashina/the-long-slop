@@ -1,6 +1,5 @@
 //! Car crash step: source `carscript.Update` calls `DamageStuff(|speed - lspeed|)`.
 use super::GarageRuntime;
-use crate::conditions::ConditionStore;
 use crate::crash::{Candidate, Flags};
 use crate::interaction::items::{ItemLocation, ItemStore};
 use crate::interaction::wheels::WheelAssemblies;
@@ -11,14 +10,6 @@ use crate::world::ObjectKey;
 /// Source `carscript.Stuff` speed: forward speed in km/h. The port has no `whlocked`.
 pub(super) fn forward_kmh(physics: &PhysicsWorld, key: &ObjectKey) -> f32 {
     physics.snapshot(key).speed_mps.abs() * 3.6
-}
-
-/// Source `partconditionscript.state`: the manifest state, else the generated spawn state.
-fn condition_state(conditions: &ConditionStore, items: &ItemStore, item: ItemId) -> Option<u8> {
-    conditions.item_state(item).or_else(|| {
-        let quality = items.get(item)?.generated_condition?;
-        Some(((1. - quality) * 4.).round().clamp(0., 4.) as u8)
-    })
 }
 
 /// True if `root` holds `item` through slots, wheel slots, attachments or storage locks.
@@ -62,7 +53,7 @@ impl GarageRuntime {
         let condition = record
             .condition
             .and(car)
-            .and_then(|car| condition_state(&self.area.conditions, &self.area.items, car));
+            .and_then(|car| self.area.interaction.conditions.item_state(car));
         let flags = Flags {
             driving: driver,
             player_driving: driver,
@@ -88,12 +79,16 @@ impl GarageRuntime {
 
     /// Source `currentParts`: parts under the car that pass `WouldFallOff(crashLerp)`.
     fn candidates(&mut self, reference: &ReferenceManifest, car: ItemId, lerp: f32) {
-        let (items, conditions, wheels) = (&self.area.items, &self.area.conditions, &self.wheels);
+        let (items, conditions, wheels) = (
+            &self.area.items,
+            &self.area.interaction.conditions,
+            &self.wheels,
+        );
         let passes = |item, category| {
             crate::crash::would_fall_off(
                 &reference.crash,
                 category,
-                condition_state(conditions, items, item),
+                conditions.item_state(item),
                 lerp,
             )
         };
