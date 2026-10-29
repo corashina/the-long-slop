@@ -696,6 +696,38 @@ pub(crate) fn bind_lighting(
         source.uniform.lights[index].cookie_size = record.cookie_size;
         source.uniform.lights[index].mask = UVec4::new(record.culling_mask, 0, 0, 0);
     }
+    // One reserved slot for the pumpkin light (lightdither).
+    if let Some(record) = dither_light(&reference.0) {
+        let record = &record.light;
+        let index = source.lights.len();
+        if index == MAX_LIGHTS {
+            source.state = RenderingState::Failed("Pumpkin light exceeds light capacity".into());
+            return;
+        }
+        let entity = commands.spawn((SourceLight, Transform::default())).id();
+        source.lights.push(BoundLight {
+            world: Some(WorldBoundLight {
+                record: record.clone(),
+                output: crate::lighting::LightOutput {
+                    id: record.id,
+                    enabled: false,
+                    intensity: record.startup_intensity,
+                },
+            }),
+            index,
+            road: false,
+            item: None,
+            body: None,
+            id: record.id,
+            source_index: 0,
+            entity,
+            node: None,
+            pose: Transform::default(),
+        });
+        source.uniform.lights[index].cookie_rect = Vec4::ZERO;
+        source.uniform.lights[index].cookie_size = record.cookie_size;
+        source.uniform.lights[index].mask = UVec4::new(record.culling_mask, 0, 0, 0);
+    }
     source.uniform.counts.x = source.lights.len() as u32;
     source.road_lamps.fixed_lights = source.lights.len();
     source.road_lamps.capacity = MAX_LIGHTS - source.lights.len();
@@ -716,6 +748,15 @@ pub(crate) fn ember_light(
         .find(|p| p.item_id == Some(reference.acquisition.cigarette_item_id))
         .and_then(|p| p.consumable.as_ref())
         .map(|c| &c.ember.light)
+}
+/// The `lightdither` record of the pumpkin prototype.
+pub(crate) fn dither_light(
+    reference: &crate::reference::ReferenceManifest,
+) -> Option<&crate::reference::LightDitherReference> {
+    reference
+        .item_prototypes
+        .iter()
+        .find_map(|p| p.light_dither.as_ref())
 }
 /// The particle of the cigarette ember record.
 pub(crate) fn ember_particle(

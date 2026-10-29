@@ -10,6 +10,7 @@ pub mod creatures;
 pub mod decals;
 pub mod fixed_assets;
 pub mod gpu_prepare;
+pub mod light_dither;
 pub mod lighting;
 pub mod materials;
 pub mod mechanisms;

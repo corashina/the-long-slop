@@ -263,6 +263,7 @@ pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
                 (
                     presentation::spawned::sync,
                     presentation::cigarettes::sync,
+                    presentation::light_dither::sync,
                     presentation::outfit::poll,
                     presentation::player_body::sync,
                     presentation::ragdoll::sync,

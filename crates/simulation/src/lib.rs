@@ -24,6 +24,7 @@ pub mod horror;
 pub mod host;
 pub mod interaction;
 pub mod inventory;
+pub mod light_dither;
 pub mod lighting;
 pub mod particles;
 pub mod plates;

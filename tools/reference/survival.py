@@ -230,20 +230,15 @@ def recover_cigarette(source,root,manifest,output):
         elif reader.type.name!='Transform':reader=source.transform_for(source.resolve(reader,source.read(reader)['m_GameObject']))
         return nodes[key(reader)]
     def link(owner,field):return source.resolve(owner,source.read(owner)[field])
-    ember=link(reader,'ember');e=source.read(ember);light=link(ember,'feny');ld=source.read(light);shadow=ld['m_Shadows']
+    ember=link(reader,'ember');e=source.read(ember);light=link(ember,'feny');ld=source.read(light)
     emitter=link(ember,'ps');pd=source.read(emitter);render=component(source,source.transform_for(source.resolve(emitter,pd['m_GameObject'])),'ParticleSystemRenderer')
     source.lighting_textures=getattr(source,'lighting_textures',{(t['source']['file'],t['source']['path_id']):t for t in manifest['lighting']['textures']})
     if output is None:
         with TemporaryDirectory(prefix='checked-cigarette-') as temp:p=particle(source,emitter,'cigarette',e['startParticle'],Path(temp),root)
     else:p=particle(source,emitter,'cigarette',e['startParticle'],output,root)
-    light_transform=source.transform_for(source.resolve(light,ld['m_GameObject']))
     if ld['m_Cookie']['m_PathID']:raise ValueError('Unaudited cigarette light cookie')
-    l={'id':1,'source':source_id(light),'node':node(light),'pose':converted_transform(source.read(light_transform)),
-        'kind':{0:'spot',1:'directional',2:'point',3:'area'}[ld['m_Type']],'color':rgba(ld['m_Color']),
-        'serialized_intensity':ld['m_Intensity'],'startup_intensity':e['startLightIntensity'],'range_meters':ld['m_Range'],
-        'full_cone_degrees':ld['m_SpotAngle'],'inner_cone_degrees':ld['m_InnerSpotAngle'],'enabled':bool(ld['m_Enabled']),
-        'culling_mask':ld['m_CullingMask']['m_Bits'],'shadows':{'kind':shadow['m_Type'],'strength':shadow['m_Strength'],
-        'bias':shadow['m_Bias'],'normal_bias':shadow['m_NormalBias'],'near_plane':shadow['m_NearPlane'],'resolution':shadow['m_Resolution'],'custom_resolution':shadow['m_CustomResolution']},'cookie':None,'cookie_size':ld['m_CookieSize']}
+    from .lighting import light_payload
+    l=light_payload(source,light,node(light),1,e['startLightIntensity'])
     result={'source':source_id(reader),'continuous':bool(d['continous']),'automatic':bool(d['continousAuto']),
         'destroy_on_end':bool(d['destroyOnEnd']),'ate_once':bool(d['ateOnce']),'serialized_hp':d['hp'],'startup_hp':d['hp'] if d['ateOnce'] else 1.,
         'eat_speed':d['eatSpeed'],'auto_eat_speed':d['autoEatSpeed'],'effect':dict(food=d['foodValue'],water=d['waterValue'],bowel=d['shitValue'],hp=d['hpValue']),

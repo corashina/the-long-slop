@@ -148,6 +148,10 @@ pub struct StateBlock {
     pub sky_anchor: [f32; 3],
     /// Cigarette that owns the ember light, as `ItemId + 1`. 0 is none.
     pub ember_light: u32,
+    /// Item that owns the `lightdither` light, as `ItemId + 1`. 0 is none.
+    pub dither_light: u32,
+    /// Keeps the block free of padding.
+    pub pad: u32,
     /// `DeadV` weight: death seconds over the survival death seconds, 0 to 1. 0 while alive.
     pub dead_weight: f32,
     /// Bumps when the audio motion history restarts.
