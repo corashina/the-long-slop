@@ -22,6 +22,8 @@ pub struct WorldTrailerReference {
     pub source: SourceId,
     pub body: u32,
     pub wheels: Vec<SledWheelReference>,
+    /// `wheelgraphicsscript.T` of each wheel: the node that `Graphics` poses from the wheel.
+    pub graphics: Vec<u32>,
     /// `CenterOfMass` and `CenterOfMassAttached`, in the root frame.
     pub center_of_mass: [f32; 3],
     pub center_of_mass_hitched: [f32; 3],
@@ -73,6 +75,11 @@ impl WorldTrailerReference {
                 .wheels
                 .iter()
                 .all(|w| (w.node as usize) < p.nodes.len() && w.collider.valid())
+            && self.graphics.len() == self.wheels.len()
+            && self
+                .graphics
+                .iter()
+                .all(|&n| n != 0 && (n as usize) < p.nodes.len())
             && self.grip.prototype != p.source
             && !self.grip.types.is_empty()
             && self

@@ -44,6 +44,12 @@ pub(super) fn moving_nodes_of(
     for body in &prototype.bodies {
         moving[body.node as usize] = true;
     }
+    // wheelgraphicsscript.T of trailer wheels.
+    if let Some(trailer) = &prototype.trailer {
+        for &node in &trailer.graphics {
+            moving[node as usize] = true;
+        }
+    }
     // Bat wing bones.
     if prototype.source == reference.sky.flyer.prefab {
         for track in &reference.sky.flyer.wing.tracks {

@@ -59,6 +59,20 @@ def recover_trailer(source, hierarchy, mapping, bodies, root_point, lights):
         wheels.append({'source': source_id(wheel), 'node': mapping[key(transform)],
             'collider': wheel_collider_record(source.read(wheel))})
     if not wheels:raise ValueError(f'{identity}: trailer has no wheels')
+    # wheelgraphicsscript.Graphics poses `T` from its wheel. Trailers use neither W2 nor keepUpright.
+    graphics = {}
+    for _, graphic in scripts(source, hierarchy, 'wheelgraphicsscript'):
+        g = source.read(graphic)
+        wheel = source.resolve(graphic, g['W'])
+        if wheel is None:continue
+        if source.resolve(graphic, g['W2']) is not None or g['keepUpright']:
+            raise ValueError(f'{key(graphic)}: unsupported trailer wheel graphics W2 or keepUpright')
+        target = required(graphic, g['T'], 'T')
+        if key(target) not in mapping:raise ValueError(f'{key(graphic)} T: outside its prototype')
+        if key(wheel) in graphics:raise ValueError(f'{key(graphic)}: wheel has two graphics')
+        graphics[key(wheel)] = mapping[key(target)]
+    wheel_keys = [key(required(script, pointer, 'wheels')) for pointer in data['wheels']]
+    if any(k not in graphics for k in wheel_keys):raise ValueError(f'{identity}: a trailer wheel has no graphics')
     brake = source.resolve(script, data['brake'])
     if brake is not None and (brake.type.name != 'MonoBehaviour' or source.class_name(brake) != 'flashlightscript'
             or not any(key(c) == key(brake) for n in hierarchy for c in n['components'])):
@@ -83,7 +97,7 @@ def recover_trailer(source, hierarchy, mapping, bodies, root_point, lights):
     controllers = lights()
     rear = [record for record in controllers if record['kind'] == 'rear']
     if len(rear) != len(controllers):raise ValueError(f'{identity}: a trailer has only rearlights controllers')
-    return {'source': source_id(script), 'body': body, 'wheels': wheels,
+    return {'source': source_id(script), 'body': body, 'wheels': wheels, 'graphics': [graphics[k] for k in wheel_keys],
         'center_of_mass': point('CenterOfMass'), 'center_of_mass_hitched': point('CenterOfMassAttached'),
         'brake_force': float(data['brakeForce']), 'brake': source_id(brake) if brake is not None else None,
         'grip': {'source': source_id(grip_script), 'prototype': source_id(source.transform_for(prefab)),

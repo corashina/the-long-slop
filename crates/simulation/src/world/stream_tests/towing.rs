@@ -186,6 +186,18 @@ fn lada_tows_the_trailer_and_the_hitch_saves() {
     );
     tow(&mut run, &car_key, 2., DriveInput::default(), 0.);
     let start = position(&run, trailer_item);
+    let wheel_rotations = |run: &GarageRuntime| -> Vec<[f32; 4]> {
+        run.stream
+            .trailer(match &trailer_key {
+                ObjectKey::Generated(id) => id,
+                _ => unreachable!("startup trailer"),
+            })
+            .expect("bound trailer")
+            .graphics()
+            .map(|(_, pose)| pose.rotation)
+            .collect()
+    };
+    let rest = wheel_rotations(&run);
 
     // The car pulls the trailer forward. The grip point stays on the hitch target.
     let throttle = DriveInput {
@@ -197,6 +209,12 @@ fn lada_tows_the_trailer_and_the_hitch_saves() {
     assert!(
         Vector::new(moved.x, 0., moved.z).length() > 1.,
         "trailer moved {moved:?}"
+    );
+    // wheelgraphicsscript: the trailer wheel meshes roll.
+    let rolled = wheel_rotations(&run);
+    assert!(
+        rest.iter().zip(&rolled).all(|(a, b)| a != b),
+        "trailer wheel meshes roll"
     );
     let (target, point) = hitch_points(&run, &reference, car_item, trailer_item);
     assert!(
