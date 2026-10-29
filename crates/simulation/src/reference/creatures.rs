@@ -244,6 +244,8 @@ pub struct CreatureRagdoll {
     pub bodies: Vec<BodyRecord>,
     pub colliders: Vec<ColliderRecord>,
     pub joints: Vec<RagdollJoint>,
+    /// The `pickupable` of each body, in body order. `SetRagdol(true)` clears `cant_pickup`.
+    pub pickups: Vec<PickupReference>,
 }
 
 /// The base layer default state: a looping 1D blend tree. Track nodes are manifest node ids.
@@ -447,6 +449,7 @@ impl RabbitReference {
         let bodies = r.bodies.len() as u32;
         require(
             !r.bodies.is_empty()
+                && r.pickups.len() == r.bodies.len()
                 && r.bodies.iter().enumerate().all(|(i, b)| {
                     b.id.0 == i as u32 + 1 && self.local(m, b.node) && b.mass_kg > 0.
                 })

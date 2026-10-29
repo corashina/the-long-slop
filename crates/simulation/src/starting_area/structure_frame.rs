@@ -601,8 +601,10 @@ impl StructureViews {
         }
         let cobwebs = stream.cobweb_hidden(id);
         let start = frame.hidden_nodes.len() as u32;
+        // Source washtriggerscript GotDirty and GotClean set the car blood nodes active.
+        let blood = |n: usize| car.and_then(|(_, v)| v.blood.as_ref()?.visible(n as u32));
         for i in 0..prototype.nodes.len() {
-            let enabled = active_food(prototype, i, appearance, reference, food)
+            let enabled = active_food(prototype, i, appearance, reference, food, blood)
                 && !cobwebs.contains(&i)
                 && !self.gun_hidden.contains(&(i as u32))
                 && car
@@ -735,9 +737,10 @@ fn active_food(
     appearance: &[NodeAppearance],
     reference: &ReferenceManifest,
     item: Option<&ItemState>,
+    set: impl Fn(usize) -> Option<bool>,
 ) -> bool {
     let Some(item) = item else {
-        return active(prototype, node, appearance);
+        return active_with(prototype, node, appearance, set);
     };
     let state = item.food.unwrap();
     let food = &reference.survival.foods[state.prototype_index];
@@ -781,15 +784,28 @@ fn active_food(
 /// The node and its ancestors are active after the appearance overrides.
 pub fn active(
     prototype: &WorldPrototypeReference,
-    mut node: usize,
+    node: usize,
     appearance: &[NodeAppearance],
 ) -> bool {
+    active_with(prototype, node, appearance, |_| None)
+}
+
+/// `active` with the runtime `set` override before the appearance overrides.
+fn active_with(
+    prototype: &WorldPrototypeReference,
+    mut node: usize,
+    appearance: &[NodeAppearance],
+    set: impl Fn(usize) -> Option<bool>,
+) -> bool {
     for _ in 0..prototype.nodes.len() {
-        if !appearance
-            .iter()
-            .rev()
-            .find(|a| a.node == prototype.nodes[node].source && a.active.is_some())
-            .and_then(|a| a.active)
+        if !set(node)
+            .or_else(|| {
+                appearance
+                    .iter()
+                    .rev()
+                    .find(|a| a.node == prototype.nodes[node].source && a.active.is_some())
+                    .and_then(|a| a.active)
+            })
             .unwrap_or(prototype.nodes[node].parent.is_none() || prototype.nodes[node].active)
         {
             return false;

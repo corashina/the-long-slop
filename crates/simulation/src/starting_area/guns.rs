@@ -110,6 +110,16 @@ impl GarageRuntime {
         while let Some(strike) = self.area.interaction.guns.take_strike() {
             self.shot_explosive(strike);
         }
+        while let Some(hit) = self.area.interaction.guns.take_creature_hit() {
+            self.creatures.shoot(
+                &reference.creatures.rabbit,
+                &self.physics,
+                hit.collider,
+                hit.force,
+                hit.direction,
+            );
+        }
+        self.settle_rabbit_deaths(reference);
         self.store_decals(dt);
         held.is_some()
     }

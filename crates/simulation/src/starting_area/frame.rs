@@ -1,8 +1,8 @@
 //! Renderer data of one tick.
 use super::GarageRuntime;
 use crate::boundary::{
-    BudgetRow, Change, CigaretteRow, ConditionRow, CreatureRow, PlaneRow, PoseRow, SimFrame,
-    StateBlock, ValveRow,
+    BudgetRow, Change, CigaretteRow, ConditionRow, CreatureBoneRow, CreatureRow, PlaneRow, PoseRow,
+    SimFrame, StateBlock, ValveRow,
 };
 use crate::interaction::cigarettes::EmberPhase;
 use crate::interaction::items::ItemLocation;
@@ -168,17 +168,40 @@ impl GarageRuntime {
                 heading: plane.heading.to_array(),
             }));
         frame.creatures.clear();
-        frame
-            .creatures
-            .extend(self.creatures.views(&self.physics).map(|v| CreatureRow {
+        frame.creature_bones.clear();
+        for v in self.creatures.views(&self.physics) {
+            let start = frame.creature_bones.len() as u32;
+            if v.dead {
+                self.creatures.each_bone(&self.physics, v.id, |node, pose| {
+                    frame.creature_bones.push(CreatureBoneRow {
+                        node: node as u32,
+                        position: pose.translation.to_array(),
+                        rotation: pose.rotation.to_array(),
+                    });
+                });
+            }
+            let mut flags = 0;
+            for (on, flag) in [
+                (v.visible, PoseRow::VISIBLE),
+                (v.dead, CreatureRow::DEAD),
+                (!v.eyes, CreatureRow::NO_EYES),
+            ] {
+                if on {
+                    flags |= flag;
+                }
+            }
+            frame.creatures.push(CreatureRow {
                 id: v.id,
-                flags: if v.visible { PoseRow::VISIBLE } else { 0 },
+                flags,
                 position: v.pose.translation.to_array(),
                 rotation: v.pose.rotation.to_array(),
                 scale: v.scale,
                 phase: v.phase,
                 value: v.value,
-            }));
+                twitch: v.twitch,
+                bones: [start, frame.creature_bones.len() as u32 - start],
+            });
+        }
         let lighting = &self.lighting;
         frame.lighting.cycle.clone_from(lighting.cycle.output());
         frame.lighting.road_lamp = lighting.road_lamp_output(&reference.lighting);

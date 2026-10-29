@@ -76,6 +76,15 @@ pub struct Strike {
     pub hole: Option<[Vector; 2]>,
 }
 
+/// One shot hit on a collider without an item: rabbits take it as `breakchilds` or
+/// `breakablescript.TryBreakShoot` with the shot direction.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CreatureHit {
+    pub collider: ColliderHandle,
+    pub force: f32,
+    pub direction: Vector,
+}
+
 /// `fpscontroller` weapon crosshair: the `UiReference::sprites` index and the color.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Crosshair {
@@ -433,6 +442,7 @@ pub struct GunState {
     decals: Vec<DecalSpawn>,
     foods: Vec<ItemId>,
     strikes: Vec<Strike>,
+    creature_hits: Vec<CreatureHit>,
     /// Items whose part poses changed since the presentation took them.
     presented: Vec<ItemId>,
     /// Items whose saved state changed since the caller took them.
@@ -478,6 +488,7 @@ impl GunState {
             decals: Vec::with_capacity(HIT_CAPACITY),
             foods: Vec::with_capacity(HIT_CAPACITY),
             strikes: Vec::with_capacity(HIT_CAPACITY),
+            creature_hits: Vec::with_capacity(HIT_CAPACITY),
             presented: Vec::with_capacity(8),
             changed: Vec::with_capacity(8),
             breaking: None,
@@ -571,6 +582,10 @@ impl GunState {
     /// The next item that a shot hits. The caller takes every hit after each step.
     pub fn take_strike(&mut self) -> Option<Strike> {
         self.strikes.pop()
+    }
+    /// The next shot hit on a collider without an item. The caller takes every hit after each step.
+    pub fn take_creature_hit(&mut self) -> Option<CreatureHit> {
+        self.creature_hits.pop()
     }
     /// `fpscontroller` crosshair of the gun in the hand.
     pub fn crosshair(&self) -> Option<Crosshair> {
@@ -1193,6 +1208,13 @@ impl GunState {
                 && !self.foods.contains(&id)
             {
                 self.foods.push(id);
+            }
+            if item.is_none() && self.creature_hits.len() < HIT_CAPACITY {
+                self.creature_hits.push(CreatureHit {
+                    collider: hit.collider,
+                    force,
+                    direction,
+                });
             }
             // The tank and explosivescript hits of weaponscript.Shot.
             if let Some(id) = item {

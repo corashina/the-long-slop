@@ -221,6 +221,10 @@ impl ExplosionState {
     pub fn hits(&self) -> &[(ColliderHandle, f32)] {
         &self.hits
     }
+    /// Each body of the last query once.
+    pub fn bodies(&self) -> &[RigidBodyHandle] {
+        &self.bodies
+    }
     /// `AddExplosionForce(2 * force)` on each dynamic body of the last query but the player.
     pub fn push(&self, physics: &mut PhysicsWorld, blast: &Blast, player: Option<RigidBodyHandle>) {
         for &body in &self.bodies {

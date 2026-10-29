@@ -1145,6 +1145,20 @@ impl AudioState {
             }
         }
     }
+    /// `mainscript.PlayClipAtPoint(clip, position, 1f)` through the one-shot `voice` template.
+    pub fn clip_at(&mut self, voice: u32, instance: u32, clip: u32, position: [f64; 3]) {
+        if self.cars.events.len() < self.cars.events.capacity() {
+            self.cars.events.push(cars::CarSignal {
+                kind: cars::CAR_KIND + voice,
+                instance,
+                action: AudioAction::Start,
+                clip,
+                gain: 1.,
+                pitch: 1.,
+                position,
+            });
+        }
+    }
     /// breakablescript.Break: mainscript.PlayClipAtPoint(clip, position, 1f, AudioPriorities[6]).
     pub fn break_clip(&mut self, clip: &crate::reference::SourceId, position: [f64; 3]) {
         let clip = self
@@ -1162,6 +1176,21 @@ impl AudioState {
             clip,
             gain: 1.,
             pitch: 1.,
+            position,
+        });
+    }
+    /// carscript.DamageStuff: PlayClipAtPoint(SBlood01, position, 1f, randomPitch, AudioPriorities[6]).
+    /// It has the group, priority and settings of the Break row, so it plays through it.
+    pub fn point_clip(&mut self, clip: u32, position: [f64; 3]) {
+        let pitch = self.random_pitch();
+        self.survival_event(SurvivalAudioEvent {
+            session: self.session,
+            emitter: 0,
+            kind: AudioKind::Break,
+            action: AudioAction::Start,
+            clip,
+            gain: 1.,
+            pitch,
             position,
         });
     }
