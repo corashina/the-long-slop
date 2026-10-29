@@ -608,6 +608,7 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
                 | AssetUsage::PlayerPrototype
                 | AssetUsage::RagdollPrototype
                 | AssetUsage::SkyTraffic
+                | AssetUsage::CreaturePrototype
         )
     }) {
         let (_, handle) = visuals

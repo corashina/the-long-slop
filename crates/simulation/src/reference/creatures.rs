@@ -8,6 +8,10 @@ pub struct CreaturesReference {
     pub rabbit: RabbitReference,
     /// Every `stimulscript`, sorted by source.
     pub stimuli: Vec<StimulusSource>,
+    /// `Stimul` on the player Head.
+    pub player_stimulus: SourceId,
+    /// The stimulus of the `mainscript.Audio` prefab. `PlayClipAtPoint` sets it to the volume.
+    pub sound_stimulus: SourceId,
 }
 
 /// Source `stimulType`.
@@ -283,12 +287,23 @@ fn range(r: &[f32; 2]) -> bool {
 }
 
 impl CreaturesReference {
+    pub fn stimulus(&self, source: &SourceId) -> Option<&StimulusSource> {
+        self.stimuli.iter().find(|s| &s.source == source)
+    }
     pub fn validate(&self, m: &ReferenceManifest) -> Result<(), ReferenceError> {
         self.rabbit.validate(m)?;
         require(
             self.stimuli.iter().all(|s| {
                 s.max_sound_value.is_finite() && s.stimuli.iter().all(|v| v.value.is_finite())
-            }) && self.stimuli.iter().any(|s| s.visible),
+            }) && self
+                .stimulus(&self.player_stimulus)
+                .is_some_and(|s| s.visible && !s.stimuli.is_empty())
+                && self.stimulus(&self.sound_stimulus).is_some_and(|s| {
+                    s.sound
+                        && !s.check_audio_sources
+                        && s.audio_sources.is_empty()
+                        && !s.stimuli.is_empty()
+                }),
             "stimulus sources",
         )
     }

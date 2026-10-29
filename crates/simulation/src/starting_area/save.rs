@@ -382,6 +382,13 @@ impl GarageRuntime {
             candidate.simulation_seconds,
             &saved.weather,
         );
+        candidate.creatures.restore(
+            &reference.creatures.rabbit,
+            &mut candidate.physics,
+            &candidate.stream.origin,
+            &saved.rabbits,
+            candidate.simulation_seconds,
+        )?;
         let spawned = super::spawned::restore_save(
             reference,
             &mut candidate.area,
@@ -651,6 +658,7 @@ impl GarageRuntime {
             weather: self
                 .weather
                 .snapshot(&reference.weather, self.simulation_seconds),
+            rabbits: self.creatures.snapshot(&self.physics, origin),
         };
         if let Some(pending) = &self.pending_restore {
             for saved in &pending.items {

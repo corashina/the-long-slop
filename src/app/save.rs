@@ -257,6 +257,11 @@ fn commit(world: &mut World, mut candidate: Candidate) {
     world.resource_scope(
         |world, mut sky: Mut<crate::presentation::sky_traffic::SkyTrafficVisuals>| sky.reset(world),
     );
+    world.resource_scope(
+        |world, mut creatures: Mut<crate::presentation::creatures::CreatureVisuals>| {
+            creatures.reset(world)
+        },
+    );
     // The prepared commands and stable bindings make this boundary infallible.
     let mut presentation = candidate.presentation.take().unwrap();
     // The candidate ledger becomes the active ledger. Its last report and the last answer of

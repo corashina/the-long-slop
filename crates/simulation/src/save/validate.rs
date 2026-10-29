@@ -113,6 +113,13 @@ impl SaveSnapshot {
         self.validate_mechanisms(reference, &ids)?;
         self.validate_lighting(reference, &ids)?;
         validate_weather(&reference.weather, &self.weather)?;
+        for rabbit in &self.rabbits {
+            absolute(&rabbit.pose)?;
+            data(
+                unit(rabbit.size) && rabbit.shoot_health.is_finite(),
+                "Rabbit state",
+            )?;
+        }
         crate::conditions::validate_surfaces(reference, &self.conditions)?;
         crate::interaction::cleaning::validate_tools(reference, &self.conditions.tools)?;
         for brush in &reference.conditions.brushes {

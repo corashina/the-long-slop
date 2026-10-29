@@ -16,6 +16,10 @@ RABBIT = ('sharedassets1.assets', 33572)
 # aispawn on the Player GameObject. The copy on the inactive map player (level1 74614) never runs.
 SPAWNER = ('level1', 74613)
 STIMULUS_CLASS = 'stimulscript'
+# Stimul on the Player Head: the visible stimulus of the player.
+PLAYER_STIMULUS = ('level1', 68283)
+# The stimulscript on the mainscript.Audio prefab. PlayClipAtPoint sets its value to the volume.
+SOUND_STIMULUS = ('sharedassets1.assets', 153649)
 STIMULUS_KINDS = ('nothing', 'food', 'water', 'threat', 'light', 'command')
 EVIDENCE = [
     'if ((move.RB.velocity - lastVelocity).sqrMagnitude > accelerationDeath)',
@@ -238,7 +242,8 @@ def recover_creatures(source, manifest, output):
         # recover_audio replaces these AudioClip identities with clip ids and sets the shared one-shot voice.
         'die_clips': [source_id(c) for c in clips], 'die_voice': None,
         'evidence': managed_evidence(source, EVIDENCE)},
-        'stimuli': recover_stimuli(source)}
+        'stimuli': recover_stimuli(source),
+        'player_stimulus': source_id(source.get(*PLAYER_STIMULUS)), 'sound_stimulus': source_id(source.get(*SOUND_STIMULUS))}
 
 
 def recover_stimuli(source):
@@ -318,5 +323,10 @@ def validate_creatures(c, manifest):
             'max_sound_value': number, 'check_audio_sources': boolean, 'audio_sources': array(source_shape)})
         if any(s['kind'] not in STIMULUS_KINDS for s in row['stimuli']):
             raise ValueError('Invalid stimulus kind')
-    if not any(row['visible'] for row in c['stimuli']):
-        raise ValueError('No visible stimulus source')
+    rows = {(row['source']['file'], row['source']['path_id']): row for row in c['stimuli']}
+    player = rows.get((c['player_stimulus']['file'], c['player_stimulus']['path_id']))
+    sound = rows.get((c['sound_stimulus']['file'], c['sound_stimulus']['path_id']))
+    if player is None or not player['visible'] or not player['stimuli']:
+        raise ValueError('Player stimulus differs')
+    if sound is None or not sound['sound'] or sound['check_audio_sources'] or sound['audio_sources'] or not sound['stimuli']:
+        raise ValueError('Sound stimulus differs')
