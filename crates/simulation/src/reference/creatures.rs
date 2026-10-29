@@ -328,22 +328,12 @@ pub struct EyeMaterials {
 }
 
 /// The `PlayerDeathTrigger` sphere and its `playerdeathtriggerscript` damage per second.
-/// Geometry is in the space of its node, like `LiveCollider`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AttackTrigger {
-    pub node: NodeId,
     pub damage_player: f32,
     pub damage_breakable: f32,
-    pub source: SourceId,
-    pub sensor: bool,
-    pub membership: u32,
-    pub filter: u32,
-    pub friction: f32,
-    pub restitution: f32,
-    pub geometry: ColliderGeometry,
-    pub step_surface: Option<StepSurface>,
-    pub tag: Option<ColliderTag>,
+    pub collider: LiveCollider,
 }
 
 /// Animator layer 1 `piszmog`: an override layer that loops one clip.
@@ -610,8 +600,8 @@ impl RabbitReference {
                 && [&e.eye_materials.evil, &e.eye_materials.green]
                     .iter()
                     .all(|l| l.asset == self.asset)
-                && e.trigger.sensor
-                && self.local(m, e.trigger.node),
+                && e.trigger.collider.sensor
+                && self.local(m, e.trigger.collider.node),
             "rabbit evil",
         )?;
         require(

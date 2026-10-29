@@ -172,8 +172,8 @@ def evil_record(source, nyul, node, matrix, by_reader, asset):
         'roar_pitch': 0.985,
         'roar_clips': clips('Sroar'), 'idle_clips': clips('Sidle'), 'attack_clips': clips('Sattack'),
         'eye_materials': {'evil': eye('EyeEvil'), 'green': eye('EyeGreen')},
-        'trigger': {'node': node(owner['reader']), 'damage_player': t['damagePlayer'], 'damage_breakable': t['damageBreakable'],
-            **collider_record(source, matrix, sphere, owner, pose, True)}}
+        'trigger': {'damage_player': t['damagePlayer'], 'damage_breakable': t['damageBreakable'],
+            'collider': {'node': node(owner['reader']), **collider_record(source, matrix, sphere, owner, pose, True)}}}
 
 
 def damage_record(source, nyul, node):
@@ -459,7 +459,7 @@ def validate_creatures(c, manifest):
         'attack_clips': array(u32), 'eye_materials': lambda v: record(v, {'evil': material, 'green': material}),
         'trigger': lambda v: None})
     t = e['trigger']
-    if (not local(t['node']) or not t['sensor'] or t['damage_player'] < 0 or t['damage_breakable'] < 0
+    if (not local(t['collider']['node']) or not t['collider']['sensor'] or t['damage_player'] < 0 or t['damage_breakable'] < 0
             or any(m['asset'] != r['asset'] for m in e['eye_materials'].values())
             or not 0 <= e['idle_time'][0] <= e['idle_time'][1] or min(e['attack_duration'], e['roar_duration']) <= 0):
         raise ValueError('Invalid rabbit evil record')
