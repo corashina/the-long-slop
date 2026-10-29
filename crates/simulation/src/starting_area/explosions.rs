@@ -1,7 +1,7 @@
 //! Explosions in the world: tank and explosive prop triggers, the blast on colliders and bodies,
 //! the removal of exploded items, and the blast particle and sound.
 use super::GarageRuntime;
-use crate::interaction::explosions::{Blast, prop_factor, tank_factor};
+use crate::interaction::explosions::{Blast, power, prop_factor, tank_factor};
 use crate::interaction::guns::Strike;
 use crate::interaction::items::ItemLocation;
 use crate::reference::{ItemId, ReferenceManifest};
@@ -180,6 +180,21 @@ impl GarageRuntime {
         }
         if let Some(power) = heard {
             self.hear_blast(reference, power, blast.position);
+        }
+        // Source: each body with `carscript` gets `DamageStuff(power * 5)` at its body position.
+        for i in 0..self.area.interaction.explosions.bodies().len() {
+            let body = self.area.interaction.explosions.bodies()[i];
+            let Some(key) = self.physics.vehicle_of(body).cloned() else {
+                continue;
+            };
+            let Some(record) = self.vehicles.get(&key).map(|v| v.record(reference)) else {
+                continue;
+            };
+            let d = self.physics.rapier().bodies[body]
+                .translation()
+                .distance(blast.position);
+            let v = power(d, blast.radius, blast.force) * 5.;
+            self.crash_car(reference, &key, record, v);
         }
         let explosions = &self.area.interaction.explosions;
         explosions.push(&mut self.physics, blast, player);

@@ -7,6 +7,8 @@ mod breakables;
 mod car_types;
 #[path = "stream_tests/cargo.rs"]
 mod cargo;
+#[path = "stream_tests/crash.rs"]
+mod crash;
 #[path = "stream_tests/drive_out.rs"]
 mod drive_out;
 #[path = "stream_tests/explosions.rs"]
