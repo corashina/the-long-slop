@@ -211,6 +211,8 @@ pub struct PrototypeRenderer {
 pub struct PrototypeBehavior {
     pub pack: Option<SourceId>,
     pub ammo: Option<SourceId>,
+    /// The root ammoscript of a magazine.
+    pub ammo_rules: Option<PrototypeAmmo>,
     pub cigarette_prefab: Option<SourceId>,
     pub spawn: Option<SourceId>,
     /// Box breakablescript. Its record is in `breakables`.
@@ -228,6 +230,17 @@ pub struct PrototypeBehavior {
     pub clips: Vec<SourceId>,
     pub contact_sound_source: Option<SourceId>,
     pub contact_clips: Vec<Vec<SourceId>>,
+}
+
+/// A root ammoscript as Start leaves it.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrototypeAmmo {
+    pub kind: u32,
+    pub count: f32,
+    pub maximum: f32,
+    pub float: bool,
+    pub is_mag: bool,
 }
 
 /// gibscript of a gib piece. It keeps its own life after the main gib detaches it.
@@ -260,8 +273,8 @@ pub struct GibReference {
 }
 
 /// Item prototypes before the gibs, in export order.
-const SELECTED: [i64; 11] = [
-    75443, 51722, 61587, 70812, 53838, 53837, 63605, 63259, 54495, 83430, 51557,
+const SELECTED: [i64; 12] = [
+    75443, 51722, 61587, 70812, 53838, 53837, 63605, 63259, 54495, 83430, 51557, 51878,
 ];
 /// Gib prototypes: beer, box, cacti, vase, wc, then box, vase and wc reduced gibs, then the
 /// tumbleweed gib and the Attachable07 gib.
@@ -477,6 +490,7 @@ impl ItemPrototype {
             // Hose segment inventory flags and icons are not checked against the source build.
             83430 => Some((Some(61), 6, None, false, false, None)),
             51557 => Some((Some(312), 1, Some(4569), false, false, Some(146482))),
+            51878 => Some((Some(215), 1, Some(4580), true, false, Some(132733))),
             _ => None,
         };
         // Gibs other than the box gibs have no checked counts, icons or pickup flags.
@@ -514,6 +528,7 @@ impl ItemPrototype {
             54495 => Some((1, 7)),
             83430 => Some((6, 0)),
             51557 => Some((1, 1)),
+            51878 => Some((1, 1)),
             _ => None,
         };
         require(
@@ -749,7 +764,8 @@ impl ItemPrototype {
         }
         require(
             b.pack.is_some() == (item_id == Some(74))
-                && b.ammo.is_some() == (item_id == Some(74))
+                && b.ammo.is_some() == matches!(item_id, Some(74 | 215))
+                && b.ammo_rules.is_some() == (item_id == Some(215))
                 && b.cigarette_prefab.is_some() == (item_id == Some(74))
                 && b.spawn.is_some() == (item_id == Some(62))
                 && b.breakable.is_some() == (item_id == Some(62))
@@ -789,6 +805,13 @@ impl ItemPrototype {
                             .any(|n| Some(&n.source) == source.as_ref() && self.within(m, n.id))
                     }),
                 "shovel source links",
+            )?,
+            Some(215) => require(
+                optional_checked(&b.ammo, 132742)
+                    && b.ammo_rules.is_some_and(|a| {
+                        a.is_mag && a.maximum.is_finite() && (0. ..=a.maximum).contains(&a.count)
+                    }),
+                "magazine source links",
             )?,
             None => self.validate_gib(m, generic)?,
             _ => {}

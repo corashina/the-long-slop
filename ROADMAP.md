@@ -40,8 +40,7 @@ All tasks are done.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| X02 | Weapons and damage | L | Cacti breaks, SMG magazine drop on unload, AI parts of the damage model (X03). |
-| X03 | Creatures | XL | Evil rabbits (roar and attack), ground UFO and EMP, human monster (attacks hurt the player). Rabbits do not yet sense engines, radios or hums. |
+| X03 | Creatures | XL | Evil rabbits (roar and attack), ground UFO and EMP, human monster (attacks hurt the player), breakablescript `DamageFrom` for AI. Rabbits do not yet sense engines, radios or hums. |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. |
 | X09 | Car crash damage | L | `carscript.DamageStuff`: parts fall off by crash speed and condition, horn, blood, death on hard crashes; blasts call it with power x 5. |
@@ -260,6 +259,8 @@ Prepare once:
 1. Run `cargo test --lib x02_leftovers -- --ignored`.
 2. Shoot the full 20 L garage fuel can. It explodes, and the can and its cap go away. Save and load: they stay gone.
 3. Shoot the garage water tank with a shotgun. Holes that face down leak.
+4. SMG: unload with E at loose ammo, or with R while you hold ammo. A magazine drops at the gun with the gun rounds, and the gun is empty. Load it back with R. Load a held magazine into a loaded SMG: the old magazine drops. Save and load: a dropped magazine keeps its rounds. The export now has the magazine as an item prototype and a new acquisition hash.
+5. Drive into a cactus, shoot one until it breaks, and blow one up. Cactus pieces fly off and the cactus stays, as in the original (its Break throws before Destroy). It does not break again until its area streams in again.
 
 ### Sky traffic and bats (X03a)
 
