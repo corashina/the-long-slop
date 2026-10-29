@@ -37,6 +37,8 @@ pub struct WorldSeatReference {
     pub cant_sit_angle_degrees: Option<f32>,
     /// `lookInsteadOfLean`.
     pub look_instead_of_lean: bool,
+    /// `rootOrigin`: the outside view pivots on the root, not on the seat.
+    pub root_origin: bool,
     pub pitch_limits_degrees: [f32; 2],
     pub default_pitch_degrees: f32,
     pub min_exit_angle_degrees: f32,
@@ -148,6 +150,7 @@ fn main_seat(
             None
         },
         look_instead_of_lean: flag(f, "lookInsteadOfLean")?,
+        root_origin: flag(f, "rootOrigin")?,
         pitch_limits_degrees: SEAT_PITCH_LIMITS_DEGREES,
         default_pitch_degrees: number(f, "defYrot")?,
         min_exit_angle_degrees: number(f, "minGetUpAnlge")?,
@@ -509,6 +512,7 @@ mod tests {
                 ("limitLessRot", WorldValue::Integer(0)),
                 ("BcantSitAngle", WorldValue::Integer(0)),
                 ("lookInsteadOfLean", WorldValue::Integer(0)),
+                ("rootOrigin", WorldValue::Integer(0)),
                 ("defYrot", WorldValue::Number(0.)),
                 ("minGetUpAnlge", WorldValue::Number(65.)),
                 ("getOutHeight", WorldValue::Number(1.)),

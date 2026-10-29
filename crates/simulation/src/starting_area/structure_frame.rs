@@ -46,6 +46,8 @@ pub struct StructureViews {
     wing_poses: Vec<Transform>,
     /// Hidden gun parts of the written slot. Reused each slot.
     gun_hidden: Vec<u32>,
+    /// `GarageRuntime::other_view` of the written worn flags.
+    other_view: bool,
 }
 
 impl GarageRuntime {
@@ -85,6 +87,20 @@ impl GarageRuntime {
                 views.selection.push(slot as usize);
             }
         }
+        if views.other_view != self.other_view {
+            views.other_view = self.other_view;
+            // Rewrite the worn flags of worn items.
+            for (slot, entry) in views.entries.iter().enumerate() {
+                if entry.as_ref().and_then(|e| e.food).is_some_and(|id| {
+                    self.area
+                        .items
+                        .get(id)
+                        .is_some_and(|item| matches!(item.location, ItemLocation::Worn(_)))
+                }) {
+                    views.selection.push(slot);
+                }
+            }
+        }
         let inputs = Inputs {
             reference,
             stream: &self.stream,
@@ -95,6 +111,7 @@ impl GarageRuntime {
             powertrain: &self.powertrain,
             flyers: &self.flyers,
             seconds: self.simulation_seconds,
+            other_view: self.other_view,
         };
         let result = views.write(&inputs, frame);
         self.physics.clear_presentation_bodies();
@@ -115,6 +132,7 @@ struct Inputs<'a> {
     powertrain: &'a crate::simulation::powertrain::PowertrainParts,
     flyers: &'a crate::flyers::Flyers,
     seconds: f64,
+    other_view: bool,
 }
 
 impl StructureViews {
@@ -372,10 +390,12 @@ impl StructureViews {
         if let Some(item) = food {
             check_food(reference, prototype, item)?;
         }
-        if entry
-            .food
-            .and_then(|id| items.get(id))
-            .is_some_and(|item| matches!(item.location, ItemLocation::Worn(_)))
+        // Source `wearedRenderer.make = !otherView()`: other views show worn items.
+        if !inputs.other_view
+            && entry
+                .food
+                .and_then(|id| items.get(id))
+                .is_some_and(|item| matches!(item.location, ItemLocation::Worn(_)))
         {
             row.flags |= StructureRow::WORN;
         }

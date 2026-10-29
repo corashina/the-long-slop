@@ -1640,7 +1640,7 @@ impl InteractionState {
             .filter(|target| valid(*target) && availability.light_control.is_none());
         let grab_target = aim.grab_target.filter(|target| valid(*target));
         let filling_target = aim.filling_target.filter(|target| valid(*target));
-        self.mechanisms.sync(physics, false);
+        self.mechanisms.sync(physics);
         let released_mechanism = use_input.released & keys::USE != 0 && self.use_consumed;
         let primary_use = availability.lmb_use && self.held_light_control().is_none();
         let mechanism_held = use_input.held & keys::USE != 0
@@ -2001,7 +2001,7 @@ impl InteractionState {
         {
             self.complete_carry_release(&mut action, InteractionAction::Drop(item));
         }
-        self.mechanisms.sync(physics, false);
+        self.mechanisms.sync(physics);
         items.sync_poses(physics);
         let hose_input = hose::HoseInput {
             held: self.held(),
@@ -2153,7 +2153,7 @@ impl InteractionState {
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
         self.parts.prepare_mechanisms(items, &mut self.mechanisms);
-        self.mechanisms.sync(physics, true);
+        self.mechanisms.sync(physics);
         self.parts
             .capture_mechanisms(items, &self.mechanisms, physics)?;
         self.parts.sync(items, physics)?;
@@ -2161,7 +2161,7 @@ impl InteractionState {
         Ok(())
     }
     pub fn sync_mechanisms(&mut self, physics: &mut PhysicsWorld) {
-        self.mechanisms.sync(physics, true);
+        self.mechanisms.sync(physics);
     }
 }
 

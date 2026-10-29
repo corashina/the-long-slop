@@ -104,12 +104,8 @@ impl GarageRuntime {
                     flags: PoseRow::ACTIVE,
                     rotation: camera.rotation,
                 }),
-            seat_car: match (area.player.seat_vehicle(), self.vehicle.as_ref()) {
-                (Some(_), Some(key)) => {
-                    PoseRow::new(self.physics.snapshot(key).pose, PoseRow::ACTIVE)
-                }
-                _ => PoseRow::default(),
-            },
+            // The driver sets the view camera.
+            view_camera: PoseRow::default(),
             prepared_roads: metrics.prepared_roads as u32,
             glasses: crate::boundary::GlassesState::encode(area.wear.glasses),
             // The driver sets the look and its own counters.

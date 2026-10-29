@@ -442,6 +442,10 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
             'doppler': prefab_data['DopplerLevel'], 'pan': prefab_data['Pan2D']})
     # randomFlyer.Sound plays its clip through mainscript.PlayClipAtPoint at AudioPriorities[3].
     flyer['voice'] = shared_voice(PRIORITIES[3])
+    # nyulscript.Die plays a random Sdie clip through mainscript.PlayClipAtPoint at AudioPriorities[3].
+    rabbit = manifest['creatures']['rabbit']
+    rabbit['die_clips'] = [clip(source.get(c['file'], c['path_id'])) for c in rabbit['die_clips']]
+    rabbit['die_voice'] = shared_voice(PRIORITIES[3])
     def binding(owner, trigger, pointers, gain, pitch, priority, evidence, route=None, voice_id=None):
         choices = [clip(source.resolve(owner, p)) for p in pointers if p['m_PathID']]
         if not choices: return None
@@ -571,6 +575,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
             wheels=recover_wheel_voices(source,root,[source.get(w['source']['file'],w['source']['path_id']) for w in vehicle['wheels']])
             vehicle['audio']=car_audio(source,car,[{f:source.get(v['file'],v['path_id']) for f,v in w.items()} for w in wheels],cd,car_sound,car_shot)
             vehicle['audio']['doors']=door_audio(source,root,car,lambda r,p:car_shot(r,p,1.,None,None,PRIORITIES[4]))
+            if vehicle['blood_clip']:vehicle['blood_clip']=clip(source.get(vehicle['blood_clip']['file'],vehicle['blood_clip']['path_id']))
             routes=[c for node in source.hierarchy(root,activate_root=True) for c in node['components']
                 if c.type.name=='MonoBehaviour' and source.class_name(c)=='audioBasedOnInteriorsensscript' and source.read(c)['def']['m_PathID']]
             if len(routes)>1:raise ValueError(f'Car prototype has more than one audio route: {key(car)}')

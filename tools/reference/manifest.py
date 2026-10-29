@@ -11,6 +11,7 @@ from .parts import recover_part_slots
 from .driving import recover_driving
 from .lighting import rgba
 from .player_movement import recover_player_movement
+from .car_camera import recover_car_camera
 
 
 def component_mass(source, components) -> float:
@@ -56,7 +57,7 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
     assets=[]
     for asset_id,(name,readers) in enumerate(roots.items(),1):
         report=reports[name]
-        assets.append({'id':asset_id,'mesh_count':report['mesh_count'],'material_count':report['material_count'],'usage':'player_prototype' if name=='player' else 'ragdoll_prototype' if name=='ragdoll' else 'item_prototype' if name.startswith('item_') else 'food_prototype' if name=='food' else 'road_lamp_prototype' if name=='road_lamp' else 'sky_prototype' if name=='sky' else 'sky_traffic' if name.startswith('sky_') else 'unique_scene','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
+        assets.append({'id':asset_id,'mesh_count':report['mesh_count'],'material_count':report['material_count'],'usage':'player_prototype' if name=='player' else 'ragdoll_prototype' if name=='ragdoll' else 'item_prototype' if name.startswith('item_') else 'food_prototype' if name=='food' else 'road_lamp_prototype' if name=='road_lamp' else 'sky_prototype' if name=='sky' else 'sky_traffic' if name.startswith('sky_') else 'creature_prototype' if name.startswith('creature_') else 'unique_scene','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
         records=[]
         for root in readers:records.extend(source.hierarchy(root,activate_root=True))
         for entry,record in zip(report['nodes'],records,strict=True):
@@ -236,9 +237,12 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
             inverse=[-x for x in rim_pose['rotation'][:3]]+[rim_pose['rotation'][3]];pose['rotation']=list(quaternion_product(inverse,pose['rotation']))
             tire_mount=pose;tire_main=tire_data['maintipus'];tire_types=tire_data['tipus']
         else:radius=source.read(components[node]['gumiscript'][0])['radius']
+        # mainscript.defFallOffChance has 18 members.
+        if not 0<=value['fallOffCategory']<=17:raise ValueError(f'{key(part)} fallOffCategory is not a defFallOffChance member')
         wheel_parts.append({'item':item_nodes[node],'source':source_id(part),'radius':radius,'main_types':value['maintipus'],'part_types':value['tipus'],
             'colliders':[collider_ids[identity] for identity in identities],'tire_slot_anchor':tire_anchor,'tire_mount':tire_mount,
-            'tire_main_types':tire_main,'tire_types':tire_types,'local_rotation_after_mount':euler_quaternion(vector(value['localRotationAfterMount'])),'cover_slot':value['cover_CantCraftIfCovered']['m_PathID'] or None})
+            'tire_main_types':tire_main,'tire_types':tire_types,'local_rotation_after_mount':euler_quaternion(vector(value['localRotationAfterMount'])),'cover_slot':value['cover_CantCraftIfCovered']['m_PathID'] or None,
+            'fall_off_category':value['fallOffCategory']})
     # A tire owns its listed shapes if a parent rim lists the same shapes.
     tire_colliders={collider_id for part in wheel_parts if 'gumi' in part['part_types'] for collider_id in part['colliders']}
     for part in wheel_parts:
@@ -267,6 +271,7 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
         obj_rotation_sensitivity=defaults[4],look_sensitivity=[defaults[0]*defaults[1],defaults[0]*defaults[2]])
     scroll_slider=source.resolve(settings_reader,settings['tabControls']['sliders'][3]);scroll_definition=source.read(scroll_slider)
     player_record['scroll_sensitivity']=scroll_definition['defValue']*(scroll_definition['valueMultipler'] if scroll_definition['valueMultipler'] else 1.)
+    player_record['car_camera']=recover_car_camera(source,player_reader,player,main)
     player_record['camera_culling_mask']=recover_camera_visibility(source)['normal_view_mask']
     player_record['action_masks']=recover_masks(player)
     time_reader=source.get('globalgamemanagers',8)

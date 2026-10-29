@@ -32,7 +32,7 @@ fn frame_round_trips() {
             motion_revision: 2,
             far_plane: 1500.,
             sleep_camera: row(9.),
-            seat_car: PoseRow::default(),
+            view_camera: PoseRow::default(),
             prepared_roads: 12,
             glasses: GlassesState::encode(Some(GlassesState {
                 profile: 3,

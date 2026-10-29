@@ -1002,6 +1002,7 @@ mod tests {
             tire_main_types: Vec::new(),
             tire_types: vec!["gumi".into()],
             local_rotation_after_mount: [0., 0., 0., 1.],
+            fall_off_category: 7,
         };
         let (rim, rim_collider) = part(40, physics, items);
         let (tire, tire_collider) = part(41, physics, items);

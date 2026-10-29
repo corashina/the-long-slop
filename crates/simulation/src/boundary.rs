@@ -156,8 +156,8 @@ pub struct StateBlock {
     pub far_plane: f32,
     /// Sleep camera in stream space. `ACTIVE` while the sleep view shows.
     pub sleep_camera: PoseRow,
-    /// Chassis of the car the player sits in, at the current step. `ACTIVE` while seated.
-    pub seat_car: PoseRow,
+    /// Camera of the seated outside view, drop cam or map view. `ACTIVE` while one shows.
+    pub view_camera: PoseRow,
     /// Startup roads with prepared meshes.
     pub prepared_roads: u32,
     /// Lens of the worn glasses, as `GlassesState::encode`. Read it with `StateBlock::glasses`.
@@ -344,8 +344,8 @@ impl StateBlock {
     pub const GENERATION_READY: u32 = 1 << 7;
     /// The world supports the player and the required content is ready.
     pub const WORLD_READY: u32 = 1 << 8;
-    /// The chase camera shows the seated car.
-    pub const CHASE: u32 = 1 << 9;
+    /// Source `otherView()`: the outside view, the drop cam or the map view shows.
+    pub const OTHER_VIEW: u32 = 1 << 9;
     /// The storage startup frames are done.
     pub const STORAGE_READY: u32 = 1 << 10;
     /// The simulation has a save candidate.
@@ -354,6 +354,10 @@ impl StateBlock {
     pub const RESTORED: u32 = 1 << 11;
     /// The world has no generation jobs and no pending work.
     pub const WORLD_IDLE: u32 = 1 << 12;
+    /// The other view is the drop cam.
+    pub const DROP_CAM: u32 = 1 << 14;
+    /// The other view is the map view.
+    pub const MAP_VIEW: u32 = 1 << 15;
 }
 
 /// Valve of one opening: 0 closed, 1 open.
