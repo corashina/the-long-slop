@@ -11,6 +11,7 @@ from .parts import recover_part_slots
 from .driving import recover_driving
 from .lighting import rgba
 from .player_movement import recover_player_movement
+from .car_camera import recover_car_camera
 
 
 def component_mass(source, components) -> float:
@@ -270,6 +271,7 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
         obj_rotation_sensitivity=defaults[4],look_sensitivity=[defaults[0]*defaults[1],defaults[0]*defaults[2]])
     scroll_slider=source.resolve(settings_reader,settings['tabControls']['sliders'][3]);scroll_definition=source.read(scroll_slider)
     player_record['scroll_sensitivity']=scroll_definition['defValue']*(scroll_definition['valueMultipler'] if scroll_definition['valueMultipler'] else 1.)
+    player_record['car_camera']=recover_car_camera(source,player_reader,player,main)
     player_record['camera_culling_mask']=recover_camera_visibility(source)['normal_view_mask']
     player_record['action_masks']=recover_masks(player)
     time_reader=source.get('globalgamemanagers',8)

@@ -725,7 +725,8 @@ pub struct GarageRuntime {
     urine_reference: crate::reference::FluidParticleReference,
     urine_emission: [f32; 2],
     sleep_camera: Option<crate::sleep::SleepCamera>,
-    pub sleep_camera_allowed: bool,
+    /// Source `otherView()`: a seated outside view, drop cam or map view shows. The driver sets it.
+    pub other_view: bool,
     pub audio_motion_revision: u32,
     pub simulation_seconds: f64,
     survival_draw: u64,
@@ -901,7 +902,7 @@ impl GarageRuntime {
             hearing: crate::hearing::HearingState::new(reference)?,
             sleep: crate::sleep::SleepState::new(&reference.sleep),
             sleep_camera: None,
-            sleep_camera_allowed: true,
+            other_view: false,
             audio_motion_revision: 0,
             simulation_seconds: 0.,
             survival_draw: 0,
@@ -1754,7 +1755,7 @@ impl GarageRuntime {
             crate::sleep::SleepInput {
                 held: sleep_held,
                 active: !self.paused,
-                camera_allowed: self.sleep_camera_allowed || !self.area.player.seated(),
+                camera_allowed: !self.other_view || !self.area.player.seated(),
                 dead: self.needs_output().dead,
                 show_text: self.area.player.show_sleep_text(),
             },

@@ -86,6 +86,40 @@ pub struct PlayerViewReference {
     pub height_scroll_step: f32,
 }
 
+/// Source `fpscontroller` outside view rig values (`CarCam*`, `carCamLerp*`, `defcarcamrotX`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CarCameraReference {
+    pub default_pitch_degrees: f32,
+    /// `CarCamLimitX`, `CarCamLimitY`, `CarCamLimitZ`.
+    pub pan_limits: [f32; 3],
+    pub pan_sensitivity: f32,
+    /// Minus the `CarCam` local z.
+    pub default_distance: f32,
+    /// `FduckLerp`.
+    pub recenter_rate: f32,
+    pub follow_rate: f32,
+    pub follow_speed_kmh: [f32; 2],
+    pub follow_angle_speed_kmh: [f32; 2],
+    pub map: MapViewReference,
+}
+
+/// Source `mainscript.mapCamView*`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MapViewReference {
+    pub time_add: f32,
+    pub min_height: f32,
+    pub max_height: f32,
+    pub min_pan: f32,
+    pub max_pan: f32,
+    pub min_pan_speed: f32,
+    pub max_pan_speed: f32,
+    pub height_rate: f32,
+    pub rotation_rate: f32,
+    pub look_time: f32,
+}
+
 fn same(actual: f32, expected: f32) -> bool {
     actual.is_finite() && (actual - expected).abs() <= 0.00001
 }

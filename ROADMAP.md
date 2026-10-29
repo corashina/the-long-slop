@@ -262,3 +262,15 @@ Prepare once:
 5. Jump at a wall: one extra push. Jump at a ledge: a second push. Hold jump below the ledge: you grip and stop falling, then jump up.
 6. Save mid-air and load: the jump continues.
 7. Check F3 walking and in a bus. Compare with the frame rate rule.
+
+### Car camera modes (X10)
+
+1. Sit in the Lada driver seat. Tap C: the outside view orbits the car with the mouse. Pitch stops at about 89 degrees.
+2. Hold Q and move the mouse: the view pans up to 1.5 m. Shift+Q pans forward and back.
+3. Scroll: zoom from 1 to 30 m. Hold Tab: the view goes back to 5 m and the default angle.
+4. Drive: the view turns behind the car, faster at higher speed.
+5. Tap C: back to the cockpit. Repeat on the passenger seat and on a sled or bike seat.
+6. Hold C for 0.4 s: the camera stays at its spot and turns with the mouse. Hold C again: it follows the car. Tap C: back to the view before.
+7. Press M in a seat: the camera rises over 1/3 s and looks down. Scroll sets the height from 2.5 to 200 m. Q and the mouse pan. Tab recenters. Press M again: the camera comes back down.
+8. In each other view: E does not get out or use things, prompts and the crosshair hide, worn items show, and the sunglasses tint is off. Sleep is not possible.
+9. Check F3 in each view. Compare with the frame rate rule.

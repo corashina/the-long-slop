@@ -211,12 +211,7 @@ fn lada_tows_the_trailer_and_the_hitch_saves() {
 
     // Save and load: the grip returns to the car hitch.
     let snapshot = run
-        .capture_save(
-            &reference,
-            &stamp,
-            crate::save::CameraSave::FirstPerson,
-            "2026-10-26T12:00:00Z",
-        )
+        .capture_save(&reference, &stamp, "2026-10-26T12:00:00Z")
         .unwrap();
     let snapshot: crate::save::SaveSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
