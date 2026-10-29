@@ -57,6 +57,18 @@ pub fn set_collider_enabled(collider: &mut rapier3d::prelude::Collider, enabled:
     collider.set_enabled(enabled);
     collider.set_solver_groups(solver_groups(enabled));
 }
+/// Collider pose changes below this are float noise of world round trips.
+const POSE_TOLERANCE: f32 = 1e-4;
+/// A pose write is due when `next` differs from `current` by more than float noise.
+/// Each collider pose write recomputes the body mass and wakes the body.
+pub fn pose_changed(current: Option<&rapier3d::math::Pose>, next: &rapier3d::math::Pose) -> bool {
+    current.is_none_or(|current| {
+        !current
+            .translation
+            .abs_diff_eq(next.translation, POSE_TOLERANCE)
+            || !current.rotation.abs_diff_eq(next.rotation, POSE_TOLERANCE)
+    })
+}
 pub const SLOT_SENSOR_FLAG: u128 = 1 << 126;
 /// Collider user data bits 32 to 34 hold the `StepSurface` code. 0 is none.
 pub const STEP_SURFACE_SHIFT: u32 = 32;

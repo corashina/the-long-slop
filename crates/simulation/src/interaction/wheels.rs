@@ -1192,7 +1192,7 @@ impl WheelAssemblies {
                     if collider.user_data != data {
                         collider.user_data = data;
                     }
-                    if *collider.position() != world {
+                    if crate::vehicle::pose_changed(Some(collider.position()), &world) {
                         collider.set_position(world);
                     }
                 });

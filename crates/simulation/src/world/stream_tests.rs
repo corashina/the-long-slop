@@ -23,6 +23,8 @@ mod item_seats;
 mod long_trip;
 #[path = "stream_tests/melee.rs"]
 mod melee;
+#[path = "stream_tests/parked_car.rs"]
+mod parked_car;
 #[path = "stream_tests/sled.rs"]
 mod sled;
 #[path = "stream_tests/towing.rs"]
