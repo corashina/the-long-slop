@@ -176,6 +176,8 @@ struct Gun {
     /// Revolver `Bullets` or BB gun `bullet` nodes.
     bullets: Vec<u32>,
     mag: Option<u32>,
+    /// `magPos` in the item root frame: the dropped magazine pose.
+    mag_pos: Option<Pose>,
     /// The flash light node.
     flash: Option<u32>,
     hand: Option<ReloadHand>,
@@ -646,8 +648,7 @@ impl GunState {
             rt.can(&self.guns[rt.gun].record) && accepts(&rt.ammo, &from.ammo, from.is_mag)
         })
     }
-    /// `weaponscript.CanUnload(to)`. A magazine gun drops its magazine prefab, which this port
-    /// cannot spawn, so it does not unload.
+    /// `weaponscript.CanUnload(to)`.
     pub fn can_unload(&self, item: ItemId, to: &AmmoItem) -> bool {
         self.runtimes.get(&item).is_some_and(|rt| {
             let r = &self.guns[rt.gun].record;
@@ -661,21 +662,21 @@ impl GunState {
     pub fn unloads(&self, item: ItemId) -> bool {
         self.record(item).is_some_and(|r| unloads(&r.kind))
     }
-    /// `weaponscript.Reload(other, unload)` at the gun `position`. Returns true when the
-    /// magazine item `other` goes into the gun and must be removed.
+    /// `weaponscript.Reload(other, unload)` at the gun `position`. `held`: `other` is picked up.
     pub fn reload(
         &mut self,
         item: ItemId,
         other: &mut AmmoItem,
         unload: bool,
+        held: bool,
         position: [f64; 3],
-    ) -> bool {
+    ) -> Reloaded {
         let Some(rt) = self.runtimes.get_mut(&item) else {
-            return false;
+            return Reloaded::default();
         };
         let g = &self.guns[rt.gun];
         rt.reload_time = self.time;
-        let remove = kind_reload(rt, &g.record.kind, g.bullets.len(), other, unload);
+        let result = kind_reload(rt, &g.record.kind, g.bullets.len(), other, unload, held);
         if let Some((clip, volume)) = g.reload {
             let pitch = self.random.range(RANDOM_PITCH[0], RANDOM_PITCH[1]);
             self.sounds.push(ShotSound {
@@ -687,7 +688,20 @@ impl GunState {
         }
         touch(&mut self.changed, item);
         touch(&mut self.presented, item);
-        remove
+        result
+    }
+    /// `magPos` of a magazine gun in physics space, and the magazine prefab.
+    pub fn mag_drop(
+        &self,
+        item: ItemId,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+    ) -> Option<(Pose, &SourceId)> {
+        let g = &self.guns[self.runtimes.get(&item)?.gun];
+        let GunKind::Magazine { mag_prefab, .. } = &g.record.kind else {
+            return None;
+        };
+        Some((root_pose(items, physics, item)? * g.mag_pos?, mag_prefab))
     }
     /// `weaponscript.Csoletores(LOOKX, LOOKY)` while R is held: the break barrel moves.
     pub fn break_barrel(&mut self, item: ItemId, look: [f32; 2], position: [f64; 3]) {
@@ -1265,14 +1279,27 @@ fn settle_triggers(g: &Gun, rt: &mut GunRuntime) {
     }
 }
 
-/// The kind `Reload(other, unload)`. Returns true when the magazine `other` is used up.
+/// What `Reload(other, unload)` leaves for the world to do.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Reloaded {
+    /// The magazine `other` went into the gun: remove it.
+    pub used: bool,
+    /// geppityuscript drops the old magazine at `magPos` with these rounds.
+    pub dropped: Option<f32>,
+    /// A loose magazine `other` moves to `magPos` before the swap.
+    pub to_mag_pos: bool,
+}
+
+/// The kind `Reload(other, unload)`.
 fn kind_reload(
     rt: &mut GunRuntime,
     kind: &GunKind,
     chambers: usize,
     other: &mut AmmoItem,
     unload: bool,
-) -> bool {
+    held: bool,
+) -> Reloaded {
+    let mut result = Reloaded::default();
     match *kind {
         GunKind::BbGun { ammo_gain, .. } => {
             let gain = ammo_gain as f32;
@@ -1283,7 +1310,6 @@ fn kind_reload(
             } else if accepts(&rt.ammo, &other.ammo, other.is_mag) {
                 rt.ammo.reload(&mut other.ammo, gain);
             }
-            false
         }
         GunKind::Revolver { .. } => {
             if unload {
@@ -1295,25 +1321,39 @@ fn kind_reload(
                 rt.ammo.reload(&mut other.ammo, 1.);
                 rt.chambers = load_chamber(rt.chambers, chambers);
             }
-            false
         }
-        // geppityuscript: a magazine swaps rounds with the gun. Without a magazine in the gun
-        // the item is used up.
-        GunKind::Magazine { .. } if !unload && other.is_mag => {
+        // geppityuscript.Reload: unload drops the magazine with the gun rounds.
+        GunKind::Magazine { .. } if unload => drop_magazine(rt, &mut result),
+        // A picked-up magazine drops the old one and goes in. A loose magazine moves to
+        // `magPos` and swaps rounds; without a magazine in the gun it is used up.
+        GunKind::Magazine { .. } if other.is_mag => {
+            if held {
+                drop_magazine(rt, &mut result);
+            } else {
+                result.to_mag_pos = true;
+            }
             let (gun, mag) = swap_magazine(rt.ammo.count, other.ammo.count);
             rt.ammo.count = gun;
             other.ammo.count = mag;
-            let used = !rt.has_mag;
+            result.used = !rt.has_mag;
             rt.has_mag = true;
-            used
         }
-        _ => false,
+        _ => {}
     }
+    result
 }
 
-/// Magazine guns drop a magazine prefab on unload.
+/// `geppityuscript.Reload(null, unload: true)`.
+fn drop_magazine(rt: &mut GunRuntime, result: &mut Reloaded) {
+    if rt.has_mag {
+        result.dropped = Some(rt.ammo.count);
+        rt.ammo.count = 0.;
+    }
+    rt.has_mag = false;
+}
+
 fn unloads(kind: &GunKind) -> bool {
-    !matches!(kind, GunKind::Magazine { .. } | GunKind::None)
+    !matches!(kind, GunKind::None)
 }
 
 /// `ammoscript.CanReload`: `to` takes rounds of its type, or a magazine.
@@ -1516,7 +1556,12 @@ fn gun(
             })
         })
         .transpose()?;
+    let mag_pos = match &record.kind {
+        GunKind::Magazine { mag_pos, .. } => Some(root(mag_pos)?),
+        _ => None,
+    };
     Ok(Gun {
+        mag_pos,
         muzzle: root(&record.muzzle)?,
         mass: r.guns.ammo_mass[kind],
         velocity: r.guns.ammo_velocity[kind],

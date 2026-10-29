@@ -40,7 +40,7 @@ All tasks are done.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| X02 | Weapons and damage | L | Cacti breaks, SMG magazine drop on unload, AI parts of the damage model (X03). |
+| X02 | Weapons and damage | L | Cacti breaks, AI parts of the damage model (X03). |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters (attacks hurt the player), UFO, EMP. |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. |
@@ -260,6 +260,7 @@ Prepare once:
 1. Run `cargo test --lib x02_leftovers -- --ignored`.
 2. Shoot the full 20 L garage fuel can. It explodes, and the can and its cap go away. Save and load: they stay gone.
 3. Shoot the garage water tank with a shotgun. Holes that face down leak.
+4. SMG: unload with E at loose ammo, or with R while you hold ammo. A magazine drops at the gun with the gun rounds, and the gun is empty. Load it back with R. Load a held magazine into a loaded SMG: the old magazine drops. Save and load: a dropped magazine keeps its rounds. The export now has the magazine as an item prototype and a new acquisition hash.
 
 ### Sky traffic and bats (X03a)
 
