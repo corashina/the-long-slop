@@ -259,5 +259,6 @@ Run the X03a test pass (sky traffic) in the same run:
 | X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. [M13] |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. [K01-K09, K11-K14, F04] |
 | X09 | Car crash damage | L | `carscript.DamageStuff`: parts fall off by crash speed and condition, horn, blood, death on hard crashes; blasts call it with power x 5. [B23] |
+| X10 | Car camera modes | M | Port `fpscontroller` outside view (mouse orbit, Q pan, scroll zoom 1-30 m, Tab recenter) on every seat, drop cam (hold C 0.4 s) and map view (M). Replace the fixed chase camera. |
 
 Not planned: multiplayer, VR, stereo 3D, mod events, Steam features, developer tools. [N01-N08]
