@@ -7,6 +7,8 @@ mod breakables;
 mod car_types;
 #[path = "stream_tests/cargo.rs"]
 mod cargo;
+#[path = "stream_tests/crash.rs"]
+mod crash;
 #[path = "stream_tests/drive_out.rs"]
 mod drive_out;
 #[path = "stream_tests/explosions.rs"]
@@ -1332,6 +1334,7 @@ fn replay_placement(source: &SourceId, ordinal: u32, position: [f64; 3]) -> Plac
 }
 fn replay_snapshot(position: [f64; 3]) -> super::super::ObjectSnapshot {
     super::super::ObjectSnapshot {
+        conditions: Vec::new(),
         pose: AbsolutePose {
             position,
             rotation: [0., 0., 0., 1.],

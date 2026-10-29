@@ -59,6 +59,13 @@ impl WorldStream {
         let target = &self.breakables.targets()[target];
         Some((target.kind.clone(), target.record))
     }
+    /// The placement pose of a bound prop structure.
+    pub fn prop_pose(&self, parent: &GeneratedId) -> Option<crate::world::AbsolutePose> {
+        self.structures
+            .iter()
+            .find(|s| &s.placement.id == parent)
+            .map(|s| s.placement.pose)
+    }
     /// Source Break: one random clip of the record.
     pub fn pick_break_clip<'a>(&mut self, record: &'a BreakableReference) -> Option<&'a SourceId> {
         self.breakables.pick_clip(record)
@@ -174,6 +181,7 @@ impl WorldStream {
             BreakKind::Lamp { parent, control } => lamps
                 .iter()
                 .any(|b| b.control == *control && &b.parent == parent),
+            BreakKind::Prop { parent } => structures.iter().any(|s| &s.placement.id == parent),
         });
         // A content item whose world prototype holds a breakablescript without a lamp.
         for content in active {
@@ -220,6 +228,27 @@ impl WorldStream {
                 }
             }
         }
+        // A prop structure whose world prototype holds a breakablescript without a lamp.
+        let props = records.iter().enumerate().filter(|(_, r)| r.lamp.is_none());
+        let props = props.flat_map(|(i, r)| {
+            r.owners
+                .iter()
+                .filter(|o| o.kind == BreakableOwnerKind::World)
+                .map(move |o| (&o.prototype, i))
+        });
+        // Rescans follow content changes, not frames.
+        let props: Vec<(&SourceId, usize)> = props.collect();
+        for instance in structures {
+            if let Some(&(_, record)) = props
+                .iter()
+                .find(|(p, _)| *p == &instance.placement.prototype)
+            {
+                let kind = BreakKind::Prop {
+                    parent: instance.placement.id.clone(),
+                };
+                self.breakables.bind(kind, record, &records[record]);
+            }
+        }
         // A structure lamp control: each breakablescript in its prototype that breaks its lamps.
         for binding in lamps {
             let Some(instance) = structures.iter().find(|s| s.placement.id == binding.parent)
@@ -241,19 +270,21 @@ impl WorldStream {
                 }
             }
         }
-        // Lamp trigger colliders are the structure colliders on the breakablescript node.
+        // Lamp trigger and prop colliders are the structure colliders on the breakablescript
+        // node. Prop triggers report OnTriggerEnter.
         for index in 0..self.breakables.targets().len() {
             let target = &self.breakables.targets()[index];
-            let BreakKind::Lamp { parent, .. } = &target.kind else {
+            let (BreakKind::Lamp { parent, .. } | BreakKind::Prop { parent }) = &target.kind else {
                 continue;
             };
+            let prop = matches!(target.kind, BreakKind::Prop { .. });
             let record = target.record;
             let instance = structures
                 .iter()
                 .find(|s| &s.placement.id == parent)
-                .expect("bound lamp structure");
+                .expect("bound structure");
             let node = world_node(&records[record], &instance.placement.prototype)
-                .expect("bound lamp owner");
+                .expect("bound structure owner");
             let prototype = self
                 .reference
                 .prototypes
@@ -267,6 +298,12 @@ impl WorldStream {
                     .any(|c| &c.source == source && c.node == node)
                 {
                     self.breakables.bind_collider(*handle, index);
+                    let events = physics.rapier().colliders[*handle].active_events();
+                    if prop && !events.contains(ActiveEvents::COLLISION_EVENTS) {
+                        physics.edit_collider(*handle, |c| {
+                            c.set_active_events(events | ActiveEvents::COLLISION_EVENTS)
+                        });
+                    }
                 }
             }
         }

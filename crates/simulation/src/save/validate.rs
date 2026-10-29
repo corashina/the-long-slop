@@ -51,7 +51,9 @@ impl SaveSnapshot {
                 )?;
             } else {
                 links(
-                    item.food.is_none() && !item.removed,
+                    item.food.is_none()
+                        && (!item.removed
+                            || crate::starting_area::explosive_imported(reference, id)),
                     "Unexpected removed item or food progress",
                 )?;
             }
@@ -81,7 +83,18 @@ impl SaveSnapshot {
         links(items.len() == reference.items.len(), "Missing source items")?;
         let mut spawned = HashSet::new();
         for record in &self.spawned {
-            crate::starting_area::spawned::saved_prototype(reference, record)?;
+            let (prototype, _) = crate::starting_area::spawned::saved_prototype(reference, record)?;
+            if let Some(count) = record.ammo {
+                let rules = reference.item_prototypes[prototype].behavior.ammo_rules;
+                data(
+                    rules.is_some_and(|r| {
+                        count.is_finite()
+                            && (0. ..=r.maximum).contains(&count)
+                            && (r.float || count.fract() == 0.)
+                    }),
+                    "Spawned ammo",
+                )?;
+            }
             absolute(&record.pose)?;
             links(
                 spawned.insert((record.serial, record.pickup)),
@@ -113,6 +126,23 @@ impl SaveSnapshot {
         self.validate_mechanisms(reference, &ids)?;
         self.validate_lighting(reference, &ids)?;
         validate_weather(&reference.weather, &self.weather)?;
+        for rabbit in &self.rabbits {
+            absolute(&rabbit.pose)?;
+            data(
+                unit(rabbit.size)
+                    && rabbit.shoot_health.is_finite()
+                    && rabbit.bones.len()
+                        == if rabbit.alive {
+                            0
+                        } else {
+                            reference.creatures.rabbit.ragdoll.bodies.len()
+                        },
+                "Rabbit state",
+            )?;
+            for bone in &rabbit.bones {
+                absolute(bone)?;
+            }
+        }
         crate::conditions::validate_surfaces(reference, &self.conditions)?;
         crate::interaction::cleaning::validate_tools(reference, &self.conditions.tools)?;
         for brush in &reference.conditions.brushes {

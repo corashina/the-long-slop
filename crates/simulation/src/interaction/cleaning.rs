@@ -63,6 +63,8 @@ pub enum WashOwner {
     Item(ItemId),
     /// A building cobweb, by its stream id.
     Cobweb(u32),
+    /// The blood trigger of a car, by the car root item.
+    Car(ItemId),
 }
 /// A washtriggerscript on generated content, such as the genie lamp or a cobweb.
 struct GeneratedWash {
@@ -386,8 +388,8 @@ impl CleaningTools {
     pub fn bind_world_condition(&mut self, handle: ColliderHandle, id: ConditionId) {
         self.world_conditions.insert(handle, id);
     }
-    pub fn unbind_world_condition(&mut self, handle: ColliderHandle) {
-        self.world_conditions.remove(&handle);
+    pub fn unbind_world_condition(&mut self, id: ConditionId) {
+        self.world_conditions.retain(|_, v| *v != id);
     }
     pub fn sync_wash_colliders(&self, conditions: &ConditionStore, physics: &mut PhysicsWorld) {
         let mut changed = false;
@@ -448,6 +450,10 @@ impl CleaningTools {
     }
     pub fn remove_generated_wash(&mut self, owner: WashOwner) {
         self.generated_washes.remove(owner);
+    }
+    /// Generated triggers that got clean since the last take.
+    pub fn cleaned_washes(&self) -> &[WashOwner] {
+        &self.generated_washes.cleaned
     }
     /// Generated triggers that got clean since the last call.
     pub fn take_cleaned_washes(&mut self) -> std::vec::Drain<'_, WashOwner> {

@@ -32,6 +32,7 @@ mod guns;
 mod home_cable;
 pub mod hose;
 mod hud;
+mod rabbits;
 mod ragdoll;
 mod reach;
 pub mod spawned;
@@ -40,6 +41,7 @@ mod survival;
 pub mod wear;
 mod weather;
 mod world_step;
+pub use explosions::explosive_imported;
 pub use survival::DrinkResult;
 pub use survival::active_part as active_food_part;
 pub use survival::saved_food;
@@ -461,6 +463,8 @@ pub struct WorldCarParts {
     pub handbrake_lever: Option<ItemId>,
     /// Plate label texts in `WorldVehicleReference::plates` order.
     pub plates: Vec<String>,
+    /// Source `carscript.blood`.
+    pub blood: Option<crate::crash::Blood>,
 }
 
 /// Car-side state of a car copy. The world change records keep it while the car is retired
@@ -474,6 +478,8 @@ pub struct VehicleState {
     pub trip_m: f64,
     pub requested_headlights: u8,
     pub steer: f32,
+    /// Source save `blood`: the car blood `ON`.
+    pub blood: bool,
 }
 
 /// Source `carscript` state of one car copy. Engine state lives on the engine part.
@@ -512,6 +518,12 @@ pub struct VehicleRuntime {
     bodies: Vec<RigidBodyHandle>,
     /// Absolute position at the start of the current step.
     previous: [f64; 3],
+    /// Source `carscript.lspeed`: forward speed in km/h at the start of the current step.
+    last_speed: f32,
+    /// Source `HornHit` state. It is not saved.
+    pub horn_hit: Option<crate::crash::HornHit>,
+    /// Source `carscript.blood`.
+    pub blood: Option<crate::crash::Blood>,
     /// Parts mounted on this car, found once at the start of each step.
     powertrain: Powertrain,
     /// Requested headlight state: off, low or high.
@@ -574,6 +586,9 @@ impl VehicleRuntime {
             recovery_bounds: parts.recovery_bounds,
             bodies: parts.bodies,
             previous: [0.0; 3],
+            last_speed: 0.,
+            horn_hit: None,
+            blood: parts.blood,
             powertrain: Powertrain::default(),
             requested_headlights: 0,
             light_switch: parts.light_switch,
@@ -618,6 +633,7 @@ impl VehicleRuntime {
         for v in self.lights.visibility() {
             v.hash(&mut h);
         }
+        self.blood.as_ref().map(|b| b.shown).hash(&mut h);
         h.finish()
     }
     /// Source `carscript.InteractSwitchLights`: off, low, high.
@@ -682,6 +698,7 @@ impl VehicleRuntime {
             trip_m: self.trip_m,
             requested_headlights: self.requested_headlights,
             steer: self.steer,
+            blood: self.blood.as_ref().is_some_and(|b| b.on),
         }
     }
     /// Restores a captured state. The gear must be in the record range.
@@ -701,9 +718,14 @@ impl VehicleRuntime {
         self.trip_m = state.trip_m;
         self.requested_headlights = state.requested_headlights;
         self.steer = state.steer;
+        // Source load: `GotDirty` when the saved blood is on, else the prototype state.
+        if let (true, Some(blood)) = (state.blood, &mut self.blood) {
+            blood.got_dirty();
+        }
     }
 }
 
+mod crash;
 mod inventory;
 pub use inventory::InventoryFrame;
 mod save;
@@ -718,6 +740,7 @@ pub struct GarageRuntime {
     weather_bindings: weather::WeatherBindings,
     sky: crate::sky_traffic::SkyTraffic,
     pub flyers: crate::flyers::Flyers,
+    pub creatures: crate::creatures::Creatures,
     pub urine: crate::interaction::fluid_contact::FluidContact,
     urine_reference: crate::reference::FluidParticleReference,
     urine_emission: [f32; 2],
@@ -759,6 +782,7 @@ pub struct GarageRuntime {
     pub notice: &'static str,
     pub aim: ResolvedAim,
     pub wheels: crate::interaction::wheels::WheelAssemblies,
+    crash: crate::crash::CrashState,
     pub driving_input: crate::simulation::input::DrivingInput,
     recovery_bodies: Vec<RigidBodyHandle>,
     /// Simulation time of the next under-map check.
@@ -895,6 +919,7 @@ impl GarageRuntime {
             weather_bindings,
             sky: crate::sky_traffic::SkyTraffic::new(&reference.sky, seed as u64),
             flyers: crate::flyers::Flyers::new(seed as u64),
+            creatures: crate::creatures::Creatures::new(reference, seed as u64, 0.)?,
             survival: crate::survival::SurvivalState::new(&reference.survival),
             hearing: crate::hearing::HearingState::new(reference)?,
             sleep: crate::sleep::SleepState::new(&reference.sleep),
@@ -928,6 +953,7 @@ impl GarageRuntime {
             notice: "",
             aim: ResolvedAim::default(),
             wheels,
+            crash: Default::default(),
             driving_input: crate::simulation::input::DrivingInput::new(
                 reference.driving.keyboard_steering_rate,
                 reference.driving.pedal_rate,
@@ -1190,6 +1216,8 @@ impl GarageRuntime {
                 &self.stream.origin,
                 key,
             );
+            // Spawn, load and restore set velocity before this point, so a new car does not crash.
+            vehicle.last_speed = crash::forward_kmh(&self.physics, key);
         }
 
         self.area.begin_step();
@@ -1516,11 +1544,13 @@ impl GarageRuntime {
         self.advance_weather(reference, FIXED_DT);
         self.advance_sky(reference, FIXED_DT);
         self.advance_flyers(reference, FIXED_DT);
+        self.advance_creatures(reference, FIXED_DT);
         self.area
             .interaction
             .mechanisms
             .apply_reactions(&mut self.physics);
         self.physics.step_physics();
+        self.step_crashes(reference);
         self.area
             .player
             .step_head_bob(walking_input, needs.dead, &self.physics, FIXED_DT);
@@ -1718,6 +1748,7 @@ impl GarageRuntime {
             }));
             self.urine.rebase(shift);
             self.flyers.rebase(shift);
+            self.creatures.rebase(shift);
             if let Some(audio) = &mut self.audio {
                 audio.rebase(std::array::from_fn(|i| {
                     (self.area.origin[i] - old_origin[i]) as f32
@@ -1811,6 +1842,37 @@ impl GarageRuntime {
                 },
             );
         }
+    }
+
+    /// Rabbits run in every state. Source `aispawn` sits on the Player.
+    fn advance_creatures(&mut self, reference: &ReferenceManifest, dt: f32) {
+        let player = &self.area.player;
+        let body = crate::vehicle::to_rapier(player.body_pose(&self.physics));
+        let head = rapier3d::math::Vector::from_array(player.focus_position(&self.physics));
+        let (stream, origin) = (&self.stream, self.stream.origin);
+        let supports = |p: rapier3d::math::Vector| {
+            let p = origin.absolute(p.to_array());
+            stream.supports(crate::world::WorldBounds {
+                min: p.map(|v| v - 2.),
+                max: p.map(|v| v + 2.),
+            })
+        };
+        self.creatures.step(
+            &reference.creatures.rabbit,
+            &mut self.physics,
+            &crate::creatures::StepInput {
+                now: self.simulation_seconds,
+                dt,
+                player: crate::creatures::spawner::Player {
+                    position: body.translation,
+                    rotation: body.rotation,
+                },
+                head: (head, player.body_handle()),
+                origin: &origin,
+                supports: &supports,
+            },
+        );
+        self.settle_rabbit_deaths(reference);
     }
 
     pub fn sky(&self) -> &crate::sky_traffic::SkyTraffic {
@@ -1983,6 +2045,7 @@ impl GarageRuntime {
                             && controls
                             && seated == Some(key)
                             && input.held & keys::HORN != 0,
+                        horn_hit: vehicle.horn_hit.map(|h| h.gain()),
                         ambient_temperature,
                         wheels: &vehicle.wheel_effects,
                         skid: &reference.skid,
@@ -2472,6 +2535,19 @@ impl GarageRuntime {
             let rules = &reference.breakables[record];
             let item = match kind {
                 crate::damage::BreakKind::Item(item) => item,
+                // Cacti has no tosaveitemscript: source Break throws at tosave.PreDestroy, after
+                // the gib spawns. The prop stays and does not break again.
+                crate::damage::BreakKind::Prop { parent } => {
+                    let Some(pose) = self.stream.prop_pose(&parent) else {
+                        continue;
+                    };
+                    let pose = crate::vehicle::VehiclePose {
+                        position: self.stream.origin.local(pose.position),
+                        rotation: pose.rotation,
+                    };
+                    self.spawn_gib(reference, rules, pose, false);
+                    continue;
+                }
                 // Lamp triggers have no gib.
                 crate::damage::BreakKind::Lamp { parent, control } => {
                     let position = self
@@ -2508,33 +2584,7 @@ impl GarageRuntime {
             else {
                 continue;
             };
-            // Source Break spawns Gib at the object pose. No reduced-gibs setting exists here.
-            if let Some(gib) = rules.gib.as_ref().filter(|_| !rules.no_gib) {
-                let prototype = reference
-                    .item_prototypes
-                    .iter()
-                    .position(|p| &p.id == gib)
-                    .expect("validated gib prototype");
-                let gibs = spawned::spawn_prototype(
-                    reference,
-                    &mut self.area,
-                    &mut self.physics,
-                    prototype,
-                    pose,
-                )
-                .expect("validated gib prototype");
-                // A buried object makes its gib buried.
-                if buried {
-                    for gib in &gibs {
-                        crate::interaction::buried::bury(
-                            *gib,
-                            &mut self.area.items,
-                            &mut self.physics,
-                        );
-                    }
-                }
-                self.area.gibs.spawn(prototype, gibs, pose);
-            }
+            self.spawn_gib(reference, rules, pose, buried);
             if let Some(clip) = self.stream.pick_break_clip(rules)
                 && let Some(audio) = &mut self.audio
             {
@@ -2561,6 +2611,39 @@ impl GarageRuntime {
             }
         }
         self.step_gibs(reference);
+    }
+
+    /// Source Break spawns Gib at the object pose. No reduced-gibs setting exists here.
+    fn spawn_gib(
+        &mut self,
+        reference: &ReferenceManifest,
+        rules: &crate::reference::BreakableReference,
+        pose: crate::vehicle::VehiclePose,
+        buried: bool,
+    ) {
+        let Some(gib) = rules.gib.as_ref().filter(|_| !rules.no_gib) else {
+            return;
+        };
+        let prototype = reference
+            .item_prototypes
+            .iter()
+            .position(|p| &p.id == gib)
+            .expect("validated gib prototype");
+        let gibs = spawned::spawn_prototype(
+            reference,
+            &mut self.area,
+            &mut self.physics,
+            prototype,
+            pose,
+        )
+        .expect("validated gib prototype");
+        // A buried object makes its gib buried.
+        if buried {
+            for gib in &gibs {
+                crate::interaction::buried::bury(*gib, &mut self.area.items, &mut self.physics);
+            }
+        }
+        self.area.gibs.spawn(prototype, gibs, pose);
     }
 
     /// Gib starts after the breaks of this step, then gib updates and removals.

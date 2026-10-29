@@ -58,6 +58,8 @@ pub struct ObjectSnapshot {
     pub buried: bool,
     pub attachment: Option<AttachmentSnapshot>,
     pub mechanism: Option<MechanismSnapshot>,
+    /// Source save_partcondition of the item's world parts that differ from their spawn state.
+    pub conditions: Vec<crate::save::SurfaceSnapshot>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -625,6 +627,7 @@ pub fn capture(
     let state = items.get(id)?;
     let mut snapshot = items.generated_snapshot(id, interaction.generated_valve(id))?;
     snapshot.mechanism = interaction.mechanisms.snapshot(id);
+    snapshot.conditions = interaction.conditions.item_surfaces(id);
     snapshot.gun = interaction.guns.snapshot(id);
     snapshot.food = state.food.map(|food| FoodSnapshot {
         source: reference.survival.foods[food.prototype_index]
@@ -772,6 +775,15 @@ pub fn restore_motion(
 impl ObjectSnapshot {
     pub fn heap_bytes(&self) -> usize {
         self.food.as_ref().map_or(0, |f| f.source.file.capacity())
+            + self
+                .conditions
+                .iter()
+                .map(|c| {
+                    size_of::<crate::save::SurfaceSnapshot>()
+                        + c.source.file.capacity()
+                        + c.source.path_id.capacity()
+                })
+                .sum::<usize>()
             + self.attachment.as_ref().map_or(0, |a| {
                 a.owner.as_ref().map_or(0, key_heap)
                     + a.slot.as_ref().map_or(0, |s| s.file.capacity())

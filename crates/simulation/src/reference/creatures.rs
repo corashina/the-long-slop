@@ -8,6 +8,10 @@ pub struct CreaturesReference {
     pub rabbit: RabbitReference,
     /// Every `stimulscript`, sorted by source.
     pub stimuli: Vec<StimulusSource>,
+    /// `Stimul` on the player Head.
+    pub player_stimulus: SourceId,
+    /// The stimulus of the `mainscript.Audio` prefab. `PlayClipAtPoint` sets it to the volume.
+    pub sound_stimulus: SourceId,
 }
 
 /// Source `stimulType`.
@@ -240,9 +244,11 @@ pub struct CreatureRagdoll {
     pub bodies: Vec<BodyRecord>,
     pub colliders: Vec<ColliderRecord>,
     pub joints: Vec<RagdollJoint>,
+    /// The `pickupable` of each body, in body order. `SetRagdol(true)` clears `cant_pickup`.
+    pub pickups: Vec<PickupReference>,
 }
 
-/// The default Animator state: a looping 1D blend tree. Track nodes are manifest node ids.
+/// The base layer default state: a looping 1D blend tree. Track nodes are manifest node ids.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BlendReference {
@@ -251,6 +257,16 @@ pub struct BlendReference {
     /// Ascending, one per clip.
     pub thresholds: Vec<f32>,
     pub clips: Vec<MotionClip>,
+    pub overlay: OverlayLayer,
+}
+
+/// Animator layer 1 `piszmog`: an override layer that loops one clip.
+/// The clip keeps only the tracks of bones in the layer mask.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OverlayLayer {
+    pub weight: f32,
+    pub clip: MotionClip,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -283,12 +299,23 @@ fn range(r: &[f32; 2]) -> bool {
 }
 
 impl CreaturesReference {
+    pub fn stimulus(&self, source: &SourceId) -> Option<&StimulusSource> {
+        self.stimuli.iter().find(|s| &s.source == source)
+    }
     pub fn validate(&self, m: &ReferenceManifest) -> Result<(), ReferenceError> {
         self.rabbit.validate(m)?;
         require(
             self.stimuli.iter().all(|s| {
                 s.max_sound_value.is_finite() && s.stimuli.iter().all(|v| v.value.is_finite())
-            }) && self.stimuli.iter().any(|s| s.visible),
+            }) && self
+                .stimulus(&self.player_stimulus)
+                .is_some_and(|s| s.visible && !s.stimuli.is_empty())
+                && self.stimulus(&self.sound_stimulus).is_some_and(|s| {
+                    s.sound
+                        && !s.check_audio_sources
+                        && s.audio_sources.is_empty()
+                        && !s.stimuli.is_empty()
+                }),
             "stimulus sources",
         )
     }
@@ -422,6 +449,7 @@ impl RabbitReference {
         let bodies = r.bodies.len() as u32;
         require(
             !r.bodies.is_empty()
+                && r.pickups.len() == r.bodies.len()
                 && r.bodies.iter().enumerate().all(|(i, b)| {
                     b.id.0 == i as u32 + 1 && self.local(m, b.node) && b.mass_kg > 0.
                 })
@@ -441,7 +469,10 @@ impl RabbitReference {
                 && a.thresholds.len() == a.clips.len()
                 && finite(&a.thresholds)
                 && a.thresholds.windows(2).all(|w| w[0] < w[1])
-                && a.clips.iter().all(|c| {
+                && a.overlay.weight > 0.
+                && a.overlay.weight <= 1.
+                && !a.overlay.clip.tracks.is_empty()
+                && a.clips.iter().chain([&a.overlay.clip]).all(|c| {
                     c.r#loop
                         && c.start_time < c.stop_time
                         && c.tracks

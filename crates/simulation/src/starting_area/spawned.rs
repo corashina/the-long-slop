@@ -1,6 +1,8 @@
 //! Runtime copies of exported item prototypes. One item owns each prototype pickup body.
 use super::StartingArea;
+use crate::interaction::guns::AmmoItem;
 use crate::interaction::items::HitSound;
+use crate::interaction::spray::Ammo;
 use crate::reference::{ItemId, ItemPrototype, ReferenceError, ReferenceManifest};
 use crate::vehicle::{PhysicsWorld, VehiclePose, collider_builder, from_rapier, to_rapier};
 use crate::world::stream::content_bindings::hit_events;
@@ -21,6 +23,8 @@ pub struct SpawnedItem {
 pub struct SpawnedItems {
     items: Vec<SpawnedItem>,
     next_serial: u32,
+    /// The ammoscript of each spawned magazine.
+    ammo: Vec<(ItemId, AmmoItem)>,
 }
 
 impl SpawnedItems {
@@ -38,6 +42,14 @@ impl SpawnedItems {
     }
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
+    }
+    pub fn ammo(&self, id: ItemId) -> Option<AmmoItem> {
+        self.ammo.iter().find(|(i, _)| *i == id).map(|(_, a)| *a)
+    }
+    pub fn set_ammo(&mut self, id: ItemId, ammo: AmmoItem) {
+        if let Some((_, a)) = self.ammo.iter_mut().find(|(i, _)| *i == id) {
+            *a = ammo;
+        }
     }
     /// Restored serials stay unique: later spawns start after the largest one.
     pub(super) fn record(&mut self, item: SpawnedItem) {
@@ -187,6 +199,21 @@ pub fn spawn_body(
         prototype,
         pickup,
     });
+    if let Some(a) = record.behavior.ammo_rules {
+        let ammo = Ammo {
+            count: a.count,
+            maximum: a.maximum,
+            float: a.float,
+            kind: a.kind,
+        };
+        area.spawned.ammo.push((
+            id,
+            AmmoItem {
+                ammo,
+                is_mag: a.is_mag,
+            },
+        ));
+    }
     physics.refresh_queries();
     Ok(id)
 }
@@ -220,6 +247,7 @@ pub fn despawn(
     area.items.remove_spawned(id);
     area.item_render_poses.retain(|(item, _, _)| *item != id);
     area.spawned.items.swap_remove(index);
+    area.spawned.ammo.retain(|(i, _)| *i != id);
     Ok(())
 }
 
@@ -250,6 +278,13 @@ impl SpawnedItems {
                     pickup: spawned.pickup as u32,
                     pose,
                     gun: guns.snapshot(spawned.id),
+                    // None at the prefab count.
+                    ammo: self.ammo(spawned.id).map(|a| a.ammo.count).filter(|count| {
+                        prototype
+                            .behavior
+                            .ammo_rules
+                            .is_none_or(|r| r.count != *count)
+                    }),
                 })
             })
             .collect();
@@ -300,6 +335,20 @@ pub fn restore_save(
             },
             record.serial,
         )?);
+        if let Some(count) = record.ammo {
+            let id = *ids.last().unwrap();
+            let ammo = area
+                .spawned
+                .ammo(id)
+                .and_then(|a| {
+                    Some(AmmoItem {
+                        ammo: a.ammo.with_count(count)?,
+                        ..a
+                    })
+                })
+                .ok_or_else(|| crate::save::SaveError::CorruptData("Spawned ammo".into()))?;
+            area.spawned.set_ammo(id, ammo);
+        }
     }
     Ok(ids)
 }

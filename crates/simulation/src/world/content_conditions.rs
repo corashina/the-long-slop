@@ -3,7 +3,9 @@ use super::WorldStream;
 use super::content_index::ContentSlot;
 use crate::conditions::{ConditionRule, ConditionState};
 use crate::interaction::InteractionState;
+use crate::interaction::items::ItemStore;
 use crate::reference::{ItemId, ReferenceError, SourceId, WorldPrototypeReference};
+use crate::save::SourceKey;
 use crate::world::contents::ContentInstance;
 use crate::world::spawn_appearance::{NodeAppearance, condition_appearance};
 use crate::world::spawn_rules::*;
@@ -50,6 +52,19 @@ pub(super) fn bind(
         if !(0..=4).contains(&state) || state2 < 0 || state3 < 0 || permission < 0 {
             return Err(invalid("state"));
         }
+        // The nearest item node above the condition saves it.
+        let mut parent = Some(node);
+        let mut saver = content.item;
+        for _ in 0..prototype.nodes.len() {
+            let Some(n) = parent else {
+                break;
+            };
+            if let Some(&(_, item)) = owners.iter().find(|(o, _)| *o == n) {
+                saver = Some(item);
+                break;
+            }
+            parent = prototype.nodes[n].parent.map(|p| p as usize);
+        }
         let entry = interaction.conditions.add_world(
             ConditionRule {
                 permission_index: permission as u32,
@@ -70,6 +85,7 @@ pub(super) fn bind(
                 .iter()
                 .find(|(n, _)| *n == node)
                 .map(|(_, item)| *item),
+            saver.map(|item| (item, SourceKey::from(&input.source))),
         )?;
         content.conditions.push((entry, index, node));
     }
@@ -110,16 +126,10 @@ pub(super) fn bind(
 }
 
 /// Removes the store entries and collider targets of a content.
-pub(super) fn unbind(
-    content: &mut ContentInstance,
-    instance: &crate::world::StructureInstance,
-    interaction: &mut InteractionState,
-) {
+pub(super) fn unbind(content: &mut ContentInstance, interaction: &mut InteractionState) {
     for (entry, ..) in content.conditions.drain(..) {
         interaction.conditions.remove_world(entry);
-    }
-    for (_, handle) in &instance.colliders {
-        interaction.cleaning.unbind_world_condition(*handle);
+        interaction.cleaning.unbind_world_condition(entry);
     }
 }
 
@@ -149,13 +159,17 @@ fn merge(appearance: &mut Vec<NodeAppearance>, look: &NodeAppearance) {
 }
 
 impl WorldStream {
-    /// Rebuilds the condition appearance of contents whose conditions changed.
+    /// Rebuilds the condition appearance of contents whose conditions changed and marks their items for save.
     pub(super) fn sync_condition_appearance(
         &mut self,
+        items: &mut ItemStore,
         interaction: &mut InteractionState,
     ) -> Result<(), ReferenceError> {
         self.condition_changes.clear();
         while let Some(id) = interaction.conditions.take_world_changed() {
+            if let Some(item) = interaction.conditions.world_owner(id) {
+                items.mark_dirty(item);
+            }
             self.condition_changes.push(id);
         }
         if self.condition_changes.is_empty() {

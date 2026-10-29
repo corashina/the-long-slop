@@ -1,8 +1,8 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 34;
-pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 34;
+pub const SAVE_SCHEMA_VERSION: u32 = 39;
+pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 39;
 pub fn schema_supported(version: u32) -> bool {
     (OLDEST_SAVE_SCHEMA_VERSION..=SAVE_SCHEMA_VERSION).contains(&version)
 }
@@ -66,6 +66,22 @@ pub struct SaveSnapshot {
     pub cigarettes: CigarettesSnapshot,
     /// Source save_sandstorm and the storm spawner timer.
     pub weather: WeatherSnapshot,
+    /// Spawner rabbits. The spawner timer is not saved: the source coroutine restarts.
+    pub rabbits: Vec<RabbitSnapshot>,
+}
+/// Source save_prefab pose and save_nyulscript.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RabbitSnapshot {
+    pub pose: AbsolutePose,
+    pub size: f32,
+    /// `breakable.shootHealth`.
+    pub shoot_health: f32,
+    pub alive: bool,
+    pub eyes: bool,
+    pub ears: bool,
+    /// `save_ragdollpos`: the bone body poses of a dead rabbit, in body order. Empty while alive.
+    pub bones: Vec<AbsolutePose>,
 }
 /// Source sandstormLastTime (negated) and sandstormNextTime.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -120,6 +136,8 @@ pub struct SpawnedItemSnapshot {
     pub pose: AbsolutePose,
     /// Gun state; None at its spawn state.
     pub gun: Option<crate::interaction::guns::GunSnapshot>,
+    /// Magazine rounds; None at the prefab count.
+    pub ammo: Option<f32>,
 }
 /// One runtime food copy, saved in the world at its pose.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -458,7 +476,7 @@ mod g04_ordered_state {
     fn older_schemas_are_rejected_before_payload_reconstruction() {
         for version in [
             6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
-            31, 32, 33, 35,
+            31, 32, 33, 34, 35, 36, 37, 38, 40,
         ] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
@@ -470,11 +488,33 @@ mod g04_ordered_state {
 
     #[test]
     fn current_schema_passes_the_version_gate() {
-        // Schema 34 reaches payload parsing; the empty payload then fails as corrupt data.
+        // Schema 39 reaches payload parsing; the empty payload then fails as corrupt data.
         assert!(matches!(
-            SaveSnapshot::from_json(br#"{"schema_version":34}"#),
+            SaveSnapshot::from_json(br#"{"schema_version":39}"#),
             Err(SaveError::CorruptData(_))
         ));
+    }
+
+    #[test]
+    fn dead_rabbit_bones_round_trip() {
+        let pose = |x: f64| AbsolutePose {
+            position: [1e6 + x, 2., -3.],
+            rotation: [0., 0.6, 0., 0.8],
+        };
+        let rabbit = RabbitSnapshot {
+            pose: pose(0.),
+            size: 0.4,
+            shoot_health: 1.5,
+            alive: false,
+            eyes: false,
+            ears: true,
+            bones: (0..14).map(|i| pose(f64::from(i) * 0.01)).collect(),
+        };
+        let json = serde_json::to_string(&rabbit).unwrap();
+        assert_eq!(
+            serde_json::from_str::<RabbitSnapshot>(&json).unwrap(),
+            rabbit
+        );
     }
 
     #[test]

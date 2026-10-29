@@ -1,7 +1,7 @@
 //! Explosions in the world: tank and explosive prop triggers, the blast on colliders and bodies,
 //! the removal of exploded items, and the blast particle and sound.
 use super::GarageRuntime;
-use crate::interaction::explosions::{Blast, prop_factor, tank_factor};
+use crate::interaction::explosions::{Blast, power, prop_factor, tank_factor};
 use crate::interaction::guns::Strike;
 use crate::interaction::items::ItemLocation;
 use crate::reference::{ItemId, ReferenceManifest};
@@ -9,6 +9,18 @@ use crate::vehicle::to_rapier;
 use crate::world::ObjectKey;
 use rapier3d::math::Vector;
 use rapier3d::prelude::ColliderHandle;
+
+/// An imported item on the body of a portable tank: an exploded tank removes it.
+pub fn explosive_imported(reference: &ReferenceManifest, item: ItemId) -> bool {
+    let body = |id: ItemId| reference.items.iter().find(|i| i.id == id).map(|i| i.body);
+    let Some(own) = body(item) else {
+        return false;
+    };
+    reference
+        .tanks
+        .iter()
+        .any(|t| t.role == crate::reference::TankRole::Portable && body(t.item) == Some(own))
+}
 
 impl GarageRuntime {
     /// `explosionscript.Explode` of each queued blast and of the blasts that they set off.
@@ -116,6 +128,10 @@ impl GarageRuntime {
                 .detach(&mut area.items, &mut self.physics);
         }
         area.inventory.forget(root);
+        if matches!(area.items.object_key(root), ObjectKey::Imported(_)) {
+            self.remove_imported_item(root);
+            return;
+        }
         self.stream
             .remove_exploded_item(
                 root,
@@ -165,6 +181,23 @@ impl GarageRuntime {
         if let Some(power) = heard {
             self.hear_blast(reference, power, blast.position);
         }
+        // Source: each body with `carscript` gets `DamageStuff(power * 5)` at its body position.
+        let mut vehicles = std::mem::take(&mut self.vehicles);
+        for i in 0..self.area.interaction.explosions.bodies().len() {
+            let body = self.area.interaction.explosions.bodies()[i];
+            let Some(key) = self.physics.vehicle_of(body).cloned() else {
+                continue;
+            };
+            let Some(vehicle) = vehicles.get_mut(&key) else {
+                continue;
+            };
+            let d = self.physics.rapier().bodies[body]
+                .translation()
+                .distance(blast.position);
+            let v = power(d, blast.radius, blast.force) * 5.;
+            self.crash_car(reference, &key, vehicle, v);
+        }
+        self.vehicles = vehicles;
         let explosions = &self.area.interaction.explosions;
         explosions.push(&mut self.physics, blast, player);
     }
@@ -221,16 +254,33 @@ impl GarageRuntime {
             })
             .map(|s| s.id)
     }
-    /// A generated content item in the world or in the hands can explode.
+    /// A generated content item or a moving imported item in the world or in the hands can
+    /// explode. Fixed imported tanks only leak.
     fn explodable(&self, root: ItemId) -> bool {
-        self.area.items.get(root).is_some_and(|s| {
+        let Some(state) = self.area.items.get(root).filter(|s| {
             !s.removed
-                && s.body.is_some()
                 && matches!(
                     s.location,
                     ItemLocation::World | ItemLocation::Held | ItemLocation::Equipped
                 )
-        }) && matches!(self.area.items.object_key(root), ObjectKey::Generated(_))
+        }) else {
+            return false;
+        };
+        let Some(body) = state.body else {
+            return false;
+        };
+        match self.area.items.object_key(root) {
+            ObjectKey::Generated(_) => true,
+            ObjectKey::Imported(_) => {
+                !self.area.spawned.contains(root)
+                    && self
+                        .physics
+                        .rapier()
+                        .bodies
+                        .get(body)
+                        .is_some_and(|b| b.is_dynamic())
+            }
+        }
     }
     /// The item root point in physics space.
     fn item_point(&self, item: ItemId) -> Option<Vector> {

@@ -389,6 +389,10 @@ impl StorageLocks {
     pub fn mark_dropped(&mut self, item: ItemId) {
         self.drop_times.insert(item, self.elapsed);
     }
+    /// Source `dontMountTillPickup = true`.
+    pub fn hold_till_pickup(&mut self, item: ItemId) {
+        self.till_pickup.insert(item);
+    }
     pub fn picked_up(&mut self, item: ItemId) {
         self.till_pickup.remove(&item);
     }

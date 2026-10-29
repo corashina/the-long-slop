@@ -49,6 +49,14 @@ impl ConditionRule {
     }
 }
 
+/// The save key of a world part condition: its item and source, and its spawn state.
+#[derive(Clone, Debug)]
+pub struct WorldSave {
+    pub item: ItemId,
+    pub source: SourceKey,
+    pub spawn: ConditionState,
+}
+
 /// Condition owners: exported garage surfaces, then world parts.
 /// World ids start above the exported ids. Removed world ids are reused.
 pub struct ConditionStore {
@@ -60,6 +68,8 @@ pub struct ConditionStore {
     first_world: u32,
     live: Vec<bool>,
     free: Vec<usize>,
+    /// World slots from `records.len()`. None when no item saves the entry.
+    saves: Vec<Option<WorldSave>>,
     items: HashMap<ItemId, ConditionId>,
     tables: Vec<[[bool; 7]; 5]>,
     decay_rate: f32,
@@ -113,6 +123,7 @@ impl ConditionStore {
             first_world: records.iter().map(|s| s.id.0 + 1).max().unwrap_or(1),
             live: vec![true; n],
             free: Vec::new(),
+            saves: Vec::new(),
             items: records
                 .iter()
                 .filter_map(|s| s.item.map(|i| (i, s.id)))
@@ -163,6 +174,7 @@ impl ConditionStore {
         mut rule: ConditionRule,
         state: ConditionState,
         item: Option<ItemId>,
+        save: Option<(ItemId, SourceKey)>,
     ) -> Result<ConditionId, ReferenceError> {
         if rule.permission_index as usize >= self.tables.len() {
             return Err(ReferenceError("World condition repair property".into()));
@@ -184,6 +196,15 @@ impl ConditionStore {
                 self.states.len() - 1
             }
         };
+        let save = save.map(|(item, source)| WorldSave {
+            item,
+            source,
+            spawn: state,
+        });
+        match self.saves.get_mut(index - self.records.len()) {
+            Some(slot) => *slot = save,
+            None => self.saves.push(save),
+        }
         let id = self.id(index);
         if let Some(item) = item {
             self.items.insert(item, id);
@@ -202,6 +223,7 @@ impl ConditionStore {
             return;
         }
         self.live[i] = false;
+        self.saves[i - self.records.len()] = None;
         self.rules[i].children.clear();
         self.items.retain(|_, v| *v != id);
         if self.in_progress[i] {
@@ -375,6 +397,62 @@ impl ConditionStore {
             }
         }
     }
+    /// The item that saves a world entry.
+    pub fn world_owner(&self, id: ConditionId) -> Option<ItemId> {
+        let i = self.index(id);
+        self.saves
+            .get(i.checked_sub(self.records.len())?)?
+            .as_ref()
+            .map(|s| s.item)
+    }
+    /// World entries of `item` that differ from their spawn state, in store order.
+    pub fn item_surfaces(&self, item: ItemId) -> Vec<SurfaceSnapshot> {
+        let first = self.records.len();
+        self.saves
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| {
+                let s = s.as_ref().filter(|s| s.item == item)?;
+                let v = &self.states[first + i];
+                (*v != s.spawn).then(|| SurfaceSnapshot {
+                    source: s.source.clone(),
+                    state: v.state,
+                    state2: v.state2,
+                    state3: v.state3,
+                    color: v.color,
+                    repair_progress: v.repair_progress,
+                })
+            })
+            .collect()
+    }
+    /// Applies saved world entries of a bound item over their spawn states.
+    pub fn restore_item(
+        &mut self,
+        item: ItemId,
+        saved: &[SurfaceSnapshot],
+    ) -> Result<(), ReferenceError> {
+        let first = self.records.len();
+        for v in saved {
+            let i = self
+                .saves
+                .iter()
+                .position(|s| {
+                    s.as_ref()
+                        .is_some_and(|s| s.item == item && s.source == v.source)
+                })
+                .ok_or_else(|| ReferenceError("Saved part condition has no owner".into()))?;
+            self.states[first + i] = ConditionState {
+                state: v.state,
+                state2: v.state2,
+                state3: v.state3,
+                color: v.color,
+                repair_progress: v.repair_progress,
+            };
+            self.track_progress(first + i);
+            self.mark(self.id(first + i));
+        }
+        Ok(())
+    }
     pub fn capture_save(
         &self,
         reference: &ReferenceManifest,
@@ -531,17 +609,17 @@ mod tests {
     fn world_entries_reuse_removed_ids() {
         let mut s = store();
         let a = s
-            .add_world(ConditionRule::default(), state(1), Some(ItemId(7)))
+            .add_world(ConditionRule::default(), state(1), Some(ItemId(7)), None)
             .unwrap();
         let b = s
-            .add_world(ConditionRule::default(), state(2), None)
+            .add_world(ConditionRule::default(), state(2), None, None)
             .unwrap();
         assert!(s.is_world(a) && a != b);
         assert_eq!(s.item_state(ItemId(7)), Some(1));
         s.remove_world(a);
         assert_eq!(s.item_state(ItemId(7)), None);
         let c = s
-            .add_world(ConditionRule::default(), state(3), None)
+            .add_world(ConditionRule::default(), state(3), None, None)
             .unwrap();
         assert_eq!(c, a);
         assert_eq!(s.get(c).state, 3);
@@ -553,6 +631,7 @@ mod tests {
                     ..Default::default()
                 },
                 state(0),
+                None,
                 None
             )
             .is_err()
@@ -560,10 +639,53 @@ mod tests {
     }
 
     #[test]
+    fn world_entries_save_only_changes_of_their_item() {
+        let key = |path_id: &str| SourceKey {
+            file: "f".into(),
+            path_id: path_id.into(),
+        };
+        let mut s = store();
+        let a = s
+            .add_world(
+                ConditionRule::default(),
+                state(2),
+                None,
+                Some((ItemId(7), key("1"))),
+            )
+            .unwrap();
+        s.add_world(
+            ConditionRule::default(),
+            state(2),
+            None,
+            Some((ItemId(7), key("2"))),
+        )
+        .unwrap();
+        assert_eq!(s.world_owner(a), Some(ItemId(7)));
+        assert!(s.item_surfaces(ItemId(7)).is_empty());
+        assert!(s.paint(a, [1., 0., 0., 1.]));
+        let saved = s.item_surfaces(ItemId(7));
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].source, key("1"));
+        let mut loaded = store();
+        let b = loaded
+            .add_world(
+                ConditionRule::default(),
+                state(2),
+                None,
+                Some((ItemId(9), key("1"))),
+            )
+            .unwrap();
+        loaded.restore_item(ItemId(9), &saved).unwrap();
+        assert_eq!(loaded.get(b).color, [1., 0., 0., 1.]);
+        assert_eq!(loaded.take_world_changed(), Some(b));
+        assert!(loaded.restore_item(ItemId(8), &saved).is_err());
+    }
+
+    #[test]
     fn world_repair_refreshes_children_and_decays() {
         let mut s = store();
         let parent = s
-            .add_world(ConditionRule::default(), state(2), None)
+            .add_world(ConditionRule::default(), state(2), None, None)
             .unwrap();
         let child = s
             .add_world(
@@ -572,6 +694,7 @@ mod tests {
                     ..Default::default()
                 },
                 state(2),
+                None,
                 None,
             )
             .unwrap();

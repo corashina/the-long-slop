@@ -456,6 +456,7 @@ pub fn load_materials(
                     | AssetUsage::PlayerPrototype
                     | AssetUsage::RagdollPrototype
                     | AssetUsage::SkyTraffic
+                    | AssetUsage::CreaturePrototype
             )
         })
         .map(|asset| asset.id)

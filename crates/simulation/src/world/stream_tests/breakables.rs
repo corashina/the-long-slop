@@ -47,7 +47,7 @@ fn bottle_breaks_on_a_hard_drop_once_and_stays_removed_after_reload() {
         .iter()
         .filter_map(|t| match t.kind {
             BreakKind::Item(item) => Some((t.record, item)),
-            BreakKind::Lamp { .. } => None,
+            _ => None,
         })
         .filter(|(record, item)| {
             let r = &records[*record];

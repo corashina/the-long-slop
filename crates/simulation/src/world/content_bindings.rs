@@ -1177,7 +1177,7 @@ impl WorldStream {
                 index += 1;
                 continue;
             }
-            let content = self.contents.remove_active(index);
+            let mut content = self.contents.remove_active(index);
             // Hitches end while the bodies still exist.
             for item in content
                 .item
@@ -1233,6 +1233,7 @@ impl WorldStream {
                     .mechanisms
                     .remove_generated(item, &content.nodes);
             }
+            super::content_conditions::unbind(&mut content, interaction);
             for binding in &content.bindings {
                 wheels.remove_generated(binding.item);
                 if let Some(instance) = self
@@ -1673,7 +1674,7 @@ pub(super) fn rollback(
             .mechanisms
             .remove_generated(item, &content.nodes);
     }
-    super::content_conditions::unbind(content, instance, interaction);
+    super::content_conditions::unbind(content, interaction);
     for (_, collider) in &instance.colliders {
         physics.edit_collider(*collider, |collider| {
             collider.user_data &= STEP_SURFACE_MASK;
@@ -1847,6 +1848,9 @@ pub fn restore_item(
     if let Some(mechanism) = snapshot.mechanism {
         interaction.mechanisms.restore(id, mechanism)?;
     }
+    interaction
+        .conditions
+        .restore_item(id, &snapshot.conditions)?;
     if let (Some(parent), Some(attachment), Some(_)) = (resolved, &snapshot.attachment, volume) {
         changes::restore_lock(
             id,
