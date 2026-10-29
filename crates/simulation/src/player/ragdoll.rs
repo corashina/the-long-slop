@@ -2,7 +2,8 @@
 //! The ragdoll has no Rapier bodies until `spawn`.
 use super::body::ik::Frame;
 use crate::reference::{
-    NodeId, NodeRecord, RagdollJoint, RagdollReference, ReferenceError, ReferenceManifest,
+    BodyRecord, NodeId, NodeRecord, RagdollJoint, RagdollReference, ReferenceError,
+    ReferenceManifest,
 };
 use crate::vehicle::{PhysicsWorld, collider_builder};
 use rapier3d::math::{Pose, Rotation, Vector};
@@ -65,21 +66,25 @@ fn unscaled(f: &Frame) -> Frame {
 
 /// Twist about X, swing1 about Y, swing2 about Z. Body 1 is the connected body, so the
 /// measured angle is the own body relative to the connected body, as in Unity.
-fn joint(r: &RagdollReference, j: &RagdollJoint) -> GenericJoint {
+/// `scale` is the lossy scale of the bodies: Unity anchors are in scaled body space.
+pub(crate) fn joint(bodies: &[BodyRecord], j: &RagdollJoint, scale: f32) -> GenericJoint {
     let x = Vector::from_array(j.axis);
     let swing = Vector::from_array(j.swing_axis);
     let y = (swing - x * x.dot(swing)).normalize();
     let basis = Rotation::from_mat3(&rapier3d::glamx::Mat3::from_cols(x, y, x.cross(y)));
     let rest = |id: crate::reference::BodyId| {
-        Rotation::from_array(r.bodies[id.0 as usize - 1].pose.rotation)
+        Rotation::from_array(bodies[id.0 as usize - 1].pose.rotation)
     };
     let connected = rest(j.connected_body).inverse() * rest(j.body) * basis;
     GenericJointBuilder::new(JointAxesMask::LOCKED_SPHERICAL_AXES)
         .local_frame1(Pose::from_parts(
-            Vector::from_array(j.connected_anchor),
+            Vector::from_array(j.connected_anchor) * scale,
             connected,
         ))
-        .local_frame2(Pose::from_parts(Vector::from_array(j.anchor), basis))
+        .local_frame2(Pose::from_parts(
+            Vector::from_array(j.anchor) * scale,
+            basis,
+        ))
         .contacts_enabled(j.collide_connected)
         .limits(
             JointAxis::AngX,
@@ -187,7 +192,13 @@ impl Ragdoll {
         let joints = r
             .joints
             .iter()
-            .map(|j| Ok((body(j.body)?, body(j.connected_body)?, joint(r, j))))
+            .map(|j| {
+                Ok((
+                    body(j.body)?,
+                    body(j.connected_body)?,
+                    joint(&r.bodies, j, 1.),
+                ))
+            })
             .collect::<Result<Vec<_>, ReferenceError>>()?;
         let pairs = r
             .pose

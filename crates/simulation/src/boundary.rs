@@ -703,18 +703,37 @@ pub struct PlaneRow {
     pub heading: [f32; 4],
 }
 
-/// One rabbit in physics space. The renderer samples the blend tree at `phase` and `value`.
+/// One rabbit in physics space. The renderer samples the blend tree at `phase` and `value`
+/// and the override layer at `twitch`. A dead rabbit takes its bone rows instead.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 pub struct CreatureRow {
     pub id: u32,
-    /// `PoseRow::VISIBLE`.
+    /// `PoseRow::VISIBLE`, `DEAD` and `NO_EYES`.
     pub flags: u32,
     pub position: [f32; 3],
     pub rotation: [f32; 4],
     pub scale: f32,
     pub phase: f32,
     pub value: f32,
+    pub twitch: f32,
+    /// First index and count of the bone rows in `SimFrame::creature_bones`.
+    pub bones: [u32; 2],
+}
+impl CreatureRow {
+    pub const DEAD: u32 = 1 << 8;
+    /// `LooseEyes` hid the eye objects.
+    pub const NO_EYES: u32 = 1 << 9;
+}
+
+/// One bone body of a dead rabbit, relative to the unscaled creature row pose.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct CreatureBoneRow {
+    /// Rig node index.
+    pub node: u32,
+    pub position: [f32; 3],
+    pub rotation: [f32; 4],
 }
 
 /// One bullet hole in stream space. `kind` indexes `GunsReference::decals`.
@@ -920,6 +939,7 @@ pub struct SimFrame {
     pub decals: Vec<DecalRow>,
     pub planes: Vec<PlaneRow>,
     pub creatures: Vec<CreatureRow>,
+    pub creature_bones: Vec<CreatureBoneRow>,
     pub conditions: Vec<ConditionRow>,
     /// 1 when the wash shows, in `ConditionRecord::washes` order.
     pub washes: Vec<u8>,
@@ -1139,6 +1159,7 @@ fn write(frame: &SimFrame, out: &mut Vec<u8>) {
     put_rows(out, &frame.decals);
     put_rows(out, &frame.planes);
     put_rows(out, &frame.creatures);
+    put_rows(out, &frame.creature_bones);
     put_rows(out, &frame.conditions);
     put_rows(out, &frame.washes);
     put_rows(out, &frame.brush_poses);
@@ -1192,6 +1213,7 @@ fn read(rest: &mut &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     take_rows(rest, &mut frame.decals)?;
     take_rows(rest, &mut frame.planes)?;
     take_rows(rest, &mut frame.creatures)?;
+    take_rows(rest, &mut frame.creature_bones)?;
     take_rows(rest, &mut frame.conditions)?;
     take_rows(rest, &mut frame.washes)?;
     take_rows(rest, &mut frame.brush_poses)?;

@@ -40,7 +40,7 @@ All tasks are done.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| X03 | Creatures | XL | AI senses and movement, rabbits, monsters (attacks hurt the player), UFO, EMP, AI parts of the damage model (breakablescript AI links, Die, DamageFrom). |
+| X03 | Creatures | XL | Evil rabbits (roar and attack), ground UFO and EMP, human monster (attacks hurt the player), breakablescript `DamageFrom` for AI. Rabbits do not yet sense engines, radios or hums. |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. |
 | X09 | Car crash damage | L | `carscript.DamageStuff`: parts fall off by crash speed and condition, horn, blood, death on hard crashes; blasts call it with power x 5. |
@@ -269,6 +269,15 @@ Prepare once:
 3. Bats (X03a): set the PC date between 15 Oct and 15 Nov, start a new game and drive to a gas station. In 65% of stations, 5 to 30 bats fly near it, flap and squeak. Pick one up: it keeps squeaking and does not fly out of the hand.
 4. Save and load near the bats.
 5. Check F3 next to the bats. Compare with the frame rate rule.
+
+### Rabbits (X03 part 1)
+
+1. Rabbits spawn 30 to 100 m away, first at start, then every 50 to 100 s, at most 10. Big ones are larger and slower.
+2. They roam, run from the player and from shots, and jump over small obstacles. Their ears twitch.
+3. They die on hard hits, falls and head shots, with a die sound. A head shot can take the eyes (eyes hide) or the ears.
+4. Dead rabbits fall as ragdolls. Pick up and carry a bone: the body follows.
+5. Save and load with live and dead rabbits, and with a rabbit that lost its eyes.
+6. Check F3 near 10 rabbits. Compare with the frame rate rule.
 
 ### Player movement (vehicle carry, air momentum, wall jump)
 
