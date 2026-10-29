@@ -1,11 +1,13 @@
 //! Car prototypes and engine parts of spawned world contents.
 //! A car copy is a vehicle body, a car runtime, its wheel slots and the engine and radiator
 //! parts on it.
+use crate::crash::Blood;
 use crate::interaction::InteractionState;
+use crate::interaction::cleaning::WashOwner;
 use crate::interaction::items::ItemStore;
 use crate::interaction::wheels::{WheelAssemblies, WorldWheelSlot};
 use crate::reference::{
-    Bounds, EnginePartReference, ItemId, RadiatorPartReference, ReferenceError,
+    Bounds, ColliderId, EnginePartReference, ItemId, RadiatorPartReference, ReferenceError,
     WorldPrototypeReference, WorldReference,
 };
 use crate::simulation::car_lights::CarLightLinks;
@@ -234,7 +236,73 @@ pub(super) fn bind(
         }
         powertrain.register_gauge(part);
     }
+    if let (Some(record), Some(owner)) = (&prototype.vehicle, content.item)
+        && let Some(r) = &record.blood
+    {
+        let key = ObjectKey::Generated(content.content.placement.id.clone());
+        let chassis = prototype.bodies[record.body as usize].node as usize;
+        let blood = bind_blood(r, chassis, instance, prototype, interaction, physics)?;
+        // Source: the sponge washes the trigger while its GameObject is active.
+        let appearance = &content.content.appearance;
+        if crate::world::spawn_appearance::node_active(prototype, r.node as usize, appearance) {
+            interaction.cleaning.register_generated_wash(
+                WashOwner::Car(owner),
+                blood.permission,
+                blood.never_repair,
+                blood.colliders.clone(),
+            );
+        }
+        vehicles.get_mut(&key).unwrap().blood = Some(blood);
+    }
     Ok(())
+}
+
+/// The car blood trigger of one car copy. Colliders at and below the trigger node wash it.
+fn bind_blood(
+    r: &crate::reference::CarBloodReference,
+    chassis: usize,
+    instance: &StructureInstance,
+    prototype: &WorldPrototypeReference,
+    interaction: &mut InteractionState,
+    physics: &mut PhysicsWorld,
+) -> Result<Blood, ReferenceError> {
+    let below = |mut i: u32| loop {
+        if i == r.node {
+            return true;
+        }
+        match prototype.nodes[i as usize].parent {
+            Some(p) => i = p,
+            None => return false,
+        }
+    };
+    let mut colliders = Vec::new();
+    for (source, handle) in &instance.colliders {
+        let on_trigger = prototype
+            .colliders
+            .iter()
+            .find(|c| &c.source == source)
+            .is_some_and(|c| c.enabled && below(c.node));
+        if !on_trigger {
+            continue;
+        }
+        let mut id = ColliderId((physics.rapier().colliders[*handle].user_data >> 64) as u32);
+        if id.0 == 0 {
+            id = interaction.allocate_generated_collider()?;
+            physics.edit_collider(*handle, |c| c.user_data |= (id.0 as u128) << 64);
+        }
+        colliders.push((id, *handle));
+    }
+    Ok(Blood {
+        on: r.on,
+        shown: None,
+        permission: r.permission,
+        never_repair: r.never_repair,
+        nodes: std::iter::once(r.node)
+            .chain(r.objects.iter().copied())
+            .collect(),
+        colliders,
+        point: crate::world::placement::node_frame(prototype, chassis, r.node as usize).position,
+    })
 }
 
 /// The source slot and the wheel slot of each record wheel. The slot rim is the prototype
@@ -505,7 +573,10 @@ pub(super) fn retire(
     {
         retire_parts(item, items, powertrain, changes);
     }
-    if content.item.is_some() {
+    if let Some(owner) = content.item {
+        interaction
+            .cleaning
+            .remove_generated_wash(WashOwner::Car(owner));
         let key = ObjectKey::Generated(content.content.placement.id.clone());
         if vehicles.contains_key(&key) {
             for (id, sensor) in retire_vehicle(&key, physics, vehicles, wheels, changes) {

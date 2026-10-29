@@ -1,7 +1,8 @@
 //! Car crash rule: source `carscript.DamageStuff`, `HornHit` and `partscript.WouldFallOff`.
 use crate::interaction::wheels::WheelSlotId;
-use crate::reference::{CarCrashReference, CrashReference, ItemId};
+use crate::reference::{CarCrashReference, ColliderId, CrashReference, ItemId};
 use crate::world::UnityRandom;
+use rapier3d::prelude::ColliderHandle;
 
 /// A part that can fall off: source `carscript.currentParts` entry.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -22,6 +23,61 @@ impl Default for CrashState {
             random: UnityRandom::new(0x6372_6173),
             candidates: Vec::with_capacity(64),
         }
+    }
+}
+
+/// Source `HornHit`: `hornTime` and the time since the hit.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HornHit {
+    pub time: f32,
+    pub elapsed: f32,
+}
+
+impl HornHit {
+    pub fn new(time: f32) -> Self {
+        Self { time, elapsed: 0. }
+    }
+    /// Source `currenthorn = Lerp(1, 0, InverseLerp(0, hornTime, t))` while `t < hornTime`.
+    pub fn gain(&self) -> f32 {
+        lerp(1., 0., inverse_lerp(0., self.time, self.elapsed))
+    }
+    /// The hit after `dt`. None when the hit ends.
+    pub fn advanced(self, dt: f32) -> Option<Self> {
+        let elapsed = self.elapsed + dt;
+        (elapsed < self.time).then_some(Self { elapsed, ..self })
+    }
+}
+
+/// Source `carscript.blood` state of one car copy. The wash registry holds `repairValue`.
+pub struct Blood {
+    /// Source `ON`.
+    pub on: bool,
+    /// The trigger and `objects` nodes are active. None: the prototype state.
+    pub shown: Option<bool>,
+    pub permission: u8,
+    pub never_repair: bool,
+    /// The trigger node, then the `objects` nodes.
+    pub nodes: Vec<u32>,
+    /// Enabled colliders at and below the trigger node.
+    pub colliders: Vec<(ColliderId, ColliderHandle)>,
+    /// Trigger position in the chassis frame.
+    pub point: [f32; 3],
+}
+
+impl Blood {
+    /// Source `GotDirty` without `repairValue`.
+    pub fn got_dirty(&mut self) {
+        self.on = true;
+        self.shown = Some(true);
+    }
+    /// Source `GotClean` without `repairValue`.
+    pub fn got_clean(&mut self) {
+        self.on = false;
+        self.shown = Some(false);
+    }
+    /// The active state that the trigger sets on `node`. None: the trigger does not set it.
+    pub fn visible(&self, node: u32) -> Option<bool> {
+        self.shown.filter(|_| self.nodes.contains(&node))
     }
 }
 
@@ -194,6 +250,31 @@ mod tests {
         assert_eq!(fall_off_range(&r, Some(0)), [30.0, 60.0]);
         let [min, max] = fall_off_range(&r, Some(4));
         assert!((min - 6.0).abs() < 1e-4 && (max - 12.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn first_hard_crash_bloodies_second_kills() {
+        let r = crash();
+        let mut random = UnityRandom::new(3);
+        let mut blood = Blood {
+            on: false,
+            shown: None,
+            permission: 0,
+            never_repair: false,
+            nodes: vec![4, 5],
+            colliders: Vec::new(),
+            point: [0.; 3],
+        };
+        let first = damage(&r, &CAR, 200.0, driving(blood.on), None, &mut random);
+        assert!(first.blood && !first.kill);
+        blood.got_dirty();
+        assert_eq!(blood.visible(5), Some(true));
+        let second = damage(&r, &CAR, 200.0, driving(blood.on), None, &mut random);
+        assert!(second.blood && second.kill);
+        blood.got_clean();
+        assert_eq!(blood.visible(4), Some(false));
+        let third = damage(&r, &CAR, 200.0, driving(blood.on), None, &mut random);
+        assert!(third.blood && !third.kill);
     }
 
     #[test]

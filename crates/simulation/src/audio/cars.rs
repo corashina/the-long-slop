@@ -76,7 +76,10 @@ pub struct CarSoundInput<'a> {
     pub pose: Pose,
     /// A sleeping chassis is quiet.
     pub active: bool,
+    /// The player holds the horn key: source `ihorn`.
     pub horn: bool,
+    /// Source `HornHit` gain. It replaces the held-key gain while the hit lasts.
+    pub horn_hit: Option<f32>,
     pub ambient_temperature: f32,
     pub wheels: &'a crate::wheel_effects::WheelEffects,
     pub skid: &'a SkidReference,
@@ -295,6 +298,10 @@ impl CarSounds {
             let step = h.attack_release_rate * dt;
             let gain = &mut self.cars[index].horn;
             *gain += (target - *gain).clamp(-step, step);
+            // Source `carscript.Update` sets `currenthorn` from the hit after the key ramp.
+            if let Some(hit) = input.horn_hit {
+                *gain = hit;
+            }
             let gain = *gain;
             if gain > 0. {
                 let t = inverse_lerp(

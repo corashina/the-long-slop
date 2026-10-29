@@ -516,6 +516,10 @@ pub struct VehicleRuntime {
     previous: [f64; 3],
     /// Source `carscript.lspeed`: forward speed in km/h at the start of the current step.
     last_speed: f32,
+    /// Source `HornHit` state. It is not saved.
+    pub horn_hit: Option<crate::crash::HornHit>,
+    /// Source `carscript.blood`. The binder sets it.
+    pub blood: Option<crate::crash::Blood>,
     /// Parts mounted on this car, found once at the start of each step.
     powertrain: Powertrain,
     /// Requested headlight state: off, low or high.
@@ -579,6 +583,8 @@ impl VehicleRuntime {
             bodies: parts.bodies,
             previous: [0.0; 3],
             last_speed: 0.,
+            horn_hit: None,
+            blood: None,
             powertrain: Powertrain::default(),
             requested_headlights: 0,
             light_switch: parts.light_switch,
@@ -623,6 +629,7 @@ impl VehicleRuntime {
         for v in self.lights.visibility() {
             v.hash(&mut h);
         }
+        self.blood.as_ref().map(|b| b.shown).hash(&mut h);
         h.finish()
     }
     /// Source `carscript.InteractSwitchLights`: off, low, high.
@@ -2029,6 +2036,7 @@ impl GarageRuntime {
                             && controls
                             && seated == Some(key)
                             && input.held & keys::HORN != 0,
+                        horn_hit: vehicle.horn_hit.map(|h| h.gain()),
                         ambient_temperature,
                         wheels: &vehicle.wheel_effects,
                         skid: &reference.skid,

@@ -182,20 +182,22 @@ impl GarageRuntime {
             self.hear_blast(reference, power, blast.position);
         }
         // Source: each body with `carscript` gets `DamageStuff(power * 5)` at its body position.
+        let mut vehicles = std::mem::take(&mut self.vehicles);
         for i in 0..self.area.interaction.explosions.bodies().len() {
             let body = self.area.interaction.explosions.bodies()[i];
             let Some(key) = self.physics.vehicle_of(body).cloned() else {
                 continue;
             };
-            let Some(record) = self.vehicles.get(&key).map(|v| v.record(reference)) else {
+            let Some(vehicle) = vehicles.get_mut(&key) else {
                 continue;
             };
             let d = self.physics.rapier().bodies[body]
                 .translation()
                 .distance(blast.position);
             let v = power(d, blast.radius, blast.force) * 5.;
-            self.crash_car(reference, &key, record, v);
+            self.crash_car(reference, &key, vehicle, v);
         }
+        self.vehicles = vehicles;
         let explosions = &self.area.interaction.explosions;
         explosions.push(&mut self.physics, blast, player);
     }
