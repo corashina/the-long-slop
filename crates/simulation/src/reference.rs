@@ -1040,6 +1040,16 @@ fn valid_flow(
 }
 
 impl ReferenceManifest {
+    /// Exported audio clip id of a source clip.
+    pub fn clip_id(&self, source: &SourceId) -> Option<u32> {
+        self.audio["clips"].as_array()?.iter().find_map(|c| {
+            (c["source"]["file"].as_str() == Some(source.file.as_str())
+                && c["source"]["path_id"].as_i64() == Some(source.path_id))
+            .then(|| c["id"].as_u64())
+            .flatten()
+            .map(|id| id as u32)
+        })
+    }
     pub fn expected_instances(&self) -> usize {
         self.assets
             .iter()

@@ -675,6 +675,7 @@ impl ItemStore {
         bite: u8,
         pose: VehiclePose,
         body: RigidBodyHandle,
+        hit_sound: Option<HitSound>,
     ) -> Result<(), ReferenceError> {
         if self.indices.contains_key(&id) || bite > reference.bites {
             return Err(ReferenceError("Invalid consumable identity".into()));
@@ -699,7 +700,7 @@ impl ItemStore {
                 prototype_index,
                 bite,
             }),
-            hit_sound: None,
+            hit_sound,
             removed: false,
             pending_attachment: false,
             buried: false,
@@ -715,6 +716,7 @@ impl ItemStore {
         name: &str,
         pose: VehiclePose,
         body: RigidBodyHandle,
+        hit_sound: Option<HitSound>,
     ) -> Result<(), ReferenceError> {
         if self.indices.contains_key(&id) {
             return Err(ReferenceError("Invalid spawned item identity".into()));
@@ -736,7 +738,7 @@ impl ItemStore {
             fluid: None,
             inactive_pose: None,
             food: None,
-            hit_sound: None,
+            hit_sound,
             removed: false,
             pending_attachment: false,
             buried: false,

@@ -1,6 +1,7 @@
 //! Binds source breakablescripts of active content to `damage::Breakables` targets, steps their hits
 //! and removes broken items.
-//! Items bind by their world prototype. Lamp triggers bind by their structure lamp control.
+//! Items bind by their world prototype, spawned copies by their item prototype. Lamp triggers bind
+//! by their structure lamp control.
 use super::WorldStream;
 use crate::damage::BreakKind;
 use crate::interaction::items::{ItemLocation, ItemStore};
@@ -9,6 +10,7 @@ use crate::reference::{
     BreakableOwnerKind, BreakableReference, ItemId, LightControlId, ReferenceError,
     ReferenceManifest, SourceId,
 };
+use crate::starting_area::spawned::SpawnedItems;
 use crate::vehicle::PhysicsWorld;
 use crate::world::GeneratedId;
 use rapier3d::prelude::ActiveEvents;
@@ -22,17 +24,27 @@ fn world_node(record: &BreakableReference, prototype: &SourceId) -> Option<u32> 
         .map(|o| o.node)
 }
 
+/// The manifest node of the breakablescript in an item prototype.
+fn item_node(record: &BreakableReference, prototype: &SourceId) -> Option<u32> {
+    record
+        .owners
+        .iter()
+        .find(|o| o.kind == BreakableOwnerKind::Item && &o.prototype == prototype)
+        .map(|o| o.node)
+}
+
 impl WorldStream {
     /// Run after the physics step. Queues the targets that break this step.
     pub fn step_breakables(
         &mut self,
         reference: &ReferenceManifest,
         items: &ItemStore,
+        spawned: &SpawnedItems,
         physics: &mut PhysicsWorld,
         dt: f32,
     ) {
         self.refresh_boxes();
-        self.refresh_breakables(reference, items, physics);
+        self.refresh_breakables(reference, items, spawned, physics);
         self.breakables.step_hits(
             &reference.breakables,
             physics,
@@ -137,6 +149,7 @@ impl WorldStream {
         &mut self,
         reference: &ReferenceManifest,
         items: &ItemStore,
+        spawned: &SpawnedItems,
         physics: &mut PhysicsWorld,
     ) {
         let scan = [
@@ -154,7 +167,10 @@ impl WorldStream {
         let structures = &self.structures;
         let present = |item| items.get(item).is_some_and(|s| !s.removed);
         self.breakables.retain(|t| match &t.kind {
-            BreakKind::Item(item) => present(*item) && active.iter().any(|c| c.item == Some(*item)),
+            BreakKind::Item(item) => {
+                present(*item)
+                    && (spawned.contains(*item) || active.iter().any(|c| c.item == Some(*item)))
+            }
             BreakKind::Lamp { parent, control } => lamps
                 .iter()
                 .any(|b| b.control == *control && &b.parent == parent),
@@ -171,6 +187,18 @@ impl WorldStream {
             {
                 self.breakables
                     .bind(BreakKind::Item(item), record, &records[record]);
+            }
+        }
+        // A spawned prototype copy whose pickup node holds a breakablescript without a lamp.
+        for copy in spawned.iter().filter(|c| present(c.id)) {
+            let prototype = &reference.item_prototypes[copy.prototype];
+            let node = prototype.pickups[copy.pickup].node;
+            if let Some(record) = records
+                .iter()
+                .position(|r| r.lamp.is_none() && item_node(r, &prototype.id.0) == Some(node.0))
+            {
+                self.breakables
+                    .bind(BreakKind::Item(copy.id), record, &records[record]);
             }
         }
         // Source OnCollisionEnter runs on every contact. Item colliders without a hit sound report

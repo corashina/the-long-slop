@@ -251,6 +251,12 @@ Run the X03a test pass (sky traffic) in the same run:
 5. Save and load near the bats (save schema 27). Old saves do not load.
 6. Check F3 next to the bats. Compare with the frame rate rule.
 
+Run the small effects test pass in the same run:
+
+1. Run `cargo test --lib tumbleweed_breaks -- --ignored` and `cargo test --lib spawned_copy_takes -- --ignored`.
+2. Hit a tumbleweed hard with the car, a shot and a melee swing. It breaks with its gib and sound. Save and load: it stays gone.
+3. Drop and throw food and cut food pieces. Each makes its hit sound.
+
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X02 | Weapons and damage | L | Starting-area tanks (garage fuel can) explode and leak, cacti breaks, SMG magazine drop on unload, AI parts of the damage model (X03). [G01, G03, G06, C06] |
