@@ -581,6 +581,18 @@ impl PhysicsWorld {
         }
     }
 
+    /// Wheel centers in the chassis body frame, in wheel order. None if `key` has no vehicle.
+    pub fn wheel_centers(&self, key: &ObjectKey) -> Option<impl Iterator<Item = Vector> + '_> {
+        let vehicle = self.vehicles.get(key)?;
+        Some(
+            vehicle
+                .wheels
+                .wheels()
+                .iter()
+                .map(|w| w.connection - Vector::Y * w.suspension_length),
+        )
+    }
+
     /// Ground contact of each wheel, in wheel order.
     pub fn wheel_contacts(&self, key: &ObjectKey) -> impl Iterator<Item = bool> + '_ {
         self.vehicle(key)

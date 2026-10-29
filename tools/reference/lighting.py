@@ -580,6 +580,17 @@ def validate_sky_material(m):
               'colors':mapping(array(number,4)),'textures':array(texture)})
 
 
+def light_payload(source,light,node,light_id,startup_intensity):
+    """One Light component as a light record. `node` is its node id, `light_id` its id in its own table."""
+    ld=source.read(light);shadow=ld['m_Shadows']
+    transform=source.transform_for(source.resolve(light,ld['m_GameObject']))
+    return {'id':light_id,'source':source_id(light),'node':node,'pose':converted_transform(source.read(transform)),
+        'kind':{0:'spot',1:'directional',2:'point',3:'area'}[ld['m_Type']],'color':rgba(ld['m_Color']),
+        'serialized_intensity':ld['m_Intensity'],'startup_intensity':startup_intensity,'range_meters':ld['m_Range'],
+        'full_cone_degrees':ld['m_SpotAngle'],'inner_cone_degrees':ld['m_InnerSpotAngle'],'enabled':bool(ld['m_Enabled']),
+        'culling_mask':ld['m_CullingMask']['m_Bits'],'shadows':{'kind':shadow['m_Type'],'strength':shadow['m_Strength'],
+        'bias':shadow['m_Bias'],'normal_bias':shadow['m_NormalBias'],'near_plane':shadow['m_NearPlane'],'resolution':shadow['m_Resolution'],'custom_resolution':shadow['m_CustomResolution']},'cookie':None,'cookie_size':ld['m_CookieSize']}
+
 def validate_light_payload(l):
     from .validation import record,array,number,u32,i32,integer,boolean,string,source,pose,optional
     def shadow(s):

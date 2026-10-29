@@ -95,6 +95,7 @@ def runtime_resources(manifest):
     collect(manifest.get('clothing', {}))
     for p in manifest.get('item_prototypes',[]):collect(p.get('consumable'))
     collect(manifest.get('skid',{}).get('particles',[]))
+    collect(manifest.get('survival',{}).get('food_particles',[]))
     for item in manifest.get('render_lighting', {}).get('dependencies', []):
         collect({'path':item['file'],'sha256':item['sha256']})
     world=manifest.get('world', {})
@@ -104,6 +105,7 @@ def runtime_resources(manifest):
         collect(prototype.get('deferred_materials', []))
         vehicle=prototype.get('vehicle') or {}
         collect(vehicle.get('exhaust', []))
+        collect(vehicle.get('coolant_steam'))
         collect([[w['dust'],w['grass']] for w in vehicle.get('wheel_effects',[])])
     return list(resources.values())
 
@@ -365,6 +367,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     manifest['computer'] = recover_computer(source, manifest)
     from .melee import recover_melee, validate_melee
     manifest['melee'] = recover_melee(source, manifest, output)
+    from .particles import recover_food_particles
+    manifest['survival']['food_particles'] = recover_food_particles(source, output)
     from .guns import recover_guns, validate_guns
     # Before audio and UI: gun clips join source.item_clips, crosshair icons join the UI sprites.
     manifest['guns'] = recover_guns(source, manifest, output)

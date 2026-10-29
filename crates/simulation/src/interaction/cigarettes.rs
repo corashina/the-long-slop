@@ -210,11 +210,14 @@ impl CigaretteState {
         }
     }
     /// `ediblescript.Update` and `emberScript.Update`. The automatic burn has no survival effect.
-    pub fn update(&mut self, r: &BurnRates, dt: f32) {
+    /// Returns true when the automatic burn ran `Eat` on a lit cigarette.
+    pub fn update(&mut self, r: &BurnRates, dt: f32) -> bool {
+        let ate = r.automatic && self.ate_once && self.hp > 0.;
         if r.automatic && self.ate_once {
             self.eat(r, dt, true);
         }
         self.ember.update(&r.ember, dt);
+        ate
     }
     /// `UpdParts`: part poses lerp from end to start by hp.
     pub fn part_blend(&self) -> f32 {

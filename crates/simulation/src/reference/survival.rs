@@ -77,6 +77,9 @@ pub struct FoodReference {
     pub pickup: PickupReference,
     pub parts: Vec<Vec<NodeId>>,
     pub colliders: Vec<FoodCollider>,
+    /// Source `ediblescript.hasParticle`. A bite emits at the food root.
+    pub has_particle: bool,
+    /// Index in `SurvivalReference::food_particles`.
     pub particle_type: u8,
     pub min_particle: u32,
     pub max_particle: u32,
@@ -165,6 +168,8 @@ pub struct SurvivalReference {
     pub run_food_loss_modifier: f32,
     pub run_water_loss_modifier: f32,
     pub delay_speed: f32,
+    /// Source `mainscript.FoodParticles`, in `foodParticleType` order. Emit only, world space.
+    pub food_particles: Vec<ParticleReference>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -249,6 +254,17 @@ impl SurvivalReference {
                 && ids(self.foods.iter().map(|f| f.kind), "food kinds")?.len() == 7,
             "food prototypes",
         )?;
+        require(
+            self.food_particles.len() == 5
+                && self
+                    .food_particles
+                    .iter()
+                    .all(|p| p.simulation_space == 1 && p.role.starts_with("food_")),
+            "food particles",
+        )?;
+        for p in &self.food_particles {
+            super::particles::validate_particle(p)?;
+        }
         for f in &self.foods {
             require(
                 f.bites > 0
@@ -256,6 +272,7 @@ impl SurvivalReference {
                     && f.parts.len() == f.bites as usize
                     && f.destroy_on_end
                     && f.sound <= 1
+                    && usize::from(f.particle_type) < self.food_particles.len()
                     && f.effect.valid(),
                 "food consumption",
             )?;

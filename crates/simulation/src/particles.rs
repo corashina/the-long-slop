@@ -59,6 +59,7 @@ struct Emission {
     velocity: Option<VelocityModule>,
     inherit: Option<Inherit>,
     collision: Option<Collision>,
+    noise: Option<Noise>,
     uv: bool,
     size: Option<ParticleCurve>,
     color: Option<ParticleColor>,
@@ -81,6 +82,43 @@ struct Inherit {
     /// Source `InheritVelocityModule.m_Mode`: 0 initial velocity, 1 current velocity.
     mode: f32,
     curve: ParticleCurve,
+}
+/// Source `NoiseModule` position noise. The noise field is an approximation: Unity's native
+/// noise is not ported. Strength, frequency, octaves, scroll and damping follow the source fields.
+#[derive(Debug)]
+struct Noise {
+    strength: [ParticleCurve; 3],
+    position_amount: ParticleCurve,
+    scroll_speed: ParticleCurve,
+    frequency: f32,
+    octaves: u32,
+    octave_multiplier: f32,
+    octave_scale: f32,
+    /// Source `damping`: the strength is divided by the frequency.
+    damping: f32,
+}
+/// Per-axis offsets into the 2D noise field, so that the axes do not move together.
+const NOISE_OFFSETS: [[f32; 2]; 3] = [[17.3, 61.9], [113.7, 29.1], [71.5, 157.3]];
+impl Noise {
+    /// Noise in [-1, 1] per axis at an absolute position, before strength.
+    fn sample(&self, absolute: [f64; 3], scroll: f32) -> Vector {
+        let mut out = [0f32; 3];
+        let (mut frequency, mut amplitude) = (f64::from(self.frequency), 1.);
+        for _ in 0..self.octaves {
+            // The 2D field repeats every 256 units. Wrap in f64 to keep precision far out.
+            let q: [f32; 3] =
+                std::array::from_fn(|i| (absolute[i] * frequency).rem_euclid(256.) as f32);
+            for (i, value) in out.iter_mut().enumerate() {
+                let [a, b] = NOISE_OFFSETS[i];
+                let first = terrain::source_perlin(q[(i + 1) % 3] + a, q[(i + 2) % 3] + scroll + b);
+                let second = terrain::source_perlin(q[i] + b, q[(i + 1) % 3] + scroll + a);
+                *value += (first + second - 1.) * amplitude;
+            }
+            frequency *= f64::from(self.octave_scale);
+            amplitude *= self.octave_multiplier;
+        }
+        Vector::from_array(out)
+    }
 }
 #[derive(Debug)]
 struct Collision {
@@ -146,6 +184,32 @@ impl Modules {
                 min_kill_speed: r.scalars["CollisionModule.minKillSpeed"],
                 max_kill_speed: r.scalars["CollisionModule.maxKillSpeed"],
             }),
+            noise: on("NoiseModule").then(|| {
+                let frequency = r.scalars["NoiseModule.frequency"];
+                let strength = if r.flags["NoiseModule.separateAxes"] {
+                    [
+                        curve("NoiseModule.strength"),
+                        curve("NoiseModule.strengthY"),
+                        curve("NoiseModule.strengthZ"),
+                    ]
+                } else {
+                    std::array::from_fn(|_| curve("NoiseModule.strength"))
+                };
+                Noise {
+                    strength,
+                    position_amount: curve("NoiseModule.positionAmount"),
+                    scroll_speed: curve("NoiseModule.scrollSpeed"),
+                    frequency,
+                    octaves: r.scalars["NoiseModule.octaves"] as u32,
+                    octave_multiplier: r.scalars["NoiseModule.octaveMultiplier"],
+                    octave_scale: r.scalars["NoiseModule.octaveScale"],
+                    damping: if r.flags["NoiseModule.damping"] {
+                        1. / frequency
+                    } else {
+                        1.
+                    },
+                }
+            }),
             uv: on("UVModule"),
             size: r.curves.get("SizeModule.curve").cloned(),
             color: r.colors.get("ColorModule.gradient").cloned(),
@@ -181,6 +245,8 @@ pub struct ParticleState {
     remainder: f32,
     elapsed: f32,
     last_emitter: Option<[f64; 3]>,
+    /// Source `NoiseModule.scrollSpeed` integrated over time.
+    noise_scroll: f32,
     pub rotation: Rotation,
     pub emission_rotation: Option<Rotation>,
     /// Scales the shape radius. Storms set it to their size.
@@ -203,6 +269,7 @@ impl ParticleState {
             remainder: 0.,
             elapsed: 0.,
             last_emitter: None,
+            noise_scroll: 0.,
             rotation: Rotation::IDENTITY,
             emission_rotation: None,
             radius_scale: 1.,
@@ -442,6 +509,12 @@ impl ParticleState {
         self.burst_started = true;
         self.spawn(count, emitter_absolute, rotation, emitter_velocity);
         let e = self.modules.emission.as_ref().expect("active system");
+        if let Some(n) = &e.noise {
+            let phase = self.elapsed / self.modules.duration;
+            self.noise_scroll =
+                (self.noise_scroll + particle_curve(&n.scroll_speed, phase, 0.5) * dt) % 256.;
+        }
+        let scroll = self.noise_scroll;
         let origin = self.origin;
         // Disabled modules do not access their payload or issue physics queries.
         let surfaces = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
@@ -489,7 +562,17 @@ impl ParticleState {
                 module_velocity += emitter_velocity * particle_curve(&i.curve, t, p.inherit_draw);
             }
             let velocity = (p.velocity + module_velocity) * speed_modifier;
-            let travel = velocity * dt;
+            let mut travel = velocity * dt;
+            // Noise moves the position only. It does not change the particle velocity.
+            if let Some(n) = &e.noise {
+                let amount = particle_curve(&n.position_amount, t, p.size_draw) * n.damping * dt;
+                let strength = Vector::new(
+                    particle_curve(&n.strength[0], t, p.size_draw),
+                    particle_curve(&n.strength[1], t, p.size_draw),
+                    particle_curve(&n.strength[2], t, p.size_draw),
+                );
+                travel += n.sample(p.absolute_position, scroll) * strength * amount;
+            }
             let mut position = Vector::from_array(std::array::from_fn(|i| {
                 (p.absolute_position[i] - origin[i]) as f32
             }));

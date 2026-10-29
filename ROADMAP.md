@@ -123,7 +123,7 @@ Prepare once:
 17. Check the trailer rear and brake lamps follow the Lada lights, ignition and brake. Check the bus trailer brake switch.
 18. Pick the grip off the hitch while the car stands and while it rolls. Save and load with the trailer on the hitch.
 19. Tow a trailer far from where it spawned and back: car, trailer and grip must not vanish or freeze apart.
-20. Check the trailer reflection probe and trailer wheel meshes. Trailer wheel meshes do not turn yet; `PlusWheelToKeepAwake` is not ported.
+20. Check the trailer reflection probe. `PlusWheelToKeepAwake` is not ported.
 21. Check F3 while towing. Compare with the frame rate rule.
 22. Buses (V03): run `cargo test --lib v03_bus_pool -- --ignored`.
 23. Check F3 at the start and near a bus. Compare with the frame rate rule.
@@ -316,3 +316,10 @@ Prepare once:
 1. Run `cargo test --lib tumbleweed_breaks -- --ignored` and `cargo test --lib spawned_copy_takes -- --ignored`.
 2. Hit a tumbleweed hard with the car, a shot and a melee swing. It breaks with its gib and sound. Save and load: it stays gone.
 3. Drop and throw food and cut food pieces. Each makes its hit sound.
+4. Run `cargo test --lib lada_tows -- --ignored`: trailer wheel meshes turn while the trailer rolls.
+5. Stay up at night for a few nights. The horror sound plays for 5 to 15 s on the first night, then every 1 to 5 nights. It stops at day.
+6. Overheat a car engine above 110 degrees with coolant: steam rises under the hood and the boil sound grows with the heat. Check that steam is not lost inside the hood colliders. The steam noise is an approximation of Unity's. Car08 and Car08c have no steam.
+7. Tow a small trailer and drive Bus02 with its trailer: wheel meshes turn and steer. Bus02 leaf springs, axles and tipper rams follow the wheels.
+8. Eat each food. Crumbs, meat, turd and chocolate bits fall from the food. Smoke a cigarette: ash falls now and then.
+9. New game between 15 October and 15 November: the start pumpkin glows and flickers at night. Hold it and wear it: the light follows.
+10. Check F3 with steam on, near Bus02, and near the pumpkin. Compare with the frame rate rule.

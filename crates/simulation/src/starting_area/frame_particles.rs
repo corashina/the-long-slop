@@ -84,6 +84,10 @@ impl GarageRuntime {
             let particles = interaction.explosions.particles(source);
             out.owner(ParticleGroupRow::EXPLOSION, 0, source, particles);
         }
+        for source in 0..reference.survival.food_particles.len() {
+            let particles = self.food_particles.particles(source);
+            out.owner(ParticleGroupRow::FOOD, 0, source, particles);
+        }
         let cigarettes = &area.cigarettes;
         out.owner(
             ParticleGroupRow::EXHALE,
@@ -103,6 +107,7 @@ impl GarageRuntime {
             for (system, source) in car_particle_sources(reference, vehicle.prototype) {
                 let particles = match system {
                     ParticleGroupRow::CAR_EXHAUST => vehicle.exhaust.particles(source),
+                    ParticleGroupRow::CAR_STEAM => vehicle.coolant_steam.particles(),
                     ParticleGroupRow::CAR_WHEEL => {
                         vehicle.wheel_effects.particles(source / 8, source % 8)
                     }

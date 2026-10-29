@@ -87,16 +87,55 @@ def recover_exhaust(source,car_reader,car,owner,index,output):
     systems=[source.resolve(car_reader,pointer) for pointer in car['psSmoke']]
     if not systems or any(s is None for s in systems):raise ValueError(f'Car needs exhaust particle systems: {source_id(car_reader)}')
     result=[particle(source,s,f'exhaust_{index}_{i}',1.,output,owner) for i,s in enumerate(systems)]
-    for p in result:validate_exhaust(p)
+    for p in result:validate_runtime_particle(p)
     return result
 
-def validate_exhaust(p):
-    unsupported=sorted(k for k,v in p['module_flags'].items() if v and k not in EXHAUST_MODULES)
-    if unsupported:raise ValueError(f"Unsupported exhaust particle modules {p['role']}: {unsupported}")
+# Coolant steam also runs the NoiseModule position noise.
+STEAM_MODULES=EXHAUST_MODULES|{'NoiseModule'}
+
+def recover_coolant_steam(source,car_reader,car,owner,output):
+    """Read carscript.CoolantSteam. carscript runs it only with CoolantBoil, so a car without one has none.
+
+    The runtime sets the rate, so the exported rate is 1.
+    """
+    steam=source.resolve(car_reader,car['CoolantSteam']);boil=source.resolve(car_reader,car['CoolantBoil'])
+    if steam is None:return None
+    # carscript enables the emission. Without CoolantBoil nothing enables it.
+    if source.read(steam)['EmissionModule']['enabled']:raise ValueError(f'Coolant steam emission is on: {source_id(steam)}')
+    if boil is None:return None
+    p=particle(source,steam,f'coolant_steam_{car_reader.path_id}',1.,output,owner)
+    validate_runtime_particle(p,STEAM_MODULES)
+    if p['module_flags'].get('NoiseModule'):
+        if p['flags']['NoiseModule.remapEnabled'] or any(p['curves'][f'NoiseModule.{k}']['mode']!=0 or p['curves'][f'NoiseModule.{k}']['scalar']!=0
+                for k in ('rotationAmount','sizeAmount')):raise ValueError(f"Unsupported coolant steam noise {p['role']}")
+    return {'particle':p,'max_rate':car['CoolantSteamMaxRate']}
+
+# mainscript.foodParticleType order.
+FOOD_PARTICLES=('crumbs','meat','shit','ash','csoki')
+
+def recover_food_particles(source,output):
+    """mainscript.FoodParticles. FoodParticle moves the shared system to the bite and calls Emit(num)."""
+    main=source.get('level1',64919);systems=source.read(main)['FoodParticles']
+    if len(systems)!=len(FOOD_PARTICLES):raise ValueError('mainscript FoodParticles count differs')
+    result=[]
+    for name,pointer in zip(FOOD_PARTICLES,systems):
+        system=source.resolve(main,pointer)
+        if system is None or system.type.name!='ParticleSystem':raise ValueError(f'mainscript FoodParticles {name} is not ParticleSystem')
+        # Emission does not run. The system pose is the bite pose.
+        p=particle(source,system,f'food_{name}',0.,output)
+        p['local_pose']={'translation':[0.,0.,0.],'rotation':[0.,0.,0.,1.],'scale':[1.,1.,1.]}
+        if p['module_flags']['EmissionModule']:raise ValueError(f'Food particle emission is on: {name}')
+        validate_runtime_particle(p,EXHAUST_MODULES,1)
+        result.append(p)
+    return result
+
+def validate_runtime_particle(p,modules=EXHAUST_MODULES,simulation_space=2):
+    unsupported=sorted(k for k,v in p['module_flags'].items() if v and k not in modules)
+    if unsupported:raise ValueError(f"Unsupported particle modules {p['role']}: {unsupported}")
     # The runtime plays a whole grid sheet over lifetime only.
     if p['module_flags'].get('UVModule') and any(p['scalars'][f'UVModule.{k}']!=0 for k in ('mode','animationType','timeMode')):
-        raise ValueError(f"Unsupported exhaust texture sheet {p['role']}")
-    validate_particle_data(p,2)
+        raise ValueError(f"Unsupported texture sheet {p['role']}")
+    validate_particle_data(p,simulation_space)
 
 def relative_pose(source, root, owner):
     from .gltf import transform_point

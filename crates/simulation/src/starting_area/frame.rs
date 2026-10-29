@@ -75,6 +75,34 @@ impl GarageRuntime {
             .filter(lit)
             .or(area.interaction.held().filter(lit))
             .or_else(|| c.cigarettes.iter().map(|(id, _)| *id).find(lit));
+        // One lightdither light: a worn pumpkin, then the held one, then the nearest in the world.
+        let dithered = |id: &ItemId| {
+            area.spawned.get(*id).is_some_and(|s| {
+                reference.item_prototypes[s.prototype]
+                    .light_dither
+                    .is_some()
+            })
+        };
+        let focus = rapier3d::math::Vector::from_array(area.player.focus_position(&self.physics));
+        let dither_light = (0..crate::interaction::wear::WEAR_SLOTS)
+            .filter_map(|slot| area.wear.item(slot))
+            .find(dithered)
+            .or(area.interaction.held().filter(dithered))
+            .or_else(|| {
+                area.spawned
+                    .iter()
+                    .map(|s| s.id)
+                    .filter(dithered)
+                    .filter_map(|id| {
+                        let item = area.items.get(id)?;
+                        matches!(item.location, ItemLocation::World).then(|| {
+                            let d = rapier3d::math::Vector::from_array(item.pose.position) - focus;
+                            (id, d.length_squared())
+                        })
+                    })
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .map(|(id, _)| id)
+            });
         let anchor = self.sky_anchor(reference);
         let offset = self.stream.origin.offset;
         frame.state = StateBlock {
@@ -94,6 +122,8 @@ impl GarageRuntime {
             joint_scale: area.body.joint_scale(),
             sky_anchor: std::array::from_fn(|i| (anchor[i] - offset[i]) as f32),
             ember_light: ember_light.map_or(0, |id| id.0 + 1),
+            dither_light: dither_light.map_or(0, |id| id.0 + 1),
+            pad: 0,
             dead_weight,
             motion_revision: self.audio_motion_revision,
             far_plane: self.distances.cam2_far_plane,

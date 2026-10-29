@@ -9,8 +9,9 @@ mod memory;
 use super::{
     AssetId, AssetRecord, AssetUsage, ColliderGeometry, EngineGlobals, EnginePartReference,
     GaugePartReference, LibraryProvenance, NodeId, PrototypeBounds, RadiatorPartReference,
-    ReferenceError, ReferenceManifest, SourceHash, SourceId, Transform, WorldHitchReference,
-    WorldTrailerReference, WorldVehicleReference, finite, hash, require, transform,
+    ReferenceError, ReferenceManifest, SourceHash, SourceId, Transform, WorldFollowersReference,
+    WorldHitchReference, WorldTrailerReference, WorldVehicleReference, finite, hash, require,
+    transform,
 };
 pub use grass::*;
 pub use initial_materials::*;
@@ -166,6 +167,8 @@ pub struct WorldPrototypeReference {
     pub gauges: Vec<GaugePartReference>,
     pub sled: Option<SledReference>,
     pub trailer: Option<WorldTrailerReference>,
+    /// Node followers of Bus02 springs, axles and rams.
+    pub followers: Option<WorldFollowersReference>,
     /// Trailer hitch targets on this prototype.
     #[serde(default, deserialize_with = "compact_vec")]
     pub hitches: Vec<WorldHitchReference>,
@@ -1849,6 +1852,10 @@ impl WorldReference {
                 t.valid(p) && self.prototypes.iter().any(|g| g.source == t.grip.prototype)
             }) && p.hitches.iter().all(|h| h.valid(p)),
             &field(&p.source, "prototype trailer/hitches"),
+        )?;
+        require(
+            p.followers.as_ref().is_none_or(|f| f.valid(p)),
+            &field(&p.source, "prototype followers"),
         )?;
         let doors: Vec<_> = self
             .mechanisms

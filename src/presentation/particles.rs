@@ -265,6 +265,8 @@ enum Owner {
     Tracer,
     /// `explosionscript.particle`; `Group::source` is the explosion type.
     Explosion,
+    /// `mainscript.FoodParticles`; `Group::source` is the food particle type.
+    Food,
     /// The contrail of the sky plane with this id; `Group::source` is the prefab.
     Sky(u32),
     /// The `emberScript` particle of one cigarette.
@@ -284,6 +286,13 @@ fn car_particle(
     let record = crate::starting_area::world_vehicle(reference, prototype);
     match system {
         ParticleGroupRow::CAR_EXHAUST => &record.exhaust[source],
+        ParticleGroupRow::CAR_STEAM => {
+            &record
+                .coolant_steam
+                .as_ref()
+                .expect("coolant steam group")
+                .particle
+        }
         ParticleGroupRow::CAR_WHEEL => {
             let w = &record.wheel_effects[source / 8];
             match source % 8 {
@@ -646,6 +655,17 @@ fn sync_particles(
                 &mut materials,
             );
         }
+        for (kind, p) in reference.0.survival.food_particles.iter().enumerate() {
+            add_group(
+                &mut state,
+                Owner::Food,
+                kind,
+                p,
+                &lighting,
+                &mut commands,
+                &mut materials,
+            );
+        }
         add_group(
             &mut state,
             Owner::Exhale,
@@ -812,6 +832,7 @@ fn sync_particles(
             Owner::Tracer if g.source == 0 => &reference.0.guns.tracer.start,
             Owner::Tracer => &reference.0.guns.tracer.end,
             Owner::Explosion => &reference.0.explosions.types[g.source].particle,
+            Owner::Food => &reference.0.survival.food_particles[g.source],
             Owner::Sky(_) => reference.0.sky.prefabs[g.source]
                 .contrail
                 .as_ref()
@@ -896,6 +917,7 @@ fn key(owner: Owner, source: usize) -> ParticleGroupKey {
         Owner::Melee => (ParticleGroupRow::MELEE, 0, 0, 0),
         Owner::Tracer => (ParticleGroupRow::TRACER, 0, 0, 0),
         Owner::Explosion => (ParticleGroupRow::EXPLOSION, 0, 0, 0),
+        Owner::Food => (ParticleGroupRow::FOOD, 0, 0, 0),
         Owner::Sky(id) => (ParticleGroupRow::SKY, id, 0, 0),
         Owner::Ember(id) => (ParticleGroupRow::EMBER, id.0, 0, 0),
         Owner::Exhale => (ParticleGroupRow::EXHALE, 0, 0, 0),

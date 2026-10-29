@@ -1,15 +1,17 @@
 //! Cigarette packs and smoking. Source `fpscontroller` smoke paths.
 use super::GarageRuntime;
 use crate::interaction::cigarettes::{
-    BurnRates, CigaretteState, ExhaleRates, ExhaleState, PackState,
+    BurnRates, CigaretteState, ExhaleRates, ExhaleState, PackState, part_pose,
 };
 use crate::interaction::feedback::ActionMask;
 use crate::interaction::items::{ItemLocation, node_pose};
 use crate::particles::ParticleState;
-use crate::reference::{ItemId, NodeId, ParticleReference, ReferenceError, ReferenceManifest};
+use crate::reference::{
+    ItemId, NodeId, ParticleReference, ReferenceError, ReferenceManifest, Transform,
+};
 use crate::simulation::{FIXED_DT, FrameInput, keys, player_keys};
 use crate::vehicle::{VehiclePose, from_rapier, to_rapier};
-use rapier3d::math::Pose;
+use rapier3d::math::{Pose, Rotation, Vector};
 
 pub struct CigaretteRuntime {
     pub rates: BurnRates,
@@ -34,7 +36,49 @@ pub struct CigaretteRuntime {
     /// Ember particle part at its start and end pose, in the root frame (`UpdParts`).
     ember_start: Pose,
     ember_end: Pose,
+    ash: Option<Ash>,
     show_stats: bool,
+}
+
+/// Source `ediblescript.hasParticle` of the cigarette. `particlePos` is a child of one part.
+struct Ash {
+    kind: usize,
+    range: [i32; 2],
+    /// The part at its start and end pose, in the root frame (`UpdParts`).
+    start: Transform,
+    end: Transform,
+    /// `particlePos` in the part frame.
+    local: Transform,
+}
+
+impl CigaretteRuntime {
+    /// `mainscript.FoodParticle` of one cigarette `Eat` at `particlePos`. `hp` is the value before
+    /// the bite: `UpdParts` runs after the particle.
+    fn ash(
+        &self,
+        item: VehiclePose,
+        hp: f32,
+        origin: &crate::world::WorldOrigin,
+        food: &mut crate::food_particles::FoodParticles,
+    ) {
+        let Some(a) = &self.ash else {
+            return;
+        };
+        let part = part_pose(&a.start, &a.end, hp);
+        let rotation = Rotation::from_array(part.rotation);
+        let local = Vector::from_array(part.scale) * Vector::from_array(a.local.translation);
+        let in_root = Pose::from_parts(
+            Vector::from_array(part.translation) + rotation * local,
+            rotation * Rotation::from_array(a.local.rotation),
+        );
+        let pose = to_rapier(item) * self.root_in_body * in_root;
+        food.bite(
+            a.kind,
+            a.range,
+            origin.absolute(pose.translation.to_array()),
+            pose.rotation * Vector::NEG_Z,
+        );
+    }
 }
 
 impl CigaretteRuntime {
@@ -74,6 +118,40 @@ impl CigaretteRuntime {
         let in_root = |node| -> Result<Pose, ReferenceError> {
             Ok(root.inverse() * to_rapier(node_pose(reference, node)?))
         };
+        let node = |id: NodeId| {
+            reference
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
+                .ok_or_else(|| ReferenceError(format!("Missing node {}", id.0)))
+        };
+        let ash = if consumable.has_particle {
+            let position = node(consumable.particle_position)?;
+            let part = consumable
+                .parts
+                .iter()
+                .position(|n| Some(*n) == position.parent)
+                .ok_or_else(|| {
+                    ReferenceError("Cigarette particle position is no part child".into())
+                })?;
+            let in_root = |id: NodeId| -> Result<Transform, ReferenceError> {
+                let n = node(id)?;
+                if n.parent != Some(record.root) {
+                    return Err(ReferenceError("Cigarette part is no root child".into()));
+                }
+                Ok(n.transform)
+            };
+            in_root(consumable.parts[part])?;
+            Some(Ash {
+                kind: consumable.particle_type as usize,
+                range: [consumable.min_particle, consumable.max_particle],
+                start: in_root(consumable.start[part])?,
+                end: in_root(consumable.end[part])?,
+                local: position.transform,
+            })
+        } else {
+            None
+        };
         let exhale = &reference.small_items.exhale;
         Ok(Self {
             embers: Vec::new(),
@@ -87,6 +165,7 @@ impl CigaretteRuntime {
             root_in_body: body_local.inverse(),
             ember_start: in_root(consumable.start[part])?,
             ember_end: in_root(consumable.end[part])?,
+            ash,
             rates: BurnRates::from(consumable),
             exhale_rates: ExhaleRates::from(&reference.small_items.exhale),
             pack_prototype,
@@ -217,10 +296,17 @@ impl GarageRuntime {
                 .find(|(i, _)| *i == id)
                 .map(|(_, s)| s);
             if let Some(state) = state {
-                if state.hp > 0. {
+                let hp = state.hp;
+                if hp > 0. {
                     c.exhale.charge(&exhale, dt);
                 }
                 let effect = state.eat(&rates, dt, false);
+                if hp > 0.
+                    && let Some(item) = self.area.items.get(id)
+                {
+                    let c = &self.area.cigarettes;
+                    c.ash(item.pose, hp, &self.stream.origin, &mut self.food_particles);
+                }
                 self.survival.queue(effect);
                 if self.area.cigarettes.show_stats {
                     self.survival.show_stats();
@@ -246,8 +332,15 @@ impl GarageRuntime {
                     let rates = self.area.cigarettes.rates;
                     let exhale = self.area.cigarettes.exhale_rates;
                     let state = self.area.cigarettes.cigarette_mut(id).unwrap();
+                    let hp = state.hp;
                     let effect = state.eat(&rates, dt, false);
                     let lit = state.hp > 0.;
+                    if hp > 0.
+                        && let Some(item) = self.area.items.get(id)
+                    {
+                        let c = &self.area.cigarettes;
+                        c.ash(item.pose, hp, &self.stream.origin, &mut self.food_particles);
+                    }
                     self.survival.queue(effect);
                     if self.area.cigarettes.show_stats {
                         self.survival.show_stats();
@@ -314,8 +407,15 @@ impl GarageRuntime {
     /// Automatic burn and ember decay of every cigarette, then the ember and mouth smoke.
     pub(super) fn advance_cigarettes(&mut self) {
         let rates = self.area.cigarettes.rates;
-        for (_, c) in &mut self.area.cigarettes.cigarettes {
-            c.update(&rates, FIXED_DT);
+        let c = &mut self.area.cigarettes;
+        for i in 0..c.cigarettes.len() {
+            let (id, state) = &mut c.cigarettes[i];
+            let (id, hp) = (*id, state.hp);
+            if state.update(&rates, FIXED_DT)
+                && let Some(item) = self.area.items.get(id)
+            {
+                c.ash(item.pose, hp, &self.stream.origin, &mut self.food_particles);
+            }
         }
         let origin = self.stream.origin;
         let c = &mut self.area.cigarettes;
