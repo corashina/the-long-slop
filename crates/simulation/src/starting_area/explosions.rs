@@ -254,13 +254,15 @@ impl GarageRuntime {
         };
         match self.area.items.object_key(root) {
             ObjectKey::Generated(_) => true,
-            ObjectKey::Imported(_) => !self.area.spawned.contains(root)
-                && self
-                .physics
-                .rapier()
-                .bodies
-                .get(body)
-                .is_some_and(|b| b.is_dynamic()),
+            ObjectKey::Imported(_) => {
+                !self.area.spawned.contains(root)
+                    && self
+                        .physics
+                        .rapier()
+                        .bodies
+                        .get(body)
+                        .is_some_and(|b| b.is_dynamic())
+            }
         }
     }
     /// The item root point in physics space.

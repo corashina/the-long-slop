@@ -248,14 +248,24 @@ fn x02_leftovers_garage_can_explodes_and_stays_removed() {
         .find(|&id| {
             let state = run.area.items.get(id).unwrap();
             interaction.tank_explosion(id).is_some_and(|e| {
-                crate::interaction::explosions::tank_factor(e, state.fluid.as_ref().unwrap(), fluids, 1e6)
-                    .is_some()
+                crate::interaction::explosions::tank_factor(
+                    e,
+                    state.fluid.as_ref().unwrap(),
+                    fluids,
+                    1e6,
+                )
+                .is_some()
             })
         })
         .expect("an explosive garage can");
     let on_body: Vec<ItemId> = {
         let body = run.area.items.get(can).unwrap().body;
-        run.area.items.iter().filter(|s| s.body == body).map(|s| s.id).collect()
+        run.area
+            .items
+            .iter()
+            .filter(|s| s.body == body)
+            .map(|s| s.id)
+            .collect()
     };
     run.shot_explosive(Strike {
         item: can,
@@ -267,11 +277,17 @@ fn x02_leftovers_garage_can_explodes_and_stays_removed() {
     settle(&mut run, &reference, 0.1);
     for id in &on_body {
         let state = run.area.items.get(*id).unwrap();
-        assert!(state.removed && state.body.is_none(), "the can and its cap are gone");
+        assert!(
+            state.removed && state.body.is_none(),
+            "the can and its cap are gone"
+        );
     }
     let loaded = save_and_load(&run, &reference);
     for id in &on_body {
         let state = loaded.area.items.get(*id).unwrap();
-        assert!(state.removed && state.body.is_none(), "the can stays gone after load");
+        assert!(
+            state.removed && state.body.is_none(),
+            "the can stays gone after load"
+        );
     }
 }
