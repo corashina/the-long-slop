@@ -515,6 +515,8 @@ pub struct VehicleRuntime {
     bodies: Vec<RigidBodyHandle>,
     /// Absolute position at the start of the current step.
     previous: [f64; 3],
+    /// Source `carscript.lspeed`: forward speed in km/h at the start of the current step.
+    last_speed: f32,
     /// Parts mounted on this car, found once at the start of each step.
     powertrain: Powertrain,
     /// Requested headlight state: off, low or high.
@@ -577,6 +579,7 @@ impl VehicleRuntime {
             recovery_bounds: parts.recovery_bounds,
             bodies: parts.bodies,
             previous: [0.0; 3],
+            last_speed: 0.,
             powertrain: Powertrain::default(),
             requested_headlights: 0,
             light_switch: parts.light_switch,
@@ -707,6 +710,7 @@ impl VehicleRuntime {
     }
 }
 
+mod crash;
 mod inventory;
 pub use inventory::InventoryFrame;
 mod save;
@@ -761,6 +765,7 @@ pub struct GarageRuntime {
     pub notice: &'static str,
     pub aim: ResolvedAim,
     pub wheels: crate::interaction::wheels::WheelAssemblies,
+    crash: crate::crash::CrashState,
     pub driving_input: crate::simulation::input::DrivingInput,
     recovery_bodies: Vec<RigidBodyHandle>,
     /// Simulation time of the next under-map check.
@@ -930,6 +935,7 @@ impl GarageRuntime {
             notice: "",
             aim: ResolvedAim::default(),
             wheels,
+            crash: Default::default(),
             driving_input: crate::simulation::input::DrivingInput::new(
                 reference.driving.keyboard_steering_rate,
                 reference.driving.pedal_rate,
@@ -1192,6 +1198,8 @@ impl GarageRuntime {
                 &self.stream.origin,
                 key,
             );
+            // Spawn, load and restore set velocity before this point, so a new car does not crash.
+            vehicle.last_speed = crash::forward_kmh(&self.physics, key);
         }
 
         self.area.begin_step();
@@ -1523,6 +1531,7 @@ impl GarageRuntime {
             .mechanisms
             .apply_reactions(&mut self.physics);
         self.physics.step_physics();
+        self.step_crashes(reference);
         self.area
             .player
             .step_head_bob(walking_input, needs.dead, &self.physics, FIXED_DT);

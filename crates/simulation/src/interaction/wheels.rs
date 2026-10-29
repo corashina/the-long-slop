@@ -525,13 +525,24 @@ impl WheelAssemblies {
         Ok(())
     }
 
-    pub fn remove(
-        &mut self,
-        id: WheelSlotId,
-        items: &mut ItemStore,
-        physics: &mut PhysicsWorld,
-    ) -> Result<ItemId, ReferenceError> {
-        self.bind(items, physics)?;
+    /// Mounted rims of the car with root item `owner`: slot, rim item and `fallOffCategory`.
+    pub fn mounted_rims(
+        &self,
+        owner: ItemId,
+    ) -> impl Iterator<Item = (WheelSlotId, ItemId, u8)> + '_ {
+        self.slots.iter().filter_map(move |slot| {
+            let rim = slot.rim?;
+            (self.vehicles[slot.vehicle].owner == owner).then(|| {
+                (
+                    slot.id,
+                    self.parts[rim].item,
+                    self.rules[rim].fall_off_category,
+                )
+            })
+        })
+    }
+    /// Slot and rim indices of a mounted wheel slot.
+    fn mounted_indices(&self, id: WheelSlotId) -> Result<(usize, usize), ReferenceError> {
         let slot = self
             .slots
             .iter()
@@ -540,9 +551,29 @@ impl WheelAssemblies {
         let rim = self.slots[slot]
             .rim
             .ok_or_else(|| error("Wheel slot is empty"))?;
+        Ok((slot, rim))
+    }
+    pub fn remove(
+        &mut self,
+        id: WheelSlotId,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<ItemId, ReferenceError> {
+        let (_, rim) = self.mounted_indices(id)?;
         if self.covered(self.parts[rim].item, items) {
             return Err(error("Remove the wheel cover first"));
         }
+        self.fall_off(id, items, physics)
+    }
+    /// Source `partslotscript.UnCraft(_fallOff: true)`: `remove` without the cover check.
+    pub fn fall_off(
+        &mut self,
+        id: WheelSlotId,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<ItemId, ReferenceError> {
+        self.bind(items, physics)?;
+        let (slot, rim) = self.mounted_indices(id)?;
         let world = item_pose(items, self.parts[rim].item, physics)?;
         let body = self.free_body(rim, world, physics);
         let chassis = physics.chassis_handle(&self.vehicles[self.slots[slot].vehicle].key);

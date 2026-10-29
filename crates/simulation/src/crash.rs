@@ -1,6 +1,29 @@
 //! Car crash rule: source `carscript.DamageStuff`, `HornHit` and `partscript.WouldFallOff`.
-use crate::reference::{CarCrashReference, CrashReference};
+use crate::interaction::wheels::WheelSlotId;
+use crate::reference::{CarCrashReference, CrashReference, ItemId};
 use crate::world::UnityRandom;
+
+/// A part that can fall off: source `carscript.currentParts` entry.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Candidate {
+    Part(ItemId),
+    Wheel(WheelSlotId),
+}
+
+/// The random source and the reused candidate list of all cars.
+pub struct CrashState {
+    pub random: UnityRandom,
+    pub candidates: Vec<Candidate>,
+}
+
+impl Default for CrashState {
+    fn default() -> Self {
+        Self {
+            random: UnityRandom::new(0x6372_6173),
+            candidates: Vec::with_capacity(64),
+        }
+    }
+}
 
 /// Car state for one `DamageStuff` call.
 #[derive(Clone, Copy, Debug, Default)]

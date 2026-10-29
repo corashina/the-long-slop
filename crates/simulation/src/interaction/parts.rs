@@ -791,12 +791,15 @@ impl PartAttachments {
         }
         Ok(())
     }
-    pub fn remove(
-        &mut self,
-        item: ItemId,
-        items: &mut ItemStore,
-        physics: &mut PhysicsWorld,
-    ) -> Result<ItemId, ReferenceError> {
+    /// Mounted parts and their `fallOffCategory`.
+    pub fn mounted(&self) -> impl Iterator<Item = (ItemId, u8)> + '_ {
+        self.parts
+            .iter()
+            .filter(|p| p.slot.is_some())
+            .map(|p| (p.reference.item, p.reference.fall_off_category))
+    }
+    /// Part and slot indices of a mounted part.
+    fn mounted_indices(&self, item: ItemId) -> Result<(usize, usize), ReferenceError> {
         let i = *self
             .indices
             .get(&item)
@@ -804,13 +807,35 @@ impl PartAttachments {
         let s = self.parts[i]
             .slot
             .ok_or_else(|| error("Part is not mounted"))?;
-        if !self.bound
-            || self.parts[i].pickup.cant_pickup
+        Ok((i, s))
+    }
+    pub fn remove(
+        &mut self,
+        item: ItemId,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<ItemId, ReferenceError> {
+        let (i, s) = self.mounted_indices(item)?;
+        if self.parts[i].pickup.cant_pickup
             || self.parts[i].pickup.cant_pickup_while_mounted
             || self.covered(item)
             || self.slots[s].reference.cant_craft
             || self.slots[s].reference.cant_uncraft
         {
+            return Err(error("Cannot remove part"));
+        }
+        self.fall_off(item, items, physics)
+    }
+    /// Source `partslotscript.UnCraft(_fallOff: true)`: `remove` without the cover, craft
+    /// and pickup checks.
+    pub fn fall_off(
+        &mut self,
+        item: ItemId,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<ItemId, ReferenceError> {
+        let (i, s) = self.mounted_indices(item)?;
+        if !self.bound {
             return Err(error("Cannot remove part"));
         }
         let mut world = self.slots[s].detach_pose.unwrap_or(to_rapier(
