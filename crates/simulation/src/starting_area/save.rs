@@ -545,7 +545,6 @@ impl GarageRuntime {
         &self,
         reference: &ReferenceManifest,
         source: &SourceStamp,
-        view: CameraSave,
         saved_at: &str,
     ) -> Result<SaveSnapshot, SaveError> {
         if self.restore_pending() {
@@ -655,7 +654,6 @@ impl GarageRuntime {
                 driven_km: self.driven_km,
             },
             lighting: self.lighting.capture_save(&reference.lighting, &ids)?,
-            view: ViewSnapshot { camera: view },
             spawned: self.area.spawned.capture_save(
                 reference,
                 &self.area.items,

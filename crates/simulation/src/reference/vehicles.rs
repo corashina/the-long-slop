@@ -48,6 +48,13 @@ pub struct WorldVehicleReference {
     pub dont_ignite_with_throttle_in_automatic: bool,
     pub auto_move_min: f32,
     pub collision_gain: f32,
+    pub crash: CarCrashReference,
+    /// Source `carscript.blood`: the `washtriggerscript` node that a hard crash makes dirty.
+    pub blood: Option<u32>,
+    /// Source `carscript.SBlood01` clip id.
+    pub blood_clip: Option<u32>,
+    /// Source `carscript.condition` node.
+    pub condition: Option<u32>,
     /// Source `carscript.psSmoke` systems, posed relative to the prototype root.
     pub exhaust: Vec<ParticleReference>,
     /// One `talajnezo` per wheel, in `wheels` order. Poses are relative to the prototype root.
@@ -707,8 +714,11 @@ impl WorldVehicleReference {
             (self.body as usize) < b.bodies
                 && self.colliders.iter().all(|i| (*i as usize) < b.colliders)
                 && self.fuel_tank.is_none_or(|i| b.node(i))
-                && self.electronics.is_none_or(|i| b.node(i)),
+                && self.electronics.is_none_or(|i| b.node(i))
+                && self.blood.is_none_or(|i| b.node(i))
+                && self.condition.is_none_or(|i| b.node(i)),
         )?;
+        check(s, "vehicle crash", self.crash.valid())?;
         check(
             s,
             "vehicle scalars",

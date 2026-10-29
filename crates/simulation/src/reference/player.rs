@@ -11,6 +11,37 @@ pub struct PlayerSphereReference {
     pub filter: u32,
 }
 
+/// A Y axis trigger capsule in the player body frame.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayerCapsuleReference {
+    pub source: SourceId,
+    pub a: [f32; 3],
+    pub b: [f32; 3],
+    pub radius: f32,
+    pub membership: u32,
+    pub filter: u32,
+}
+
+/// Source `canwalljump` (wall) and `canwalljump2` (ledge) `sens` triggers.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayerWallSensorsReference {
+    pub wall: PlayerCapsuleReference,
+    pub ledge: PlayerSphereReference,
+}
+
+/// Source `interiorsens` (`sens2`): an overlap sphere at the head.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayerInteriorSensorReference {
+    pub source: SourceId,
+    pub radius: f32,
+    pub mask: u32,
+    /// Position in the head frame.
+    pub local_position: [f32; 3],
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlayerClearanceReference {
@@ -55,6 +86,40 @@ pub struct PlayerViewReference {
     pub height_scroll_step: f32,
 }
 
+/// Source `fpscontroller` outside view rig values (`CarCam*`, `carCamLerp*`, `defcarcamrotX`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CarCameraReference {
+    pub default_pitch_degrees: f32,
+    /// `CarCamLimitX`, `CarCamLimitY`, `CarCamLimitZ`.
+    pub pan_limits: [f32; 3],
+    pub pan_sensitivity: f32,
+    /// Minus the `CarCam` local z.
+    pub default_distance: f32,
+    /// `FduckLerp`.
+    pub recenter_rate: f32,
+    pub follow_rate: f32,
+    pub follow_speed_kmh: [f32; 2],
+    pub follow_angle_speed_kmh: [f32; 2],
+    pub map: MapViewReference,
+}
+
+/// Source `mainscript.mapCamView*`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MapViewReference {
+    pub time_add: f32,
+    pub min_height: f32,
+    pub max_height: f32,
+    pub min_pan: f32,
+    pub max_pan: f32,
+    pub min_pan_speed: f32,
+    pub max_pan_speed: f32,
+    pub height_rate: f32,
+    pub rotation_rate: f32,
+    pub look_time: f32,
+}
+
 fn same(actual: f32, expected: f32) -> bool {
     actual.is_finite() && (actual - expected).abs() <= 0.00001
 }
@@ -82,7 +147,8 @@ impl PlayerReference {
             same(self.prone_multiplier, 0.3)
                 && same(self.duck_jump_multiplier, 1.25)
                 && same(self.inverse_duck_multiplier, 0.5)
-                && same(self.max_fall_speed, 30.0),
+                && same(self.max_fall_speed, 30.0)
+                && same(self.max_depenetration_velocity, 10.0),
             "player posture movement",
         )?;
         require(
@@ -98,6 +164,36 @@ impl PlayerReference {
                 && p.sensor_hold_steps == 3
                 && sphere(&p.feet, "level1", 57258, 12, 4_172_190_207, 0.3),
             "player posture geometry",
+        )?;
+        let w = &self.wall_sensors.wall;
+        require(
+            same(self.air_force, 20000.0)
+                && same(self.grip_multiplier, 0.5)
+                && same(self.wall_jump_multiplier, 1.0)
+                && same(self.ledge_jump_multiplier, 1.25)
+                && same(self.grip_loose, 0.0)
+                && same(self.max_grip_fall_speed, 5.0)
+                && w.source.file == "level1"
+                && w.source.path_id == 58453
+                && finite(&w.a)
+                && finite(&w.b)
+                && same(w.radius, 0.2)
+                && w.membership == 1 << 14
+                && w.filter == 4_037_970_431
+                && sphere(
+                    &self.wall_sensors.ledge,
+                    "level1",
+                    57383,
+                    14,
+                    4_037_970_431,
+                    0.2,
+                )
+                && self.interior_sensor.source.file == "level1"
+                && self.interior_sensor.source.path_id == 80121
+                && same(self.interior_sensor.radius, 0.05)
+                && self.interior_sensor.mask == 8192
+                && finite(&self.interior_sensor.local_position),
+            "player wall jump and interior sensors",
         )?;
         let low = p.prone_head.translation;
         let distance = p

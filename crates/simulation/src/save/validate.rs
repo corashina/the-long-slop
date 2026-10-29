@@ -354,6 +354,7 @@ impl SaveSnapshot {
             finite(&[p.yaw, p.pitch, p.vertical_velocity])
                 && (-89.0..=89.0).contains(&p.pitch)
                 && bounded_local(&p.recoil_velocity)
+                && bounded_local(&p.momentum)
                 && bounded_local(&[p.vertical_velocity]),
             "Player motion",
         )?;

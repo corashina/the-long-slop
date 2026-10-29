@@ -11,6 +11,7 @@ from .parts import recover_part_slots
 from .driving import recover_driving
 from .lighting import rgba
 from .player_movement import recover_player_movement
+from .car_camera import recover_car_camera
 
 
 def component_mass(source, components) -> float:
@@ -243,9 +244,12 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
             inverse=[-x for x in rim_pose['rotation'][:3]]+[rim_pose['rotation'][3]];pose['rotation']=list(quaternion_product(inverse,pose['rotation']))
             tire_mount=pose;tire_main=tire_data['maintipus'];tire_types=tire_data['tipus']
         else:radius=source.read(components[node]['gumiscript'][0])['radius']
+        # mainscript.defFallOffChance has 18 members.
+        if not 0<=value['fallOffCategory']<=17:raise ValueError(f'{key(part)} fallOffCategory is not a defFallOffChance member')
         wheel_parts.append({'item':item_nodes[node],'source':source_id(part),'radius':radius,'main_types':value['maintipus'],'part_types':value['tipus'],
             'colliders':[collider_ids[identity] for identity in identities],'tire_slot_anchor':tire_anchor,'tire_mount':tire_mount,
-            'tire_main_types':tire_main,'tire_types':tire_types,'local_rotation_after_mount':euler_quaternion(vector(value['localRotationAfterMount'])),'cover_slot':value['cover_CantCraftIfCovered']['m_PathID'] or None})
+            'tire_main_types':tire_main,'tire_types':tire_types,'local_rotation_after_mount':euler_quaternion(vector(value['localRotationAfterMount'])),'cover_slot':value['cover_CantCraftIfCovered']['m_PathID'] or None,
+            'fall_off_category':value['fallOffCategory']})
     # A tire owns its listed shapes if a parent rim lists the same shapes.
     tire_colliders={collider_id for part in wheel_parts if 'gumi' in part['part_types'] for collider_id in part['colliders']}
     for part in wheel_parts:
@@ -274,6 +278,7 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
         obj_rotation_sensitivity=defaults[4],look_sensitivity=[defaults[0]*defaults[1],defaults[0]*defaults[2]])
     scroll_slider=source.resolve(settings_reader,settings['tabControls']['sliders'][3]);scroll_definition=source.read(scroll_slider)
     player_record['scroll_sensitivity']=scroll_definition['defValue']*(scroll_definition['valueMultipler'] if scroll_definition['valueMultipler'] else 1.)
+    player_record['car_camera']=recover_car_camera(source,player_reader,player,main)
     player_record['camera_culling_mask']=recover_camera_visibility(source)['normal_view_mask']
     player_record['action_masks']=recover_masks(player)
     time_reader=source.get('globalgamemanagers',8)
