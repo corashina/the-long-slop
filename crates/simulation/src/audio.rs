@@ -1494,6 +1494,7 @@ pub enum AudioKind {
     RadioClick = 21,
     Break = 22,
     ComputerNote = 23,
+    Horror = 24,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -1615,6 +1616,14 @@ impl AudioState {
     pub fn remove_storm_loops(&mut self, storms: &[crate::weather::Storm]) {
         self.survival_loops
             .retain(|v| v.kind != AudioKind::Storm || storms.iter().any(|s| s.id.0 == v.emitter));
+    }
+    /// mainscript.RandomHorrorSound: the player horror source, or stopped.
+    pub fn horror(&mut self, playing: bool, position: [f64; 3]) {
+        if playing {
+            self.source_loop(AudioKind::Horror, 0, 1., position);
+        } else {
+            self.stop_survival_loop(AudioKind::Horror, 0);
+        }
     }
     /// Stops the loops of every emitter of a kind.
     pub fn stop_survival_loops(&mut self, kind: AudioKind) {

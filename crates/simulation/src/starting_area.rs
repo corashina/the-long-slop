@@ -736,6 +736,7 @@ pub struct GarageRuntime {
     pub hearing: crate::hearing::HearingState,
     pub sleep: crate::sleep::SleepState,
     ambient: crate::audio::AmbientState,
+    horror: crate::horror::HorrorSound,
     pub weather: crate::weather::WeatherState,
     weather_bindings: weather::WeatherBindings,
     sky: crate::sky_traffic::SkyTraffic,
@@ -915,6 +916,7 @@ impl GarageRuntime {
             urine_reference,
             urine_emission: [0.; 2],
             ambient: crate::audio::AmbientState::new(&reference.ambient),
+            horror: crate::horror::HorrorSound::new(seed as u64),
             weather: crate::weather::WeatherState::new(&reference.weather, seed as u64),
             weather_bindings,
             sky: crate::sky_traffic::SkyTraffic::new(&reference.sky, seed as u64),
@@ -1069,6 +1071,11 @@ impl GarageRuntime {
                 self.stream.frame().structures,
             );
             audio.rock_step(self.lighting.cycle.output(), position);
+        }
+        let night = self.lighting.cycle.output().phase == crate::lighting::CyclePhase::Night;
+        let horror = self.horror.step(night, self.simulation_seconds);
+        if let Some(audio) = &mut self.audio {
+            audio.horror(horror, position);
         }
     }
 

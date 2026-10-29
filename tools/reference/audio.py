@@ -532,7 +532,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
     cycle=source.resolve(main,md['napszak']);cd=source.read(cycle)
     storm=source.get('sharedassets1.assets',158276)
     if source.class_name(storm)!='sandstormscript':raise ValueError('Storm audio source differs')
-    for role,kind,owner,pointer in [('sleep',4,player,pd['SleepCamSource']),('storm',6,storm,source.read(storm)['source']),('storm_inside',16,cycle,cd['sandStormSource']),('ambient_day',7,cycle,cd['DayAmbientSound'][0]),('ambient_night',8,cycle,cd['NightAmbientSound'][0])]:
+    for role,kind,owner,pointer in [('sleep',4,player,pd['SleepCamSource']),('horror',24,player,pd['Shorror']),('storm',6,storm,source.read(storm)['source']),('storm_inside',16,cycle,cd['sandStormSource']),('ambient_day',7,cycle,cd['DayAmbientSound'][0]),('ambient_night',8,cycle,cd['NightAmbientSound'][0])]:
         selected_source=source.resolve(owner,pointer);ad=source.read(selected_source)
         survival_groups.append((role,kind,selected_source,readers(selected_source,[ad['m_audioClip']]),selected_source,[ad['m_Volume']]*2,[ad['m_Pitch']]*2))
     tiers=[readers(main,md[f'collide{i}']) for i in range(4)]
@@ -655,14 +655,14 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
         if role!='sled' and any(c.type.name=='Rigidbody' for c in source.components(transform)[1]):raise ValueError('Selected audio velocity needs a Rigidbody route')
         pose=world_pose(source,transform)
         player_pose=world_pose(source,source.transform_for(source.resolve(player,pd['m_GameObject'])))
-        offset=[pose['translation'][i]-player_pose['translation'][i] for i in range(3)] if role in ('burp','fart','shit','death','sleep') else [0.,0.,0.]
+        offset=[pose['translation'][i]-player_pose['translation'][i] for i in range(3)] if role in ('burp','fart','shit','death','sleep','horror') else [0.,0.,0.]
         settings={'priority':ONE_SHOT_PRIORITY.get(role,PRIORITIES[7]) if one_shot else d['Priority'],'loop':bool(d['Loop']) if role!='death' else False,
             'gain':d['m_Volume'],'pitch':d['m_Pitch'],'min_distance':d['MinDistance'],'max_distance':d['MaxDistance'],
             'rolloff_mode':d['rolloffMode'],'spatial_blend':1. if one_shot else d['panLevelCustomCurve']['m_Curve'][0]['value'],
             'spatial_blend_curve':curve(d['panLevelCustomCurve']),'rolloff_curve':curve(d['rolloffCustomCurve'])}
         if one_shot:
             for k in settings['spatial_blend_curve']['keys']:k['value']=1.
-        cls,name={'eat':('mainscript','PlayClipAtPoint'),'eat_crunchy':('mainscript','PlayClipAtPoint'),'burp':('fpscontroller','Burp'),'fart':('fpscontroller','Fart'),'shit':('fpscontroller','Shit'),'death':('fpscontroller','Death2'),'sleep':('mainscript','Update'),
+        cls,name={'eat':('mainscript','PlayClipAtPoint'),'eat_crunchy':('mainscript','PlayClipAtPoint'),'burp':('fpscontroller','Burp'),'fart':('fpscontroller','Fart'),'shit':('fpscontroller','Shit'),'death':('fpscontroller','Death2'),'sleep':('mainscript','Update'),'horror':('mainscript','RandomHorrorSound'),
             'item_hit':('pickupable','OnCollisionEnter'),'car_hit':('carscript','OnCollisionEnter'),'rock_heat':('soundplayscript','PlaySound'),'footstep':('stepSoundScript','Step'),'storm':('sandstormscript','Update'),'melee_hit':('meleeweaponscript','Update'),'metal_detector':('metalDetectorScript','UpdSound'),'ambience_zone':('ambienceZone','Upd'),'sled':('szankoScript','Update'),'radio_click':('radioscript','TurnRadio'),'break':('breakablescript','Break')}.get(role,('napszakvaltakozas','FixedUpdate'))
         audio['survival'].append({'role':role,'kind':kind,'one_shot':one_shot,'source':source_id(owner),'audio_source':source_id(reader),
             'clips':[clip(r) for r in clip_readers], 'gain':gain,'pitch':pitch,'offset':offset,

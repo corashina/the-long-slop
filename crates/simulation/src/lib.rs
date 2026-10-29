@@ -17,6 +17,7 @@ pub mod exhaust;
 pub mod fluids;
 pub mod flyers;
 pub mod hearing;
+pub mod horror;
 #[cfg(target_arch = "wasm32")]
 pub mod host;
 pub mod interaction;
