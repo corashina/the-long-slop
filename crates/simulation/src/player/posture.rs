@@ -1,8 +1,21 @@
-//! Source duck transitions and retained ordered clearance contacts.
+//! Source duck transitions, jump order and retained ordered clearance contacts.
+use super::{
+    sensor::SensorContact,
+    wall_jump::{WallJump, WallJumpState},
+};
 use crate::{
     reference::PlayerPostureReference,
     simulation::{FrameInput, keys},
 };
+
+/// Source jump force multipliers.
+#[derive(Clone, Copy)]
+pub(super) struct JumpForces {
+    pub(super) duck: f32,
+    pub(super) inverse_duck: f32,
+    pub(super) wall: f32,
+    pub(super) ledge: f32,
+}
 
 pub(super) struct PostureState {
     value: f32,
@@ -12,25 +25,6 @@ pub(super) struct PostureState {
     duck_jumped: bool,
     can_duck_jump: bool,
     contacts: [SensorContact; 10],
-}
-
-#[derive(Clone, Copy, Default)]
-struct SensorContact {
-    counter: u8,
-    sensed: bool,
-}
-impl SensorContact {
-    fn step(&mut self, contact: bool, hold: u8) {
-        if self.counter > 0 {
-            self.counter -= 1;
-        } else {
-            self.sensed = false;
-        }
-        if contact {
-            self.sensed = true;
-            self.counter = hold;
-        }
-    }
 }
 
 impl PostureState {
@@ -59,27 +53,39 @@ impl PostureState {
     fn grow(&self, amount: f32, reference: &PlayerPostureReference) -> f32 {
         let mut value = 0.0;
         for (sensor, contact) in reference.clearance.iter().zip(self.contacts) {
-            if contact.sensed {
+            if contact.sensed() {
                 break;
             }
             value = amount.clamp(0.0, (sensor.posture - self.value).max(0.0));
         }
         value.clamp(0.0, 1.0)
     }
+    /// Source `Grip` flags.
+    fn grip(&mut self, wall: &mut WallJumpState) {
+        if wall.grip() {
+            self.duck_jumped = false;
+            self.can_duck_jump = true;
+        }
+    }
     /// Returns the source force multiplier for this fixed step.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn step(
         &mut self,
         input: FrameInput,
         wheel_allowed: bool,
         grounded: bool,
+        wall: &mut WallJumpState,
         reference: &PlayerPostureReference,
         dt: f32,
-        duck_force: f32,
-        inverse_force: f32,
+        forces: JumpForces,
     ) -> f32 {
         if grounded {
             self.can_duck_jump = true;
             self.duck_jumped = false;
+            wall.grounded();
+        }
+        if wall.hold(input.held & keys::SPACE != 0) {
+            self.grip(wall);
         }
         if input.released & keys::CROUCH != 0 && self.last_ducked {
             self.rising = true;
@@ -103,31 +109,40 @@ impl PostureState {
             && self.can_duck_jump
             && (!grounded || input.held & keys::SPACE != 0);
         if ctrl_jump && self.value >= 0.5 {
-            force += duck_force;
+            force += forces.duck;
             self.duck_jumped = true;
             self.can_duck_jump = false;
             self.last_ducked = true;
             duck = true;
         }
-        if grounded {
+        if wall.supported(grounded) {
             if input.pressed & keys::SPACE != 0 {
                 force += 1.0;
                 self.can_duck_jump = true;
                 self.duck_jumped = false;
+                wall.grounded();
             }
         } else {
             if (input.released & keys::CROUCH != 0 || space_released) && self.duck_jumped {
-                force -= inverse_force;
+                force -= forces.inverse_duck;
                 self.duck_jumped = false;
             }
-            if input.pressed & keys::SPACE != 0 && self.can_duck_jump {
-                self.space_duck = true;
-                if self.value >= 0.5 {
-                    self.last_ducked = true;
-                    duck = true;
-                    self.duck_jumped = true;
-                    self.can_duck_jump = false;
-                    force += duck_force;
+            if input.pressed & keys::SPACE != 0 {
+                if let Some(kind) = wall.air_jump() {
+                    self.grip(wall);
+                    force += match kind {
+                        WallJump::Wall => forces.wall,
+                        WallJump::Ledge => forces.ledge,
+                    };
+                } else if self.can_duck_jump {
+                    self.space_duck = true;
+                    if self.value >= 0.5 {
+                        self.last_ducked = true;
+                        duck = true;
+                        self.duck_jumped = true;
+                        self.can_duck_jump = false;
+                        force += forces.duck;
+                    }
                 }
             }
         }
@@ -153,25 +168,6 @@ impl PostureState {
         }
         self.value = self.value.clamp(0.0, 1.0);
         force
-    }
-}
-
-#[derive(Default)]
-pub(super) struct MovementSpeed {
-    limit: f32,
-    takeoff: f32,
-}
-impl MovementSpeed {
-    pub(super) fn limit(&mut self, grounded: bool, requested: f32) -> f32 {
-        if grounded {
-            self.limit = requested;
-        } else {
-            self.limit = self.limit.clamp(-self.takeoff, self.takeoff);
-        }
-        self.limit
-    }
-    pub(super) fn grounded_velocity(&mut self, magnitude: f32) {
-        self.takeoff = magnitude;
     }
 }
 
