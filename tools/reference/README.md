@@ -256,8 +256,9 @@ Road control counts and skin bone counts are separate.
 
 The world contract uses the source minimum draw distance of 500 metres.
 `draw_distance.py` holds this value for world distances, fog, and camera planes.
-It requires Task 1's checked local samples and retained source runs.
-Source captures, managed methods, and exported assets remain outside Git.
+The garage spawn context (frozen clock and Unity random states) is a constant in `world.py`.
+The world export needs no runtime capture of the source game.
+Managed methods and exported assets remain outside Git.
 Synthetic fixtures test contract rejection; they do not prove world generation parity.
 
 World selection includes the active object pools, active building types, and supported recursive physical props.
@@ -277,8 +278,7 @@ Five existing scene, lamp, and sky assets keep eager Bevy loading.
 World prototypes decode after selected runtime admission, including required startup surfaces.
 
 The runtime projection uses compact immutable source tables and checked receipt links.
-The original records and receipts remain in ignored provenance sidecars.
-See `.cache/world-source/task-7-input-provenance/` for immutable originals and the completion report for hashes.
+The original records and receipts remain in ignored sidecars in `.cache/world-provenance`.
 Texture arrays use checked row chunks, each at most 1 MiB plus its 16-byte header.
 Each chunk retains its payload hash, source receipt, mip, layer, row, dimensions, and complete coverage order.
 The loader admits one chunk through upload completion before the next chunk starts.
@@ -293,4 +293,4 @@ The 128 MiB manifest input limit does not establish a bootstrap or process memor
 
 The final implementation used static tracing and product compilation under the user's Ignore tests instruction.
 No final fixture, source comparison, browser, or driving acceptance ran.
-Current evidence lives in `.cache/world-source/completion/2026-10-13/` and [verification](../../docs/verification.md#source-world-implementation-2026-10-13).
+See [verification](../../docs/verification.md#source-world-implementation-2026-10-13).

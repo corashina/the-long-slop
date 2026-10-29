@@ -1,6 +1,5 @@
 """Recover selected world inputs from the checked source library."""
 import hashlib
-import json
 import math
 import copy
 from pathlib import Path
@@ -10,14 +9,20 @@ from .library.types import ObjectId
 from .gltf import GltfExporter, convert_bind_poses, converted_transform
 from .collision import geometry, step_surface, collider_tag, world_pose
 from .triggers import recover_trigger_role
-from . import world_probe
 from . import draw_distance
 from .sled import centers_of_mass, recover_sled
 from .actions import recover_world_pushes
 from .towing import recover_hitches, recover_trailer
 from .followers import recover_followers
 
-PAYLOAD_SHA256 = '243f2862c6fa3d38b4c7d8df56332a2016c09d412b11030564f7f21665ad8ad9'
+# Unity Random state before and after the garage startup draws, captured once from the source game
+# with the clock frozen at 2026-10-12T09:00:00 local.
+SPAWN_CONTEXT = {'classification':'controlled_startup_before_garage',
+    'engine_sha256':'553c1e7560e1b42bd4638c53d0168dcd1b4b9eb5b9df324b0a44f14b3f18bc86',
+    'clock_input':'2026-10-12T09:00:00 local',
+    'initial_state':[123456789,2139825738,225031475,1427228704],
+    'startup_state':[2365297906,2858699345,3940856323,829372343],
+    'startup_draws':4,'date':[2026,10,12]}
 WORLD_DATABASE_ID = 66024
 BUILDING_FIELDS = ('berror','bkezdohaz','bkut','bbudi','bbenzinkut01','bbuszmegallo','blegjobbbenzinkut','bmuhely','bnagybenzinkut','boldhouse','boldpetrolstation','bturrethaz','bvizmu','btelefonfulke','bpost','bcabin','byellowfoodkut','bfalu01','bcastle')
 HOME_BUILDING = 70166
@@ -284,14 +289,8 @@ def source_material(source, selected, owner, output, texture_source):
 
 
 def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, first_asset: int) -> dict:
-    print("Verifying retained world samples",flush=True)
-    from .world_capture import verify_capture_inputs
     from .export import provenance
-    capture_library = verify_capture_inputs(reader)
-    samples=json.loads((world_probe.PROBE_ROOT/'samples.json').read_text())
-    if samples['payload_sha256']!=PAYLOAD_SHA256:
-        raise ValueError('World source sample/library receipt changed')
-    print('World samples verified; selecting source records',flush=True)
+    print('Selecting world source records',flush=True)
     selected=Selection(source,reader)
     settings_owner=source.get('level1',64898)
     settings=required_record(source,settings_owner,('roadGens','terranGenerator','roadBuildingGeneration','objGeneration','mountainGeneration','desertTowerGeneration','desertBuildingGeneration','Terrain','DistantTerrain','DistantTerrain2',*START_CARS))
@@ -535,11 +534,10 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     grass_displacement=recover_grass_displacement(source,selected,prototypes)
     lod=recover_lod(source,selected)
     road_fields=('length','roadBoneNum','roadBoneLength','roadSegmentLength','roadAboveTerrain','width','scale','XmaxAngle','YmaxAngle','startStraight','straightModifier','alignEdgeOfTheWorld','aliignRoad','alignBuildings','forceHomesick','noises','defPointRange','defPointStep','addPoint','buildingBoneNum')
-    assembled=samples['assembled'][0]
     draw_settings=source.get('level0',16865)
     from .vehicles import vehicle_globals
-    world={'sample_payload_sha256':PAYLOAD_SHA256,'managed_sha256':samples['managed_sha256'],'library':provenance(reader.receipt),'capture_library':capture_library,
-        'spawn_context':recover_spawn_context(samples),'vehicle_globals':vehicle_globals(source),'generation_frame':IDENTITY,'magnetic_field':magnetic_field,'electronics_cutoff':0.2,'draw_distance':draw_distance.record(selected.receipt(draw_settings),source.read(draw_settings),assembled['distances']),'source_hashes':[],
+    world={'library':provenance(reader.receipt),
+        'spawn_context':SPAWN_CONTEXT,'vehicle_globals':vehicle_globals(source),'generation_frame':IDENTITY,'magnetic_field':magnetic_field,'electronics_cutoff':0.2,'draw_distance':draw_distance.record(selected.receipt(draw_settings),source.read(draw_settings)),'source_hashes':[],
         'road':{'source':source_id(road_owner),'prototypes':road_roots,**generation_counts(road),**{k:road[k] for k in road_fields}},
         'terrain':{'source':source_id(settings_owner),'prefabs':terrain_prefabs,'materials':terrain_materials,'textures':list(terrain_source.lighting_textures.values()),'game_settings':{'source':source_id(main_owner),'homesickMode':main['GSettings']['homesickMode']},
             'tiles':[{k:settings[t][k] for k in ('tileSize','resolution','drawDistance','YCoord')} for t in ('Terrain','DistantTerrain','DistantTerrain2')],
@@ -569,8 +567,8 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     bind_light_cookies(source,world,output)
     from .world_spawn import project_runtime_receipts
     from .world_fields import project_runtime_fields
-    project_runtime_receipts(world,world_probe.PROBE_ROOT)
-    project_runtime_fields(world,world_probe.PROBE_ROOT)
+    project_runtime_receipts(world)
+    project_runtime_fields(world)
     return world
 
 def bind_light_cookies(source, world, output):
@@ -741,21 +739,6 @@ def recover_initial_materials(source, selected):
     if data['currentState']!=0 or len(data['states'])!=3: raise ValueError('Changed checked Lamp1 initialization')
     for owner in (controller,renderer,node,material): selected.record(owner)
     return [{'controller':source_id(controller),'renderer':source_id(renderer),'node':source_id(node),'material':source_id(material)}]
-
-
-def recover_spawn_context(samples):
-    context=samples['source_context']
-    assembled=next(row for row in samples['assembled'] if row['seed']==42)
-    before=json.loads(assembled['initialRandomState'])
-    after=json.loads(assembled['afterStartupRandomState'])
-    if context['clock_input']!='2026-10-12T09:00:00 local':
-        raise ValueError('Spawn replay requires the checked frozen clock context')
-    return {'classification':'controlled_startup_before_garage',
-        'engine_sha256':samples['native_engine']['sha256'],
-        'clock_input':context['clock_input'],
-        'initial_state':[before['s'+str(i)]&0xffffffff for i in range(4)],
-        'startup_state':[after['s'+str(i)]&0xffffffff for i in range(4)],
-        'startup_draws':4,'date':[2026,10,12]}
 
 
 def skin_record(source, exporter, component, node, bone_id):

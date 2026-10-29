@@ -22,18 +22,10 @@ pub use draw_distance::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-pub const WORLD_SAMPLE_SHA256: &str =
-    "243f2862c6fa3d38b4c7d8df56332a2016c09d412b11030564f7f21665ad8ad9";
-pub const WORLD_MANAGED_SHA256: &str =
-    "9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e";
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorldReference {
-    pub sample_payload_sha256: String,
-    pub managed_sha256: String,
     pub library: LibraryProvenance,
-    pub capture_library: LibraryProvenance,
     pub spawn_context: WorldSpawnContext,
     /// Shared `mainscript` engine values of every car.
     pub vehicle_globals: EngineGlobals,
@@ -886,13 +878,8 @@ fn node_links_match(
 }
 impl WorldReference {
     pub fn validate(&self, manifest: &ReferenceManifest) -> Result<(), ReferenceError> {
-        require(
-            self.sample_payload_sha256 == WORLD_SAMPLE_SHA256
-                && self.managed_sha256 == WORLD_MANAGED_SHA256,
-            "world source sample/hash",
-        )?;
         require(transform(&self.generation_frame), "world source frame")?;
-        validate_world_libraries(&self.library, &self.capture_library, &manifest.library)?;
+        validate_world_library(&self.library, &manifest.library)?;
         require(
             self.spawn_context.classification == "controlled_startup_before_garage"
                 && self.spawn_context.engine_sha256
@@ -2193,9 +2180,8 @@ impl<Node, Bone: Eq + std::hash::Hash> SkinnedMeshReference<Node, Bone> {
     }
 }
 
-fn validate_world_libraries(
+fn validate_world_library(
     current: &LibraryProvenance,
-    capture: &LibraryProvenance,
     accepted: &LibraryProvenance,
 ) -> Result<(), ReferenceError> {
     require(
@@ -2204,13 +2190,5 @@ fn validate_world_libraries(
             && current.catalog_sha256 == accepted.catalog_sha256
             && current.source_manifest_sha256 == accepted.source_manifest_sha256,
         "world library receipt",
-    )?;
-    require(
-        capture.schema_version == 1
-            && capture.manifest_sha256
-                == "92a93abde82f7933090293e8c95880f98dcee1d50a7463e74b108e29e7b2db99"
-            && capture.catalog_sha256 == current.catalog_sha256
-            && capture.source_manifest_sha256 == current.source_manifest_sha256,
-        "world capture library receipt",
     )
 }

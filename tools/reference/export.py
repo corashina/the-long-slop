@@ -184,12 +184,7 @@ def verify_reference(output: Path, library) -> None:
         raise ValueError('Missing or mismatched runtime library provenance')
     if manifest['library']['schema_version'] != 1 or any(not re.fullmatch('[0-9a-f]{64}', manifest['library'][k]) for k in ('manifest_sha256','catalog_sha256','source_manifest_sha256')):
         raise ValueError('Unsupported runtime provenance')
-    from .library.reader import LibraryReader
-    from .world_capture import verify_capture_inputs
-    capture_library = verify_capture_inputs(LibraryReader(library))
     world = manifest.get('world', {})
-    if world.get('capture_library') != capture_library:
-        raise ValueError('Missing or mismatched world capture provenance')
     if world.get('library') != provenance(library):
         raise ValueError('Missing or mismatched world current library provenance')
     from .acquisition import validate_acquisition
