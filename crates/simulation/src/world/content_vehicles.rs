@@ -17,7 +17,7 @@ use crate::vehicle::PhysicsWorld;
 use crate::world::changes::ChangeRecords;
 use crate::world::contents::ContentInstance;
 use crate::world::spawn_rules::{SourceRules, number, optional, texts};
-use crate::world::{ObjectKey, StructureInstance};
+use crate::world::{GeneratedId, ObjectKey, StructureInstance};
 use rapier3d::prelude::{ColliderHandle, RigidBodyHandle};
 use std::collections::BTreeMap;
 
@@ -219,7 +219,15 @@ pub(super) fn bind(
             continue;
         };
         let coolant_tank = record.coolant_tank.and_then(node_item);
-        register_radiator(item, record, coolant_tank, items, powertrain, changes);
+        register_radiator(
+            item,
+            record,
+            coolant_tank,
+            content.content.placement.id.clone(),
+            items,
+            powertrain,
+            changes,
+        );
     }
     for record in &prototype.gauges {
         // The gauge part: the nearest item at or above the meter node.
@@ -416,11 +424,12 @@ pub fn register_radiator(
     item: ItemId,
     record: &RadiatorPartReference,
     coolant_tank: Option<ItemId>,
+    parent: GeneratedId,
     items: &ItemStore,
     powertrain: &mut PowertrainParts,
     changes: &mut ChangeRecords,
 ) {
-    let mut part = RadiatorPart::new(item, record.clone(), coolant_tank);
+    let mut part = RadiatorPart::new(item, record.clone(), coolant_tank, parent);
     if let Some(fan_on) = changes.take_radiator(&items.object_key(item)) {
         part.fan_on = fan_on;
     }
@@ -1006,6 +1015,7 @@ mod tests {
                 part,
                 &radiator_record,
                 None,
+                car.clone(),
                 &items,
                 &mut powertrain,
                 changes,

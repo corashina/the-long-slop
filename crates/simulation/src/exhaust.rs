@@ -51,10 +51,14 @@ impl ExhaustState {
         physics: &PhysicsWorld,
     ) {
         self.elapsed += dt;
-        let color = (input.running && self.elapsed >= self.next_color).then(|| {
-            self.next_color = self.elapsed + COLOR_INTERVAL;
-            input.tank.map_or([0.; 4], |tank| burn_color(tank, colors))
-        });
+        // Source: without a tank the smoke keeps its last color.
+        let color = (input.running && self.elapsed >= self.next_color)
+            .then_some(input.tank)
+            .flatten()
+            .map(|tank| {
+                self.next_color = self.elapsed + COLOR_INTERVAL;
+                burn_color(tank, colors)
+            });
         let strength = smoke_rate(input.running, input.rpm, input.max_rpm, input.smoke_rate);
         for system in &mut self.systems {
             if color.is_some() {

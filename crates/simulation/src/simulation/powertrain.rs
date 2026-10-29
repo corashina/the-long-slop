@@ -40,17 +40,31 @@ pub struct RadiatorPart {
     pub item: ItemId,
     pub record: RadiatorPartReference,
     pub coolant_tank: Option<ItemId>,
+    /// The placement whose prototype holds `record`. Its instance presents the fan.
+    pub parent: GeneratedId,
     /// Source `coolantTankscript` fan hysteresis state.
     pub fan_on: bool,
+    /// Source `Fan` turn around its local Z axis in degrees, modulo 360. It is not saved.
+    pub fan_angle: f32,
+    /// The fan angle of the last presented frame.
+    pub presented_angle: f32,
 }
 
 impl RadiatorPart {
-    pub fn new(item: ItemId, record: RadiatorPartReference, coolant_tank: Option<ItemId>) -> Self {
+    pub fn new(
+        item: ItemId,
+        record: RadiatorPartReference,
+        coolant_tank: Option<ItemId>,
+        parent: GeneratedId,
+    ) -> Self {
         Self {
             item,
             record,
             coolant_tank,
+            parent,
             fan_on: false,
+            fan_angle: 0.,
+            presented_angle: 0.,
         }
     }
 }
@@ -149,6 +163,9 @@ impl PowertrainParts {
     }
     pub fn radiators(&self) -> impl Iterator<Item = &RadiatorPart> {
         self.radiators.values()
+    }
+    pub fn radiators_mut(&mut self) -> impl Iterator<Item = &mut RadiatorPart> {
+        self.radiators.values_mut()
     }
     pub fn radiator(&self, item: ItemId) -> Option<&RadiatorPart> {
         self.radiators.get(&item)

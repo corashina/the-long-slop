@@ -8,6 +8,7 @@ use crate::reference::{
 use crate::world::stream::content_index::{ContentSlot, InstanceSelection};
 use crate::world::{ContentIndex, GeneratedId, NodeAppearance, ObjectKey};
 use bevy_platform::collections::HashMap;
+use rapier3d::math::Rotation;
 use rapier3d::prelude::RigidBodyHandle;
 use std::collections::BTreeMap;
 
@@ -79,6 +80,15 @@ impl GarageRuntime {
             &self.vehicles,
             frame,
         );
+        // Radiators with a turned fan.
+        for radiator in self.powertrain.radiators_mut() {
+            if radiator.presented_angle != radiator.fan_angle
+                && let Some(&slot) = views.slots.get(&radiator.parent)
+            {
+                radiator.presented_angle = radiator.fan_angle;
+                views.selection.push(slot as usize);
+            }
+        }
         // Guns with moved parts.
         for item in self.area.interaction.guns.take_presented() {
             if let ObjectKey::Generated(id) = self.area.items.object_key(item)
@@ -537,6 +547,21 @@ impl StructureViews {
                 .find(|(button, _)| *button == &node.source)
             {
                 local(i, pose);
+            }
+        }
+        // Source `coolantTankscript.Cool` turns the fan around its local Z axis.
+        for radiator in powertrain.radiators().filter(|r| &r.parent == id) {
+            if let Some(node) = radiator.record.fan_node {
+                let rest = prototype.nodes[node as usize].transform;
+                let rotation = Rotation::from_array(rest.rotation)
+                    * Rotation::from_rotation_z(radiator.fan_angle.to_radians());
+                local(
+                    node as usize,
+                    Transform {
+                        rotation: rotation.to_array(),
+                        ..rest
+                    },
+                );
             }
         }
         // Gauge and car instrument needles and counter digits turn in place.
