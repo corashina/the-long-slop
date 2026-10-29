@@ -113,7 +113,8 @@ impl PlayerReference {
             same(self.prone_multiplier, 0.3)
                 && same(self.duck_jump_multiplier, 1.25)
                 && same(self.inverse_duck_multiplier, 0.5)
-                && same(self.max_fall_speed, 30.0),
+                && same(self.max_fall_speed, 30.0)
+                && same(self.max_depenetration_velocity, 10.0),
             "player posture movement",
         )?;
         require(

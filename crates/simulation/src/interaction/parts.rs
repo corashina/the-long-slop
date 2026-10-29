@@ -100,7 +100,7 @@ impl PartAttachments {
             }
         }
         self.cache_assembly_mass(items);
-        mechanisms.sync(physics, true);
+        mechanisms.sync(physics);
         self.capture_mechanisms(items, mechanisms, physics)?;
         Ok(())
     }
@@ -934,7 +934,7 @@ impl PartAttachments {
     ) {
         let p = &self.parts[self.indices[&item]];
         m.set_part_root(p.reference.node, Some(p.body.unwrap()));
-        m.sync(physics, true);
+        m.sync(physics);
         let rotation = p
             .reference
             .usable

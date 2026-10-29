@@ -50,7 +50,8 @@ def recover_player_movement(source):
     prone_pose = converted_transform(source.read(prone))
     distance = math.dist(world_pose(source, prone)['translation'],
                          world_pose(source, default_standing)['translation'])
-    matrix = source.read(source.get('globalgamemanagers', 10))['m_LayerCollisionMatrix']
+    physics = source.read(source.get('globalgamemanagers', 10))
+    matrix = physics['m_LayerCollisionMatrix']
     if len(matrix) != 32 or data['sensNum'] != 10:
         raise ValueError('Player clearance count or layer matrix differs')
 
@@ -133,6 +134,7 @@ def recover_player_movement(source):
         inverse_duck_multiplier=data['FinverseDuck'], max_fall_speed=data['FmaxFall'],
         ladder_speed=data['FladderSpeed'], walk_bob_speed=data['walkBobSpeed'], walk_bob_speed_rb=data['walkBobSpeedRB'],
         max_walk_bob=data['maxWalkBob'], walk_bob_sound_threshold=data['walkbobSoundF'],
+        max_depenetration_velocity=physics['m_DefaultMaxDepenetrationVelocity'],
         air_force=data['FairM'], grip_multiplier=data['FGripM'], wall_jump_multiplier=data['FwallJumpM'],
         ledge_jump_multiplier=data['FwallJumpM2'], grip_loose=data['FGripLoose'],
         max_grip_fall_speed=data['FmaxGripFallSpeed'], wall_sensors=wall_sensors, interior_sensor=interior_sensor)
@@ -158,7 +160,8 @@ def validate_player_movement(value):
         vector(value['center'], 3)
         same(value['radius'], radius)
     for field, expected in dict(prone_multiplier=0.3, duck_jump_multiplier=1.25,
-                                inverse_duck_multiplier=0.5, max_fall_speed=30.0).items():
+                                inverse_duck_multiplier=0.5, max_fall_speed=30.0,
+                                max_depenetration_velocity=10.0).items():
         same(value[field], expected)
     for field, expected in dict(air_force=20000.0, grip_multiplier=0.5, wall_jump_multiplier=1.0,
                                 ledge_jump_multiplier=1.25, grip_loose=0.0, max_grip_fall_speed=5.0).items():

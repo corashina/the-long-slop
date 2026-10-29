@@ -50,7 +50,7 @@ fn update(run: &mut GarageRuntime, item: ItemId, input: [f32; 2], dt: f32) {
         },
         dt,
     );
-    m.sync(&mut run.physics, true);
+    m.sync(&mut run.physics);
 }
 
 fn assert_impulse(
@@ -198,7 +198,7 @@ fn g10_generated_endpoint_root() {
             .mechanisms
             .restore(item, saved)
             .unwrap();
-        run.area.interaction.mechanisms.sync(&mut run.physics, true);
+        run.area.interaction.mechanisms.sync(&mut run.physics);
         zero(&mut run, root_body);
         let input =
             10000. * if events[0] { -1. } else { 1. } * if rotation.inverted[1] { -1. } else { 1. };
