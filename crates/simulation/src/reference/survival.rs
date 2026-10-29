@@ -263,7 +263,7 @@ impl SurvivalReference {
             "food particles",
         )?;
         for p in &self.food_particles {
-            super::particles::validate_particle(p)?;
+            super::particles::validate_particle(p, 1)?;
         }
         for f in &self.foods {
             require(

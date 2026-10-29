@@ -922,10 +922,10 @@ impl WorldVehicleReference {
             self.kmh_meters.iter().all(|k| k.modifier.is_finite()),
         )?;
         for p in &self.exhaust {
-            super::particles::validate_particle(p)?;
+            super::particles::validate_particle(p, 2)?;
         }
         if let Some(steam) = &self.coolant_steam {
-            super::particles::validate_particle(&steam.particle)?;
+            super::particles::validate_particle(&steam.particle, 2)?;
             check(
                 s,
                 "vehicle coolant steam rate",
