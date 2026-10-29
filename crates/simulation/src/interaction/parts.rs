@@ -791,6 +791,12 @@ impl PartAttachments {
         }
         Ok(())
     }
+    /// True if `member` is one of the items of part `item`.
+    pub fn holds(&self, item: ItemId, member: ItemId) -> bool {
+        self.indices
+            .get(&item)
+            .is_some_and(|&i| self.parts[i].members.iter().any(|m| m.0 == member))
+    }
     /// Mounted parts and their `fallOffCategory`.
     pub fn mounted(&self) -> impl Iterator<Item = (ItemId, u8)> + '_ {
         self.parts

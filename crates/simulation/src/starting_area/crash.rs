@@ -4,7 +4,7 @@ use crate::conditions::ConditionStore;
 use crate::crash::{Candidate, Flags};
 use crate::interaction::items::{ItemLocation, ItemStore};
 use crate::interaction::wheels::WheelAssemblies;
-use crate::reference::{ItemId, ReferenceManifest};
+use crate::reference::{ItemId, ReferenceManifest, WorldVehicleReference};
 use crate::vehicle::PhysicsWorld;
 use crate::world::ObjectKey;
 
@@ -40,41 +40,50 @@ fn under(items: &ItemStore, wheels: &WheelAssemblies, mut item: ItemId, root: It
 impl GarageRuntime {
     /// Runs the crash rule for every loaded car after the physics step.
     pub(super) fn step_crashes(&mut self, reference: &ReferenceManifest) {
-        let driving = self.area.player.driving();
         // Taking the map lets the fall-off borrow the runtime without allocation.
         let vehicles = std::mem::take(&mut self.vehicles);
         for (key, vehicle) in &vehicles {
-            let record = vehicle.record(reference);
             let v = (forward_kmh(&self.physics, key) - vehicle.last_speed).abs();
-            let driver = driving && self.area.player.seat_vehicle() == Some(key);
-            let car = self.area.items.resolve_key(key);
-            let condition = record
-                .condition
-                .and(car)
-                .and_then(|car| condition_state(&self.area.conditions, &self.area.items, car));
-            let flags = Flags {
-                driving: driver,
-                player_driving: driver,
-                unpaused: !self.paused,
-                has_blood: record.blood.is_some(),
-                // PR 3 reads the blood wash state.
-                blood_on: false,
-            };
-            let outcome = crate::crash::damage(
-                &reference.crash,
-                &record.crash,
-                v,
-                flags,
-                condition,
-                &mut self.crash.random,
-            );
-            // PR 3 runs the horn, blood and kill outcomes.
-            if let (Some((lerp, count)), Some(car)) = (outcome.fall_off, car) {
-                self.candidates(reference, car, lerp);
-                self.fall_off(count);
-            }
+            self.crash_car(reference, key, vehicle.record(reference), v);
         }
         self.vehicles = vehicles;
+    }
+
+    /// Source `carscript.DamageStuff(v)` on car `key`: the crash step and blasts call it.
+    pub(crate) fn crash_car(
+        &mut self,
+        reference: &ReferenceManifest,
+        key: &ObjectKey,
+        record: &WorldVehicleReference,
+        v: f32,
+    ) {
+        let driver = self.area.player.driving() && self.area.player.seat_vehicle() == Some(key);
+        let car = self.area.items.resolve_key(key);
+        let condition = record
+            .condition
+            .and(car)
+            .and_then(|car| condition_state(&self.area.conditions, &self.area.items, car));
+        let flags = Flags {
+            driving: driver,
+            player_driving: driver,
+            unpaused: !self.paused,
+            has_blood: record.blood.is_some(),
+            // PR 3 reads the blood wash state.
+            blood_on: false,
+        };
+        let outcome = crate::crash::damage(
+            &reference.crash,
+            &record.crash,
+            v,
+            flags,
+            condition,
+            &mut self.crash.random,
+        );
+        // PR 3 runs the horn, blood and kill outcomes.
+        if let (Some((lerp, count)), Some(car)) = (outcome.fall_off, car) {
+            self.candidates(reference, car, lerp);
+            self.fall_off(count);
+        }
     }
 
     /// Source `currentParts`: parts under the car that pass `WouldFallOff(crashLerp)`.
@@ -88,10 +97,15 @@ impl GarageRuntime {
                 lerp,
             )
         };
+        let parts = &self.area.interaction.parts;
+        // The port keeps the player seated: a part that holds the player's seat stays on.
+        let seat = self.area.player.seat_item();
+        let holds_seat =
+            |item| seat.is_some_and(|s| parts.holds(item, s) || under(items, wheels, s, item));
         let candidates = &mut self.crash.candidates;
         candidates.clear();
-        for (item, category) in self.area.interaction.parts.mounted() {
-            if under(items, wheels, item, car) && passes(item, category) {
+        for (item, category) in parts.mounted() {
+            if under(items, wheels, item, car) && passes(item, category) && !holds_seat(item) {
                 candidates.push(Candidate::Part(item));
             }
         }
