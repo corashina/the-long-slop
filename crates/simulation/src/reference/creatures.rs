@@ -242,7 +242,7 @@ pub struct CreatureRagdoll {
     pub joints: Vec<RagdollJoint>,
 }
 
-/// The default Animator state: a looping 1D blend tree. Track nodes are manifest node ids.
+/// The base layer default state: a looping 1D blend tree. Track nodes are manifest node ids.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BlendReference {
@@ -251,6 +251,16 @@ pub struct BlendReference {
     /// Ascending, one per clip.
     pub thresholds: Vec<f32>,
     pub clips: Vec<MotionClip>,
+    pub overlay: OverlayLayer,
+}
+
+/// Animator layer 1 `piszmog`: an override layer that loops one clip.
+/// The clip keeps only the tracks of bones in the layer mask.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OverlayLayer {
+    pub weight: f32,
+    pub clip: MotionClip,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -441,7 +451,10 @@ impl RabbitReference {
                 && a.thresholds.len() == a.clips.len()
                 && finite(&a.thresholds)
                 && a.thresholds.windows(2).all(|w| w[0] < w[1])
-                && a.clips.iter().all(|c| {
+                && a.overlay.weight > 0.
+                && a.overlay.weight <= 1.
+                && !a.overlay.clip.tracks.is_empty()
+                && a.clips.iter().chain([&a.overlay.clip]).all(|c| {
                     c.r#loop
                         && c.start_time < c.stop_time
                         && c.tracks

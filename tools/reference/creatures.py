@@ -149,32 +149,50 @@ def collider_record(source, matrix, reader, record_, pose, sensor):
 
 
 def animator_record(source, animator, node):
-    """The base layer default state: the `RunValue` 1D blend of the idle and run clips."""
+    """Base layer default state: the `RunValue` 1D blend of the idle and run clips.
+    Layer 1 `piszmog` overrides the masked bones with one looping clip at weight 1."""
     d = source.read(animator)
     controller = source.resolve(animator, d['m_Controller'])
     data = source.read(controller)
     names = dict(data['m_TOS'])
     c = data['m_Controller']
-    if len(c['m_StateMachineArray']) != 1 or len(c['m_LayerArray']) != 1:
-        raise ValueError('Rabbit Animator layer count differs')
-    machine = c['m_StateMachineArray'][0]['data']
-    state = machine['m_StateConstantArray'][machine['m_DefaultState']]['data']
-    nodes = state['m_BlendTreeConstantArray'][0]['data']['m_NodeArray']
-    blend = nodes[0]['data']
-    if blend['m_BlendType'] != 0 or not state['m_Loop'] or state['m_Speed'] != 1:
-        raise ValueError('Rabbit default state is not a looping 1D blend')
-    thresholds = blend['m_Blend1dData']['data']['m_ChildThresholdArray']
+    layers = [l['data'] for l in c['m_LayerArray']]
+    if (len(c['m_StateMachineArray']) != 2 or [l['m_StateMachineIndex'] for l in layers] != [0, 1]
+            or [names[l['m_Binding']] for l in layers] != ['Base Layer', 'piszmog']
+            or any(l['(int&)m_LayerBlendingMode'] != 0 or l['m_IKPass'] for l in layers)):
+        raise ValueError('Rabbit Animator layers differ')
     slots = [source.resolve(controller, p) for p in data['m_AnimationClips']]
-    children = [nodes[i]['data'] for i in blend['m_ChildIndices']]
-    if len(thresholds) != len(children) or any(n['m_ChildIndices'] for n in children):
-        raise ValueError('Rabbit blend children differ')
+    def default_tree(index):
+        machine = c['m_StateMachineArray'][index]['data']
+        state = machine['m_StateConstantArray'][machine['m_DefaultState']]['data']
+        if not state['m_Loop'] or state['m_Speed'] != 1:
+            raise ValueError('Rabbit default state is not looping')
+        return state['m_BlendTreeConstantArray'][0]['data']['m_NodeArray']
     def bind(b, target):
         if b['type_id'] != 4 or b['dimension'] != (4 if b['attribute'] == 2 else 3) or b['is_pptr'] or b['script'] is not None:
             raise ValueError('Unsupported rabbit track binding')
         return node(source.get(target['file'], target['path_id']))
+    nodes = default_tree(0)
+    blend = nodes[0]['data']
+    if blend['m_BlendType'] != 0:
+        raise ValueError('Rabbit default state is not a 1D blend')
+    thresholds = blend['m_Blend1dData']['data']['m_ChildThresholdArray']
+    children = [nodes[i]['data'] for i in blend['m_ChildIndices']]
+    if len(thresholds) != len(children) or any(n['m_ChildIndices'] for n in children):
+        raise ValueError('Rabbit blend children differ')
     clips = motion_clips(source, [source_id(slots[n['m_ClipID']]) for n in children], animator, bind)
+    leaf = default_tree(1)
+    mask = layers[1]['m_SkeletonMask']['data']['m_Data']
+    if len(leaf) != 1 or leaf[0]['data']['m_ChildIndices'] or any(m['m_Weight'] not in (0, 1) for m in mask):
+        raise ValueError('Rabbit overlay layer differs')
+    masked = {m['m_PathHash'] for m in mask if m['m_Weight'] == 1}
+    [overlay] = motion_clips(source, [source_id(slots[leaf[0]['data']['m_ClipID']])], animator, bind)
+    overlay['tracks'] = [t for t in overlay['tracks'] if t['path_hash'] in masked]
+    if not overlay['tracks']:
+        raise ValueError('Rabbit overlay mask has no tracks')
     return {'source': source_id(animator), 'parameter': names[blend['m_BlendEventID']],
-        'thresholds': thresholds, 'clips': clips}
+        'thresholds': thresholds, 'clips': clips,
+        'overlay': {'weight': layers[1]['m_DefaultWeight'], 'clip': overlay}}
 
 
 def recover_creatures(source, manifest, output):
@@ -305,9 +323,11 @@ def validate_creatures(c, manifest):
     anim = r['animator']
     if len(anim['thresholds']) != len(anim['clips']) or len(anim['clips']) < 2 or any(b <= a for a, b in zip(anim['thresholds'], anim['thresholds'][1:])):
         raise ValueError('Invalid rabbit blend tree')
-    for clip in anim['clips']:
+    for clip in anim['clips'] + [anim['overlay']['clip']]:
         if not clip['loop'] or not clip['start_time'] < clip['stop_time'] or any(not local(t['node']) for t in clip['tracks']):
             raise ValueError('Invalid rabbit clip')
+    if not 0 < anim['overlay']['weight'] <= 1 or not anim['overlay']['clip']['tracks']:
+        raise ValueError('Invalid rabbit overlay layer')
     clips = {x['id'] for x in manifest['audio']['clips']}
     shots = {v['id'] for v in manifest['audio']['car_voices'] if v['one_shot']}
     if not r['die_clips'] or any(x not in clips for x in r['die_clips']) or r['die_voice'] not in shots:
