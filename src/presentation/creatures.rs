@@ -1,6 +1,6 @@
 //! Scene instances of the rabbits. Live nodes take the Animator frames of their row. Dead
-//! rabbits take their bone rows. The GPU skins the meshes.
-use super::materials::SourceMaterial;
+//! rabbits take their bone rows. The GPU skins the meshes. Evil rabbits swap the eye material.
+use super::materials::{SourceMaterial, SourceMaterials, authored_material};
 use super::reference::{ReferenceVisuals, bind_node};
 use super::sim_frame::SimFrameResource;
 use crate::app::{Drive, RuntimeReference};
@@ -10,6 +10,7 @@ use bevy::gltf::GltfExtras;
 use bevy::prelude::*;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
 use simulation::boundary::{CreatureRow, PoseRow};
+use simulation::creatures::animator::{Action, ActionPose};
 use simulation::creatures::rig::{Rig, RigPose};
 use simulation::vehicle::VehiclePose;
 use std::collections::HashMap;
@@ -25,6 +26,10 @@ struct Instance {
     /// Rig node index and entity.
     nodes: Vec<(usize, Entity)>,
     primitives: Vec<Entity>,
+    /// Primitives under the eye objects.
+    eyes: Vec<Entity>,
+    /// The eye flags of the current eye material.
+    eye_look: u32,
     pose: RigPose,
     /// Bone rows of a dead rabbit: rig node and pose.
     bones: Vec<(usize, rapier3d::math::Pose)>,
@@ -35,6 +40,13 @@ pub struct CreatureVisuals {
     rig: Option<Rig>,
     /// Rabbit id to scene instance.
     instances: HashMap<u32, Instance>,
+    /// Converted eye materials by material, mirror and receiver mask.
+    eye_materials: Vec<(
+        (crate::reference::AssetId, u32),
+        bool,
+        u32,
+        Handle<SourceMaterial>,
+    )>,
     generation: u64,
 }
 
@@ -75,6 +87,9 @@ pub(crate) fn sync(
     parents: Query<&ChildOf>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
     source_materials: Query<(), With<MeshMaterial3d<SourceMaterial>>>,
+    eye_materials: Query<(&MeshMaterial3d<SourceMaterial>, &GlobalTransform)>,
+    authored: Res<SourceMaterials>,
+    mut materials: ResMut<Assets<SourceMaterial>>,
     mut transforms: Query<&mut Transform>,
     mut visibility: Query<&mut Visibility>,
 ) {
@@ -142,6 +157,8 @@ pub(crate) fn sync(
                     shown: false,
                     nodes: Vec::with_capacity(rig.len()),
                     primitives: Vec::new(),
+                    eyes: Vec::new(),
+                    eye_look: 0,
                     pose: rig.pose(),
                     bones: Vec::with_capacity(r.ragdoll.bodies.len()),
                 },
@@ -179,9 +196,23 @@ pub(crate) fn sync(
             if instance.nodes.len() != rig.len() {
                 continue;
             }
+            let eye_nodes: Vec<Entity> = r
+                .senses
+                .eye_objects
+                .iter()
+                .filter_map(|node| rig.index(*node))
+                .filter_map(|index| instance.nodes.iter().find(|(i, _)| *i == index))
+                .map(|(_, entity)| *entity)
+                .collect();
             for (primitive, _) in &primitives {
                 if descends(primitive, instance.root, &parents) {
                     instance.primitives.push(primitive);
+                    if eye_nodes
+                        .iter()
+                        .any(|eye| descends(primitive, *eye, &parents))
+                    {
+                        instance.eyes.push(primitive);
+                    }
                 }
             }
             instance.bound = true;
@@ -236,14 +267,59 @@ pub(crate) fn sync(
                 );
             rig.ragdoll_pose(&instance.bones, row.scale, &mut instance.pose);
         } else {
+            let action = match row.action {
+                CreatureRow::ROAR => Some(Action::Roar),
+                CreatureRow::ATTACK => Some(Action::Attack),
+                _ => None,
+            }
+            .map(|action| ActionPose {
+                action,
+                time: row.action_time,
+                weight: row.action_weight,
+            });
             rig.sample(
                 &r.animator,
                 row.phase,
                 row.value,
+                action,
                 row.twitch,
                 1.,
                 &mut instance.pose,
             );
+        }
+        // `GetEvil` sets `EyeEvil` or `EyeGreen` on the eye renderers.
+        let look = row.flags & (CreatureRow::EVIL_EYES | CreatureRow::GREEN_EYES);
+        if look != instance.eye_look {
+            let link = if look & CreatureRow::GREEN_EYES != 0 {
+                &r.evil.eye_materials.green
+            } else {
+                &r.evil.eye_materials.evil
+            };
+            let key = (link.asset, link.gltf_material);
+            for primitive in &instance.eyes {
+                let Ok((current, global)) = eye_materials.get(*primitive) else {
+                    continue;
+                };
+                let Some(mask) = materials.get(&current.0).map(|m| m.extension.receiver_mask)
+                else {
+                    continue;
+                };
+                let reflected = global.affine().matrix3.determinant() < 0.;
+                let cached = creatures
+                    .eye_materials
+                    .iter()
+                    .find(|(k, f, m, _)| (*k, *f, *m) == (key, reflected, mask))
+                    .map(|(.., handle)| handle.clone());
+                let handle = cached.unwrap_or_else(|| {
+                    let handle = materials.add(authored_material(key, reflected, mask, &authored));
+                    creatures
+                        .eye_materials
+                        .push((key, reflected, mask, handle.clone()));
+                    handle
+                });
+                commands.entity(*primitive).insert(MeshMaterial3d(handle));
+            }
+            instance.eye_look = look;
         }
         // `LooseEyes` deactivates the eye objects.
         let eyes = if row.flags & CreatureRow::NO_EYES != 0 {

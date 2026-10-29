@@ -1163,8 +1163,15 @@ impl AudioState {
             }
         }
     }
-    /// `mainscript.PlayClipAtPoint(clip, position, 1f)` through the one-shot `voice` template.
-    pub fn clip_at(&mut self, voice: u32, instance: u32, clip: u32, position: [f64; 3]) {
+    /// `mainscript.PlayClipAtPoint(clip, position, 1f, pitch)` through the one-shot `voice` template.
+    pub fn clip_at(
+        &mut self,
+        voice: u32,
+        instance: u32,
+        clip: u32,
+        position: [f64; 3],
+        pitch: f32,
+    ) {
         if self.cars.events.len() < self.cars.events.capacity() {
             self.cars.events.push(cars::CarSignal {
                 kind: cars::CAR_KIND + voice,
@@ -1172,7 +1179,7 @@ impl AudioState {
                 action: AudioAction::Start,
                 clip,
                 gain: 1.,
-                pitch: 1.,
+                pitch,
                 position,
             });
         }

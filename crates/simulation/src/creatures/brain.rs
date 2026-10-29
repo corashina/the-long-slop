@@ -13,6 +13,8 @@ pub struct Steer {
     pub rot: Option<f32>,
     pub jump: bool,
     pub move_speed: f32,
+    /// `nyul.SeeTarget(angle, distance)`: set when the flight sum is positive and `attack` is on.
+    pub see_target: Option<(f32, f32)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -25,6 +27,10 @@ pub struct Brain {
     pub last_roam: f64,
     pub next_roam: f32,
     pub temp: [Vector; 2],
+    /// `goToTarget`, `avoidObstacles` and `enableInvert`. `nyulscript` changes them per rabbit.
+    pub go_to_target: bool,
+    pub avoid_obstacles: bool,
+    pub enable_invert: bool,
 }
 
 /// What the brain reads of the rabbit this frame.
@@ -68,7 +74,7 @@ fn horizontal(v: Vector) -> Vector {
 
 impl Brain {
     /// Source `Start`: the interest is the spawn position.
-    pub fn new(position: Vector) -> Self {
+    pub fn new(r: &BrainReference, position: Vector) -> Self {
         Self {
             fleeing: false,
             interest: position,
@@ -77,6 +83,9 @@ impl Brain {
             last_roam: 0.,
             next_roam: 0.,
             temp: [Vector::ZERO; 2],
+            go_to_target: r.go_to_target,
+            avoid_obstacles: r.avoid_obstacles,
+            enable_invert: r.enable_invert,
         }
     }
 
@@ -115,7 +124,7 @@ impl Brain {
             }
             flight += value;
         }
-        if flight < 0. && flight > r.invert_flight_if_above && r.enable_invert {
+        if flight < 0. && flight > r.invert_flight_if_above && self.enable_invert {
             flight = -flight;
             positive_at = negative_at;
         }
@@ -145,16 +154,19 @@ impl Brain {
             self.interest = position + i.forward * z + i.right * x;
         }
         let mut steer = Steer::default();
-        if !r.go_to_target {
+        if !self.go_to_target {
             return steer;
         }
         let target = horizontal(self.interest - position);
         let distance = target.length();
         let signed = signed_angle(i.forward, target);
         let angle = signed.abs();
+        if flight > 0. && r.attack {
+            steer.see_target = Some((angle, distance));
+        }
         if angle > r.target_angle_goal {
             let mut rot = signed;
-            if r.avoid_obstacles {
+            if self.avoid_obstacles {
                 self.sens_rot = i.ray_sum;
                 if self.sens_rot != 0. {
                     rot = self.sens_rot;
@@ -265,7 +277,7 @@ mod tests {
     #[test]
     fn a_threat_sends_the_rabbit_away() {
         let r = brain();
-        let mut b = Brain::new(Vector::ZERO);
+        let mut b = Brain::new(&r, Vector::ZERO);
         let threat = [Sensed {
             position: Vector::new(0., 0., -20.),
             kind: StimulusKind::Threat,
@@ -285,9 +297,35 @@ mod tests {
     }
 
     #[test]
+    fn inverted_flight_pulls_toward_a_weak_threat() {
+        let r = brain();
+        let no = || false;
+        let at = |value| {
+            [Sensed {
+                position: Vector::new(0., 0., -20.),
+                kind: StimulusKind::Threat,
+                value,
+            }]
+        };
+        let mut b = Brain::new(&r, Vector::ZERO);
+        b.enable_invert = true;
+        let steer = b.update(&r, &input(1., &at(10.), &no), &mut StormRandom(1));
+        assert!(!b.fleeing && b.interest == Vector::new(0., 0., -20.));
+        assert!(
+            steer
+                .see_target
+                .is_some_and(|(a, d)| a < 1e-3 && (d - 20.).abs() < 1e-4)
+        );
+        let mut b = Brain::new(&r, Vector::ZERO);
+        b.enable_invert = true;
+        b.update(&r, &input(1., &at(12.), &no), &mut StormRandom(1));
+        assert!(b.fleeing);
+    }
+
+    #[test]
     fn speed_falls_with_angle_and_rises_with_distance() {
         let r = brain();
-        let mut b = Brain::new(Vector::ZERO);
+        let mut b = Brain::new(&r, Vector::ZERO);
         b.last_roam = 100.;
         b.next_roam = 100.;
         let no = || false;

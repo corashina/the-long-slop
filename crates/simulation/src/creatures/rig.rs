@@ -1,6 +1,7 @@
 //! The rabbit Animator: the base layer 1D blend tree and the override layer, sampled into node
 //! frames under the prefab root.
 //! The simulation and the renderer share this sampler.
+use super::animator::ActionPose;
 use crate::animation::clip::{LocalPart, sample_clip};
 use crate::player::body::ik::Frame;
 use crate::reference::{BlendReference, NodeId, NodeRecord, ReferenceError};
@@ -18,6 +19,8 @@ pub struct Rig {
     lengths: Vec<f32>,
     /// Override layer clip length in seconds.
     overlay: f32,
+    /// `Roar` and `Attack` clip lengths in seconds.
+    actions: [f32; 2],
 }
 
 /// Sampled frames. `local` is parent-local; `model` is under the prefab root.
@@ -74,10 +77,15 @@ impl Rig {
                 }
             })
             .collect();
+        let actions = &blend.actions;
         if blend
             .clips
             .iter()
-            .chain([&blend.overlay.clip])
+            .chain([
+                &blend.overlay.clip,
+                &actions.roar.clip,
+                &actions.attack.clip,
+            ])
             .flat_map(|c| &c.tracks)
             .any(|t| !index.contains_key(&NodeId(t.node)))
         {
@@ -94,6 +102,7 @@ impl Rig {
                 .map(|c| c.stop_time - c.start_time)
                 .collect(),
             overlay: blend.overlay.clip.stop_time - blend.overlay.clip.start_time,
+            actions: [&actions.roar.clip, &actions.attack.clip].map(|c| c.stop_time - c.start_time),
         })
     }
 
@@ -134,13 +143,21 @@ impl Rig {
         self.overlay
     }
 
-    /// Samples the blend at `phase` (normalized cycle time) and `value`, then the override
-    /// layer at `overlay` (normalized cycle time). The root frame has the rabbit `scale`.
+    /// `Roar` and `Attack` clip seconds.
+    pub fn action_durations(&self) -> [f32; 2] {
+        self.actions
+    }
+
+    /// Samples the blend at `phase` (normalized cycle time) and `value`, fades to the `action`
+    /// clip, then samples the override layer at `overlay` (normalized cycle time). The root frame
+    /// has the rabbit `scale`.
+    #[allow(clippy::too_many_arguments)]
     pub fn sample(
         &self,
         blend: &BlendReference,
         phase: f32,
         value: f32,
+        action: Option<ActionPose>,
         overlay: f32,
         scale: f32,
         pose: &mut RigPose,
@@ -187,6 +204,39 @@ impl Rig {
         }
         for f in &mut pose.local {
             f.rotation = f.rotation.normalize();
+        }
+        if let Some(a) = action.filter(|a| a.weight > 0.) {
+            let state = a.action.state(&blend.actions);
+            let length = self.actions[a.action.index()];
+            let time = if state.r#loop {
+                a.time.rem_euclid(1.)
+            } else {
+                a.time.clamp(0., 1.)
+            };
+            pose.clip.copy_from_slice(&self.rest);
+            sample_clip(
+                &state.clip,
+                state.clip.start_time + time * length,
+                |node, part| {
+                    let frame = &mut pose.clip[self.index[&NodeId(node)]];
+                    match part {
+                        LocalPart::Position(p) => frame.position = p,
+                        LocalPart::Rotation(r) => frame.rotation = r,
+                        LocalPart::Scale(s) => frame.scale = s,
+                    }
+                },
+            );
+            let w = a.weight;
+            for (out, f) in pose.local.iter_mut().zip(&pose.clip) {
+                let r = if out.rotation.dot(f.rotation) < 0. {
+                    -f.rotation
+                } else {
+                    f.rotation
+                };
+                out.position = out.position.lerp(f.position, w);
+                out.rotation = (out.rotation * (1. - w) + r * w).normalize();
+                out.scale = out.scale.lerp(f.scale, w);
+            }
         }
         let layer = &blend.overlay;
         let w = layer.weight;

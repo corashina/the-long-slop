@@ -4887,6 +4887,9 @@ impl WorldStream {
     pub fn trigger_roles(&self) -> &super::TriggerRoles {
         &self.trigger_roles
     }
+    pub fn trigger_roles_mut(&mut self) -> &mut super::TriggerRoles {
+        &mut self.trigger_roles
+    }
 
     pub fn frame(&self) -> WorldFrame<'_> {
         WorldFrame {

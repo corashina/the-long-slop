@@ -1,5 +1,5 @@
 //! Rabbit deaths: `aiscript.Die` turns the live body into ragdoll bones that the player can
-//! carry, and `nyulscript.Die` plays a die clip.
+//! carry, and `nyulscript.Die` plays a die clip. Evil rabbit clips and attack triggers.
 use super::GarageRuntime;
 use crate::creatures::ragdoll::Bone;
 use crate::interaction::InteractionState;
@@ -34,14 +34,49 @@ fn register(
 }
 
 impl GarageRuntime {
-    /// Turns the rabbits that died this step into ragdolls.
-    pub(super) fn settle_rabbit_deaths(&mut self, reference: &ReferenceManifest) {
+    /// Turns the rabbits that died this step into ragdolls, plays the evil rabbit clips and
+    /// updates the attack trigger roles.
+    pub(super) fn settle_rabbits(&mut self, reference: &ReferenceManifest) {
         let r = &reference.creatures.rabbit;
         while let Some((id, sound)) = self.creatures.take_death() {
             if self.kill_rabbit(r, id, sound).is_err() {
                 self.notice = "Cannot drop the rabbit ragdoll.";
             }
         }
+        while let Some(sound) = self.creatures.take_sound() {
+            let position = self.stream.origin.absolute(sound.position.to_array());
+            self.play_rabbit_clip(r, sound.rabbit, sound.clip, position, sound.pitch);
+        }
+        let roles = self.stream.trigger_roles_mut();
+        while let Some((handle, role)) = self.creatures.take_trigger(r) {
+            match role {
+                Some(role) => roles.insert(handle, role),
+                None => roles.remove(handle),
+            }
+        }
+    }
+
+    /// `PlayClipAtPoint` of a rabbit clip. It makes a sound stimulus for the clip length.
+    fn play_rabbit_clip(
+        &mut self,
+        r: &RabbitReference,
+        id: u32,
+        clip: u32,
+        position: [f64; 3],
+        pitch: f32,
+    ) {
+        let Some(audio) = &mut self.audio else {
+            return;
+        };
+        let seconds = audio
+            .reference
+            .clips
+            .iter()
+            .find(|c| c.id == clip)
+            .map_or(0., |c| c.source_duration_seconds as f32);
+        self.creatures
+            .sound(position, 1., self.simulation_seconds, seconds);
+        audio.clip_at(r.die_voice, AUDIO_INSTANCE | id, clip, position, pitch);
     }
 
     fn kill_rabbit(
@@ -64,18 +99,7 @@ impl GarageRuntime {
         }
         let position = self.stream.origin.absolute(position.to_array());
         let clip = self.creatures.die_clip(r);
-        if let Some(audio) = &mut self.audio {
-            // `PlayClipAtPoint` makes a sound stimulus for the clip length.
-            let seconds = audio
-                .reference
-                .clips
-                .iter()
-                .find(|c| c.id == clip)
-                .map_or(0., |c| c.source_duration_seconds as f32);
-            self.creatures
-                .sound(position, 1., self.simulation_seconds, seconds);
-            audio.clip_at(r.die_voice, AUDIO_INSTANCE | id, clip, position);
-        }
+        self.play_rabbit_clip(r, id, clip, position, 1.);
         Ok(())
     }
 

@@ -705,13 +705,14 @@ pub struct PlaneRow {
     pub heading: [f32; 4],
 }
 
-/// One rabbit in physics space. The renderer samples the blend tree at `phase` and `value`
-/// and the override layer at `twitch`. A dead rabbit takes its bone rows instead.
+/// One rabbit in physics space. The renderer samples the blend tree at `phase` and `value`,
+/// the action state, and the override layer at `twitch`. A dead rabbit takes its bone rows
+/// instead.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 pub struct CreatureRow {
     pub id: u32,
-    /// `PoseRow::VISIBLE`, `DEAD` and `NO_EYES`.
+    /// `PoseRow::VISIBLE`, `DEAD`, `NO_EYES`, `EVIL_EYES` and `GREEN_EYES`.
     pub flags: u32,
     pub position: [f32; 3],
     pub rotation: [f32; 4],
@@ -719,6 +720,10 @@ pub struct CreatureRow {
     pub phase: f32,
     pub value: f32,
     pub twitch: f32,
+    /// `NO_ACTION`, `ROAR` or `ATTACK`, with its normalized time and weight.
+    pub action: u32,
+    pub action_time: f32,
+    pub action_weight: f32,
     /// First index and count of the bone rows in `SimFrame::creature_bones`.
     pub bones: [u32; 2],
 }
@@ -726,6 +731,13 @@ impl CreatureRow {
     pub const DEAD: u32 = 1 << 8;
     /// `LooseEyes` hid the eye objects.
     pub const NO_EYES: u32 = 1 << 9;
+    /// `GetEvil(natural: true)` set `EyeEvil`.
+    pub const EVIL_EYES: u32 = 1 << 10;
+    /// `GetEvil(natural: false)` set `EyeGreen`.
+    pub const GREEN_EYES: u32 = 1 << 11;
+    pub const NO_ACTION: u32 = 0;
+    pub const ROAR: u32 = 1;
+    pub const ATTACK: u32 = 2;
 }
 
 /// One bone body of a dead rabbit, relative to the unscaled creature row pose.

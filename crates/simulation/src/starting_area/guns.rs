@@ -119,7 +119,7 @@ impl GarageRuntime {
                 hit.direction,
             );
         }
-        self.settle_rabbit_deaths(reference);
+        self.settle_rabbits(reference);
         self.store_decals(dt);
         held.is_some()
     }
