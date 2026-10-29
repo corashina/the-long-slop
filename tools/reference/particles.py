@@ -90,8 +90,28 @@ def recover_exhaust(source,car_reader,car,owner,index,output):
     for p in result:validate_exhaust(p)
     return result
 
-def validate_exhaust(p):
-    unsupported=sorted(k for k,v in p['module_flags'].items() if v and k not in EXHAUST_MODULES)
+# Coolant steam also runs the NoiseModule position noise.
+STEAM_MODULES=EXHAUST_MODULES|{'NoiseModule'}
+
+def recover_coolant_steam(source,car_reader,car,owner,output):
+    """Read carscript.CoolantSteam. carscript runs it only with CoolantBoil, so a car without one has none.
+
+    The runtime sets the rate, so the exported rate is 1.
+    """
+    steam=source.resolve(car_reader,car['CoolantSteam']);boil=source.resolve(car_reader,car['CoolantBoil'])
+    if steam is None:return None
+    # carscript enables the emission. Without CoolantBoil nothing enables it.
+    if source.read(steam)['EmissionModule']['enabled']:raise ValueError(f'Coolant steam emission is on: {source_id(steam)}')
+    if boil is None:return None
+    p=particle(source,steam,f'coolant_steam_{car_reader.path_id}',1.,output,owner)
+    validate_exhaust(p,STEAM_MODULES)
+    if p['module_flags'].get('NoiseModule'):
+        if p['flags']['NoiseModule.remapEnabled'] or any(p['curves'][f'NoiseModule.{k}']['mode']!=0 or p['curves'][f'NoiseModule.{k}']['scalar']!=0
+                for k in ('rotationAmount','sizeAmount')):raise ValueError(f"Unsupported coolant steam noise {p['role']}")
+    return {'particle':p,'max_rate':car['CoolantSteamMaxRate']}
+
+def validate_exhaust(p,modules=EXHAUST_MODULES):
+    unsupported=sorted(k for k,v in p['module_flags'].items() if v and k not in modules)
     if unsupported:raise ValueError(f"Unsupported exhaust particle modules {p['role']}: {unsupported}")
     # The runtime plays a whole grid sheet over lifetime only.
     if p['module_flags'].get('UVModule') and any(p['scalars'][f'UVModule.{k}']!=0 for k in ('mode','animationType','timeMode')):

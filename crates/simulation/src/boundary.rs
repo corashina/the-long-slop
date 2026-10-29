@@ -803,6 +803,8 @@ impl ParticleGroupRow {
     pub const CAR_WHEEL: u32 = 1;
     /// Skid bursts: `tiresmoke` (0) or `tiresand` (1).
     pub const CAR_SKID: u32 = 2;
+    /// `carscript.CoolantSteam`; source 0.
+    pub const CAR_STEAM: u32 = 3;
 }
 
 /// The `(car system, source)` pairs of every particle system of a car prototype.
@@ -823,7 +825,11 @@ pub fn car_particle_sources(
                 .map(move |system| (ParticleGroupRow::CAR_WHEEL, wheel * 8 + system))
         });
     let skid = (0..2).map(|i| (ParticleGroupRow::CAR_SKID, i));
-    exhaust.chain(wheels).chain(skid)
+    let steam = record
+        .coolant_steam
+        .iter()
+        .map(|_| (ParticleGroupRow::CAR_STEAM, 0));
+    exhaust.chain(wheels).chain(skid).chain(steam)
 }
 
 /// Day cycle and lamp outputs.

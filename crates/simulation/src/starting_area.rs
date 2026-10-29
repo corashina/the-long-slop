@@ -494,6 +494,7 @@ pub struct VehicleRuntime {
     pub steer: f32,
     pub drivetrain: crate::simulation::drivetrain::DrivetrainState,
     pub exhaust: crate::exhaust::ExhaustState,
+    pub coolant_steam: crate::coolant_steam::CoolantSteamState,
     /// Source `carscript.Tank`: the root tank, else the tank part in `fuel_tank_slot`.
     /// Found once at the start of each step.
     pub fuel_tank: Option<ItemId>,
@@ -565,6 +566,10 @@ impl VehicleRuntime {
                 crate::simulation::lever::LeverState::rest(lever, record.driving.initial_gear)
             }),
             exhaust: crate::exhaust::ExhaustState::new(&record.exhaust, parts.seed),
+            coolant_steam: crate::coolant_steam::CoolantSteamState::new(
+                record.coolant_steam.as_ref(),
+                parts.seed ^ 0x7374_6561_6d00,
+            ),
             fuel_tank: parts.fuel_tank,
             root_tank: parts.fuel_tank,
             fuel_tank_slot: None,
@@ -2056,6 +2061,7 @@ impl GarageRuntime {
                         horn_hit: vehicle.horn_hit.map(|h| h.gain()),
                         ambient_temperature,
                         wheels: &vehicle.wheel_effects,
+                        boil: vehicle.coolant_steam.boil(),
                         skid: &reference.skid,
                         mixer,
                     },
@@ -2111,13 +2117,14 @@ impl GarageRuntime {
             .engine
             .and_then(|item| self.powertrain.engine(item));
         let output = engine.map_or_else(EngineOutput::default, |e| e.state.output());
-        let running = engine.is_some_and(|engine| {
+        let active = engine.is_some_and(|engine| {
             self.area
                 .items
                 .get(engine.item)
                 .and_then(|item| item.body)
                 .is_some_and(|body| self.physics.body_active(body))
-        }) && output.running;
+        });
+        let running = active && output.running;
         // The chassis body frame is the car root node: reference validation requires it.
         let root = self.physics.rapier().bodies[self.physics.chassis_handle(key)].position();
         vehicle.exhaust.advance(
@@ -2136,6 +2143,14 @@ impl GarageRuntime {
                 origin: self.stream.origin.offset,
             },
             &reference.fluid_rules.burn_colors,
+            &self.physics,
+        );
+        vehicle.coolant_steam.advance(
+            FIXED_DT,
+            if active { output.boil } else { 0. },
+            self.stream.origin.absolute(root.translation.to_array()),
+            root.rotation,
+            self.stream.origin.offset,
             &self.physics,
         );
     }
@@ -2367,6 +2382,9 @@ impl GarageRuntime {
                         free_run: drivetrain.free_run,
                         speed_kmh: speed * 3.6,
                         radiator_condition,
+                        coolant_boil: world_vehicle(reference, vehicle.prototype)
+                            .coolant_steam
+                            .is_some(),
                         electronics_enabled: vehicle.electronics_enabled,
                     }),
                     ..climate

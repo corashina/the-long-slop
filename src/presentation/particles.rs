@@ -284,6 +284,13 @@ fn car_particle(
     let record = crate::starting_area::world_vehicle(reference, prototype);
     match system {
         ParticleGroupRow::CAR_EXHAUST => &record.exhaust[source],
+        ParticleGroupRow::CAR_STEAM => {
+            &record
+                .coolant_steam
+                .as_ref()
+                .expect("coolant steam group")
+                .particle
+        }
         ParticleGroupRow::CAR_WHEEL => {
             let w = &record.wheel_effects[source / 8];
             match source % 8 {

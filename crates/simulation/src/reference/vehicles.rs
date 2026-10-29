@@ -57,6 +57,9 @@ pub struct WorldVehicleReference {
     pub condition: Option<u32>,
     /// Source `carscript.psSmoke` systems, posed relative to the prototype root.
     pub exhaust: Vec<ParticleReference>,
+    /// Source `carscript.CoolantSteam`, posed relative to the prototype root. Only a car with
+    /// `CoolantBoil` has it, and only such a car runs the coolant boil rule.
+    pub coolant_steam: Option<CoolantSteamReference>,
     /// One `talajnezo` per wheel, in `wheels` order. Poses are relative to the prototype root.
     pub wheel_effects: Vec<WheelEffectsReference>,
     pub effect_gains: EffectGains,
@@ -569,6 +572,7 @@ pub struct CarAudioReference {
     pub horn: Option<HornReference>,
     /// `turnedRadioSOund` on `SSounds`: ignition and light switch.
     pub switch: Option<CarShotReference>,
+    pub boil: Option<CoolantBoilReference>,
     /// One entry per wheel, in wheel effect order.
     pub wheels: Vec<WheelSoundsReference>,
     pub route: CarRouteReference,
@@ -582,6 +586,22 @@ pub struct CarAudioReference {
 pub struct BusDoorAudioReference {
     pub source: SourceId,
     pub sounds: Vec<CarShotReference>,
+}
+
+/// Source `carscript.CoolantSteam` and `CoolantSteamMaxRate`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CoolantSteamReference {
+    pub particle: ParticleReference,
+    pub max_rate: f32,
+}
+
+/// Source `carscript.CoolantBoil`. Its volume is `coolantBoilMaxSound` times the boil fraction.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CoolantBoilReference {
+    pub sound: CarSoundReference,
+    pub max_gain: f32,
 }
 
 /// Source `carscript.SHornSound`. Pitch follows the ambient temperature.
@@ -903,6 +923,14 @@ impl WorldVehicleReference {
         )?;
         for p in &self.exhaust {
             super::particles::validate_particle(p)?;
+        }
+        if let Some(steam) = &self.coolant_steam {
+            super::particles::validate_particle(&steam.particle)?;
+            check(
+                s,
+                "vehicle coolant steam rate",
+                steam.max_rate.is_finite() && steam.max_rate >= 0.,
+            )?;
         }
         Ok(())
     }

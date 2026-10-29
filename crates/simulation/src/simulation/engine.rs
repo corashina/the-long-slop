@@ -114,6 +114,8 @@ pub struct InstalledEngineInput {
     pub free_run: bool,
     pub speed_kmh: f32,
     pub radiator_condition: Option<u8>,
+    /// The car has a `carscript.CoolantBoil` source. Without it the coolant rule does not run.
+    pub coolant_boil: bool,
     /// Car electronics allow ignition.
     pub electronics_enabled: bool,
 }
@@ -162,6 +164,8 @@ pub struct EngineOutput {
     pub temperature: f32,
     /// Source `selectedFanSpeed` in degrees per second while `Cool` spins the fan.
     pub fan_speed: f32,
+    /// Source `carscript` coolant boil fraction: steam rate and boil volume scale with it.
+    pub boil: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -451,17 +455,18 @@ impl EngineState {
             );
             sump.cleanup_one();
         }
-        // A missing radiator or coolant tank skips the coolant rules.
-        if installed.radiator_condition.is_some()
+        // A missing radiator, coolant tank or boil source skips the coolant rules.
+        let mut boil = 0.0;
+        if installed.coolant_boil
+            && installed.radiator_condition.is_some()
             && self.temperature > globals.min_steam_temperature
             && let Some(coolant) = coolant.as_deref_mut()
+            && coolant.total() > 0.0
         {
+            boil = inverse_lerp(globals.min_steam_temperature, bounds[1], self.temperature);
             drain(
                 coolant,
-                globals.coolant_evaporate_rate / 60.0
-                    * dt
-                    * input.sleep_modifier
-                    * inverse_lerp(globals.min_steam_temperature, bounds[1], self.temperature),
+                globals.coolant_evaporate_rate / 60.0 * dt * input.sleep_modifier * boil,
             );
         }
         let mut fan_speed = 0.0;
@@ -522,6 +527,7 @@ impl EngineState {
             consumed_fuel_liters: consumed_fuel,
             temperature: self.temperature,
             fan_speed,
+            boil,
         };
         self.last_output
     }
@@ -630,6 +636,57 @@ mod tests {
         // With the clutch open, only the starter can lift the rpm.
         let (output, peak, _) = kick(true, false, 0., 1500.);
         assert!(output.kick_start && peak == 0., "{output:?} {peak}");
+    }
+
+    #[test]
+    fn coolant_boils_above_steam_temperature_with_a_boil_source() {
+        let record: EnginePartReference =
+            serde_json::from_value(crate::reference::engine_part_fixture()).unwrap();
+        let globals = globals();
+        let boil = |temperature: f32, coolant_boil: bool, amount: f32| {
+            let mut coolant = FluidContainer::new(
+                10.,
+                &[FluidEntry {
+                    fluid_type: 4,
+                    amount,
+                }],
+            );
+            let output = EngineState::new(temperature).step(
+                EngineInput {
+                    installed: Some(InstalledEngineInput {
+                        radiator_condition: Some(0),
+                        coolant_boil,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                VehicleFluids {
+                    fuel: None,
+                    sump: None,
+                    coolant: Some(&mut coolant),
+                },
+                EngineRecords {
+                    engine: &record,
+                    radiator: None,
+                    globals: &globals,
+                },
+                None,
+                |_| 0.,
+                0.02,
+            );
+            (output.boil, output.temperature)
+        };
+        // f = InverseLerp(minSteamTemp, maxCarTemp, temp).
+        let (f, temperature) = boil(125., true, 5.);
+        assert!(
+            (f - (temperature - 100.) / 50.).abs() < 1e-5 && f > 0.4,
+            "{f}"
+        );
+        // No boil source, no coolant or a cool engine: no boil.
+        for (temperature, source, amount) in [(125., false, 5.), (125., true, 0.), (90., true, 5.)]
+        {
+            assert_eq!(boil(temperature, source, amount).0, 0.);
+        }
     }
 
     #[test]

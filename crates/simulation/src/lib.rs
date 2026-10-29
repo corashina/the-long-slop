@@ -7,6 +7,7 @@ pub mod boundary;
 pub mod candidate;
 pub mod car_camera;
 pub mod conditions;
+pub mod coolant_steam;
 #[cfg(target_arch = "wasm32")]
 pub mod cpu_profile;
 pub mod crash;

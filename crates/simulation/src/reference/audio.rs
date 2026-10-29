@@ -510,6 +510,9 @@ impl AudioReference {
                     && rising(h.temperature)
                     && h.attack_release_rate > 0.
             }) && a.switch.as_ref().is_none_or(shot)
+                && a.boil.as_ref().is_none_or(|b| {
+                    loop_voice(&b.sound) && b.max_gain.is_finite() && b.max_gain >= 0.
+                })
                 && a.doors.iter().all(|d| d.sounds.iter().all(shot))
                 && a.wheels
                     .iter()
@@ -530,7 +533,9 @@ impl AudioReference {
                     .all(|e| e.audio.as_ref().is_none_or(engine))
                     && p.vehicle.as_ref().is_none_or(|v| {
                         v.audio.as_ref().is_none_or(|a| {
-                            a.wheels.len() == v.wheel_effects.len() && car(a, p.interiors.len())
+                            a.wheels.len() == v.wheel_effects.len()
+                                && a.boil.is_some() == v.coolant_steam.is_some()
+                                && car(a, p.interiors.len())
                         }) && v.blood_clip.is_none_or(|c| clips.contains(&c))
                     }),
                 "world car audio",

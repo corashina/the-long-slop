@@ -103,6 +103,7 @@ impl GarageRuntime {
             for (system, source) in car_particle_sources(reference, vehicle.prototype) {
                 let particles = match system {
                     ParticleGroupRow::CAR_EXHAUST => vehicle.exhaust.particles(source),
+                    ParticleGroupRow::CAR_STEAM => vehicle.coolant_steam.particles(),
                     ParticleGroupRow::CAR_WHEEL => {
                         vehicle.wheel_effects.particles(source / 8, source % 8)
                     }

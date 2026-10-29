@@ -104,6 +104,7 @@ def runtime_resources(manifest):
         collect(prototype.get('deferred_materials', []))
         vehicle=prototype.get('vehicle') or {}
         collect(vehicle.get('exhaust', []))
+        collect(vehicle.get('coolant_steam'))
         collect([[w['dust'],w['grass']] for w in vehicle.get('wheel_effects',[])])
     return list(resources.values())
 
