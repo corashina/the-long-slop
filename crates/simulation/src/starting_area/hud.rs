@@ -87,32 +87,29 @@ impl GarageRuntime {
                 .map(|(i, v)| ((v.clamp(0., 1.) * 255.).round() as u32) << (8 * i))
                 .sum();
         }
-        let Some(key) = self.vehicle.as_ref() else {
-            frame.hud = hud;
-            return;
-        };
-        hud.flags |= HudBlock::CAR;
-        let current = &self.vehicles[key];
-        let snapshot = self.physics.snapshot(key);
         let position = self.area.player.focus_position(&self.physics);
-        hud.speed_kmh = snapshot.speed_mps * 3.6;
         hud.focus = position;
         hud.absolute = self.stream.origin.absolute(position);
         hud.origin = self.stream.origin.offset;
-        hud.contacts = self
-            .physics
-            .wheel_contacts(key)
-            .enumerate()
-            .fold(0, |bits, (i, contact)| bits | ((contact as u32) << i));
         hud.surfaces = self.stream.frame().surfaces.len() as u32;
         hud.colliders = self.physics.collider_count() as u32;
         hud.rebases = self.rebases;
-        hud.trip_m = current.trip_m;
-        hud.fuel = current
-            .fuel_tank
-            .and_then(|tank| self.area.items.get(tank))
-            .and_then(|item| item.fluid.as_ref())
-            .map_or(0.0, |fluid| fluid.finite_total());
+        // A new game has no selected car until the player sits in one.
+        let car = self.vehicle.as_ref().map(|key| (key, &self.vehicles[key]));
+        if let Some((key, current)) = car {
+            hud.speed_kmh = self.physics.snapshot(key).speed_mps * 3.6;
+            hud.contacts = self
+                .physics
+                .wheel_contacts(key)
+                .enumerate()
+                .fold(0, |bits, (i, contact)| bits | ((contact as u32) << i));
+            hud.trip_m = current.trip_m;
+            hud.fuel = current
+                .fuel_tank
+                .and_then(|tank| self.area.items.get(tank))
+                .and_then(|item| item.fluid.as_ref())
+                .map_or(0.0, |fluid| fluid.finite_total());
+        }
         let available = self.area.interaction.available_actions(
             &self.aim,
             &self.area.player,
@@ -169,7 +166,9 @@ impl GarageRuntime {
         } else {
             ""
         };
-        let engine = self.engine_output(key);
+        let engine = car.map_or_else(Default::default, |(key, _)| self.engine_output(key));
+        let ignition = car.is_some_and(|(_, c)| c.ignition.ignition);
+        let handbrake = car.is_some_and(|(_, c)| c.handbrake);
         let seated = self.area.player.seated();
         let throw_charge = self.area.interaction.throw_charge();
         let throw_active = self.area.interaction.throw_active();
@@ -179,13 +178,7 @@ impl GarageRuntime {
             throw_charge: throw_charge.to_bits(),
             throw_active,
             rpm: engine.rpm.to_bits(),
-            engine_flags: [
-                current.ignition.ignition,
-                engine.running,
-                engine.starter,
-                seated,
-                current.handbrake,
-            ],
+            engine_flags: [ignition, engine.running, engine.starter, seated, handbrake],
             actions: info.actions.0
                 | if needs.dead || self.sleeping() {
                     0
@@ -253,11 +246,11 @@ impl GarageRuntime {
             throw_charge,
             throw_active,
             rpm: engine.rpm,
-            ignition: current.ignition.ignition,
+            ignition,
             running: engine.running,
             starter: engine.starter,
             seated,
-            handbrake: current.handbrake,
+            handbrake,
             quantities,
             order: stamp.order,
             light_control: stamp.light_control,

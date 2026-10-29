@@ -55,7 +55,7 @@ fn frame_round_trips() {
             hp: 80.,
             slots: [0, 7, 0, 0],
             absolute: [1e6, 2., 3.],
-            flags: HudBlock::CAR,
+            flags: HudBlock::AUTOSAVE_SAFE,
             ..HudBlock::default()
         },
         previous: vec![row(1.), row(4.)],

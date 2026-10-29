@@ -523,8 +523,6 @@ impl HudBlock {
     pub const SLEEP_HINT: u32 = 1 << 3;
     /// Safe for autosave when the grab key is up.
     pub const AUTOSAVE_SAFE: u32 = 1 << 4;
-    /// A current car exists. The car values and feedback are set.
-    pub const CAR: u32 = 1 << 5;
     /// The player aims at a radio knob.
     pub const RADIO: u32 = 1 << 6;
     pub const RADIO_AM: u32 = 1 << 7;
