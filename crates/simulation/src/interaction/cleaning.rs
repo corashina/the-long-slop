@@ -223,6 +223,8 @@ pub struct CleaningTools {
     generated_washes: GeneratedWashes,
     /// Generated items that reserve LMB while equipped, with their LMB text.
     lmb_items: HashMap<ItemId, u32>,
+    /// Loot tools whose state changed: their items need a save capture.
+    changed: Vec<ItemId>,
 }
 /// A contact at its rest pose. Missing positions keep the model at the tool root.
 fn new_contact(t: &BrushTool, p: BrushPoses) -> Contact {
@@ -312,6 +314,7 @@ impl CleaningTools {
             },
             generated_washes: GeneratedWashes::default(),
             lmb_items: HashMap::new(),
+            changed: Vec::with_capacity(4),
             wash_colliders: Vec::with_capacity(c.washes.iter().map(|w| w.colliders.len()).sum()),
             collider_enabled: reference
                 .colliders
@@ -431,6 +434,66 @@ impl CleaningTools {
                 valve: t.startup_valve,
             },
         });
+    }
+    /// Adds the brush of loot item `item`. `index` is its `conditions.prototype_tools` index.
+    pub fn add_prototype_brush(
+        &mut self,
+        item: ItemId,
+        index: usize,
+        own_condition: Option<ConditionId>,
+        poses: BrushPoses,
+        disabled: bool,
+        reference: &ReferenceManifest,
+    ) {
+        let PrototypeTool::Brush { tool, .. } = &reference.conditions.prototype_tools[index].kind
+        else {
+            unreachable!("brush of a prototype spray");
+        };
+        self.add_brush(
+            item,
+            ToolParams::Prototype(index),
+            own_condition,
+            new_contact(tool, poses),
+            tool,
+        );
+        self.tools.last_mut().expect("added tool").state.disabled = disabled;
+    }
+    /// Adds the spray of loot item `item`. `root` and `nozzle` are absolute.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_prototype_spray(
+        &mut self,
+        item: ItemId,
+        index: usize,
+        root: Pose,
+        nozzle: Pose,
+        quantity: f32,
+        color: [f32; 4],
+        reference: &ReferenceManifest,
+    ) {
+        let PrototypeTool::Spray { tool, .. } = &reference.conditions.prototype_tools[index].kind
+        else {
+            unreachable!("spray of a prototype brush");
+        };
+        let spray = new_spray(tool, root, nozzle);
+        self.add_spray(
+            item,
+            ToolParams::Prototype(index),
+            spray,
+            tool,
+            quantity,
+            color,
+            root,
+        );
+    }
+    fn mark_changed(&mut self, tool: usize) {
+        let t = &self.tools[tool];
+        if matches!(t.params, ToolParams::Prototype(_)) && !self.changed.contains(&t.state.item) {
+            self.changed.push(t.state.item);
+        }
+    }
+    /// Loot tool items whose state changed since the last call.
+    pub fn take_changed(&mut self) -> std::vec::Drain<'_, ItemId> {
+        self.changed.drain(..)
     }
     /// Removes the tool of `item`. Fixed tools never leave.
     pub fn remove_tool(&mut self, item: ItemId) {
@@ -712,6 +775,19 @@ impl CleaningTools {
         } else {
             from_rapier(&(to_rapier(items.get(item).unwrap().pose) * c.default))
         }
+    }
+    /// Loot tools: item, `conditions.prototype_tools` index and particle system count.
+    pub fn prototype_tools(&self) -> impl Iterator<Item = (ItemId, usize, usize)> + '_ {
+        self.tools.iter().filter_map(|t| {
+            let ToolParams::Prototype(index) = t.params else {
+                return None;
+            };
+            let count = match &t.body {
+                ToolBody::Brush(c) => c.particles.len(),
+                ToolBody::Spray(s) => s.particles.len(),
+            };
+            Some((t.state.item, index, count))
+        })
     }
     /// The live particles of system `particle` of the tool of `item`.
     pub fn particles(&self, item: ItemId, particle: usize) -> &[crate::particles::ParticleOutput] {
@@ -1069,6 +1145,7 @@ impl CleaningTools {
             && let Some(own) = self.tools[i].own_condition
         {
             self.tools[i].state.disabled = conditions.wear(own);
+            self.mark_changed(i);
         }
     }
     fn finish_brush(
@@ -1288,6 +1365,7 @@ impl CleaningTools {
             if *quantity > 0. {
                 // Fire checks ammo, consumes it, then paints even on the last shot.
                 *quantity -= (b.paint_loss * valve * frame.dt).clamp(0., *quantity);
+                self.mark_changed(index);
                 rotation = nozzle.rotation;
                 let direction = if equipped {
                     to_rapier(frame.view)

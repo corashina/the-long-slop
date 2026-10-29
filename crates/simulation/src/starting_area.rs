@@ -6,7 +6,7 @@ use crate::interaction::{
     items::{ItemStore, node_pose},
 };
 use crate::player::{PlayerState, PlayerStepContext};
-use crate::reference::{BodyId, ItemId, NodeId, ReferenceError, ReferenceManifest};
+use crate::reference::{BodyId, ItemId, NodeId, PrototypeTool, ReferenceError, ReferenceManifest};
 use crate::simulation::{
     DriveInput, FIXED_DT, FrameInput,
     engine::{EngineInput, EngineOutput, EngineRecords, InstalledEngineInput},
@@ -1023,6 +1023,24 @@ impl GarageRuntime {
             if let Some(voice) = c.player_brush.tool.voice {
                 let s = cleaning.player_signal();
                 audio.voice(voice, s.playing, s.voice_gain, 1.);
+            }
+            audio.tool_loops.clear();
+            for (item, index, _) in cleaning.prototype_tools() {
+                let sound = match &c.prototype_tools[index].kind {
+                    PrototypeTool::Brush { sound, .. } => sound.as_ref(),
+                    PrototypeTool::Spray { sound, .. } => Some(sound),
+                };
+                let (Some(sound), Some(s), Some(placed)) =
+                    (sound, cleaning.signal(item), self.area.items.get(item))
+                else {
+                    continue;
+                };
+                if s.playing {
+                    let p =
+                        to_rapier(placed.pose) * rapier3d::math::Vector::from_array(sound.position);
+                    let p = self.stream.origin.absolute(p.to_array());
+                    audio.tool_loop(item, sound.voice, s.voice_gain, p);
+                }
             }
         }
     }

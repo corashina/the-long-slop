@@ -796,6 +796,7 @@ impl ItemStore {
             glow: None,
             radio: None,
             detector: None,
+            tool: None,
             gun: None,
             linear_velocity: [0.; 3],
             angular_velocity: [0.; 3],

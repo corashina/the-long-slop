@@ -801,6 +801,8 @@ impl ParticleGroupRow {
     pub const EXPLOSION: u32 = 14;
     /// `mainscript.FoodParticles`; source is the food particle type.
     pub const FOOD: u32 = 15;
+    /// A loot tool: `a` is the item, `b` the `conditions.prototype_tools` index.
+    pub const LOOT_TOOL: u32 = 16;
     /// Car systems in `a`.
     pub const CAR_EXHAUST: u32 = 0;
     /// Wheel effects: source is wheel * 8 + system (0 dust, 1.. grass).

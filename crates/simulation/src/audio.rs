@@ -168,6 +168,8 @@ pub struct AudioState {
     squeaks: Vec<FlyerSqueak>,
     /// Voice instance loops and flyer squeak moves of this step. A loop that is missing stops.
     pub voice_loops: Vec<cars::CarSignal>,
+    /// Loot tool loops of this step. A loop that is missing stops.
+    pub tool_loops: Vec<cars::CarSignal>,
     pub reference: AudioReference,
     pub session: u32,
     pub game_seconds: f64,
@@ -249,6 +251,7 @@ impl AudioState {
             sky_voices: Vec::new(),
             squeaks: Vec::with_capacity(32),
             voice_loops: Vec::with_capacity(48),
+            tool_loops: Vec::with_capacity(16),
             session,
             game_seconds: 0.,
             outside_gain: outside.initial_gain,
@@ -532,6 +535,20 @@ impl AudioState {
             signal.playing = playing && !self.removed.contains(&signal.emitter);
             signal.gain = gain;
             signal.pitch = pitch;
+        }
+    }
+    /// One loop of a loot tool car voice template. `position` is absolute.
+    pub fn tool_loop(&mut self, item: ItemId, voice: u32, gain: f32, position: [f64; 3]) {
+        if self.tool_loops.len() < self.tool_loops.capacity() {
+            self.tool_loops.push(cars::CarSignal {
+                kind: cars::CAR_KIND + voice,
+                instance: item.0,
+                action: AudioAction::Update,
+                clip: cars::template_clip(&self.reference.car_voices, voice),
+                gain,
+                pitch: 1.,
+                position,
+            });
         }
     }
     /// Loops of the sky prefab voices, one instance per plane. `anchor` is absolute.
@@ -869,6 +886,7 @@ impl AudioState {
         self.survival_events.clear();
         self.survival_loops.clear();
         self.voice_loops.clear();
+        self.tool_loops.clear();
         self.squeaks.clear();
         self.sleep_radio_advanced = false;
         // Controls belong to the committed session (fresh or restored); playlists restart.

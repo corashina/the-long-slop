@@ -50,6 +50,8 @@ pub struct ObjectSnapshot {
     pub radio: Option<crate::save::RadioSnapshot>,
     /// Metal detector onOffButton turn state.
     pub detector: Option<bool>,
+    /// Loot tool state; None at its spawn state.
+    pub tool: Option<crate::save::ToolStateSnapshot>,
     pub linear_velocity: [f32; 3],
     pub angular_velocity: [f32; 3],
     pub sleeping: bool,

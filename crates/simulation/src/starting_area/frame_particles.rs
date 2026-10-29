@@ -72,6 +72,18 @@ impl GarageRuntime {
                 out.owner(ParticleGroupRow::SPRAY, tool, source, particles);
             }
         }
+        for (item, tool, count) in cleaning.prototype_tools() {
+            for source in 0..count {
+                let group = ParticleGroupRow {
+                    kind: ParticleGroupRow::LOOT_TOOL,
+                    a: item.0,
+                    b: tool as u32,
+                    source: source as u32,
+                    ..Default::default()
+                };
+                out.particles(group, cleaning.particles(item, source));
+            }
+        }
         for source in 0..reference.melee.particles.len() {
             let particles = interaction.melee.particles(source);
             out.owner(ParticleGroupRow::MELEE, 0, source, particles);

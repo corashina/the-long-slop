@@ -610,6 +610,17 @@ impl StructureViews {
                 scale: [1.; 3],
             });
         }
+        let tool = stream.tool_look(id);
+        // drotkefescript: the brush model slides on the contact.
+        if let Some((node, pose)) = tool.and_then(|t| t.model) {
+            poses.push(NodePoseRow {
+                node: node as u32,
+                kind: NodePoseRow::CONTENT,
+                translation: pose.position,
+                rotation: pose.rotation,
+                scale: [1.; 3],
+            });
+        }
         for node in 0..prototype.nodes.len() {
             if let Some(pose) = content.node_pose(node) {
                 poses.push(NodePoseRow {
@@ -641,6 +652,7 @@ impl StructureViews {
         for i in 0..prototype.nodes.len() {
             let enabled = active_food(prototype, i, appearance, reference, food, blood)
                 && !cobwebs.contains(&i)
+                && tool.is_none_or(|t| t.hidden != Some(i))
                 && !self.gun_hidden.contains(&(i as u32))
                 && car
                     .and_then(|(record, v)| v.node_visible(record, i as u32))
@@ -723,6 +735,13 @@ impl StructureViews {
                     color,
                 });
             }
+        }
+        // sprayscript.UpdColor: the renderer shows the paint color.
+        if let Some((node, color)) = tool.and_then(|t| t.color) {
+            frame.node_colors.push(NodeColorRow {
+                node: node as u32,
+                color,
+            });
         }
         row.colors = [start, frame.node_colors.len() as u32];
         frame.structures.push(row);
