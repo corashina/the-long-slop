@@ -106,6 +106,14 @@ pub(super) fn bind(
         let (slot_sources, wheel_slots) = wheel_slots(content, prototype, world, rules, items)?;
         let owner = content.item.unwrap();
         let key = ObjectKey::Generated(content.content.placement.id.clone());
+        let blood = record
+            .blood
+            .as_ref()
+            .map(|r| {
+                let chassis = prototype.bodies[record.body as usize].node as usize;
+                bind_blood(r, chassis, instance, prototype, interaction, physics)
+            })
+            .transpose()?;
         let ids = spawn(
             CarCopy {
                 key: key.clone(),
@@ -152,6 +160,7 @@ pub(super) fn bind(
                         }
                         tanks
                     }),
+                blood,
             },
             prototype,
             skid,
@@ -236,15 +245,25 @@ pub(super) fn bind(
         }
         powertrain.register_gauge(part);
     }
-    if let (Some(record), Some(owner)) = (&prototype.vehicle, content.item)
-        && let Some(r) = &record.blood
-    {
-        let key = ObjectKey::Generated(content.content.placement.id.clone());
-        let chassis = prototype.bodies[record.body as usize].node as usize;
-        let blood = bind_blood(r, chassis, instance, prototype, interaction, physics)?;
+    let key = ObjectKey::Generated(content.content.placement.id.clone());
+    if let (Some(owner), Some(blood)) = (
+        content.item,
+        vehicles.get(&key).and_then(|v| v.blood.as_ref()),
+    ) {
+        // A restored `GotDirty` shows the trigger. Repair progress starts at 0.
+        let restored = blood.shown == Some(true);
+        if restored {
+            blood.set_colliders(physics, true);
+        }
         // Source: the sponge washes the trigger while its GameObject is active.
         let appearance = &content.content.appearance;
-        if crate::world::spawn_appearance::node_active(prototype, r.node as usize, appearance) {
+        if restored
+            || crate::world::spawn_appearance::node_active(
+                prototype,
+                blood.nodes[0] as usize,
+                appearance,
+            )
+        {
             interaction.cleaning.register_generated_wash(
                 WashOwner::Car(owner),
                 blood.permission,
@@ -252,7 +271,6 @@ pub(super) fn bind(
                 blood.colliders.clone(),
             );
         }
-        vehicles.get_mut(&key).unwrap().blood = Some(blood);
     }
     Ok(())
 }
@@ -458,6 +476,8 @@ pub struct CarCopy<'a> {
     pub wheel_part_mass: f32,
     /// Prototype `tankscript` items. Their fluid adds to the chassis mass.
     pub tanks: Vec<ItemId>,
+    /// Source `carscript.blood`.
+    pub blood: Option<Blood>,
 }
 
 /// Makes the chassis a vehicle and adds its car runtime and wheel slots with the retired
@@ -498,6 +518,7 @@ pub fn spawn(
             light_switch: copy.light_switch,
             handbrake_lever: copy.handbrake_lever,
             plates,
+            blood: copy.blood,
         },
     );
     if let Some(state) = changes.take_vehicle(&key) {
@@ -694,6 +715,15 @@ mod tests {
                 wheel_slots,
                 wheel_part_mass,
                 tanks: vec![item],
+                blood: Some(Blood {
+                    on: false,
+                    shown: None,
+                    permission: 0,
+                    never_repair: false,
+                    nodes: vec![1],
+                    colliders: Vec::new(),
+                    point: [0.; 3],
+                }),
             },
             prototype,
             &crate::wheel_effects::tests::skid(),
@@ -898,7 +928,7 @@ mod tests {
     }
 
     #[test]
-    fn saved_car_returns_with_engine_gear_and_handbrake() {
+    fn saved_car_returns_with_engine_gear_handbrake_and_blood() {
         #[derive(serde::Serialize, serde::Deserialize)]
         struct Saved {
             #[serde(with = "crate::save::identity::lossless")]
@@ -989,6 +1019,7 @@ mod tests {
         car_state.drivetrain.restore_gear(2);
         car_state.handbrake = true;
         car_state.ignition.ignition = true;
+        car_state.blood.as_mut().unwrap().got_dirty();
         let mut engine_state = powertrain.engine(part).unwrap().state.capture_save();
         engine_state.rpm = 2400.;
         engine_state.temperature = 86.;
@@ -1020,6 +1051,11 @@ mod tests {
         assert_eq!(car_state.drivetrain.gear(), 2);
         assert!(car_state.handbrake);
         assert!(car_state.ignition.ignition);
+        let blood = car_state.blood.as_ref().unwrap();
+        assert!(
+            blood.on && blood.visible(1) == Some(true),
+            "load runs GotDirty"
+        );
         let restored = &powertrain.engine(part).unwrap().state;
         assert_eq!(restored.capture_save(), engine_state);
         assert!(restored.output().running);

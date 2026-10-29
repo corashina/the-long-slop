@@ -75,6 +75,13 @@ impl Blood {
         self.on = false;
         self.shown = Some(false);
     }
+    /// Source `SetActive` on the trigger node: its enabled colliders follow it.
+    pub fn set_colliders(&self, physics: &mut crate::vehicle::PhysicsWorld, enabled: bool) {
+        for &(_, handle) in &self.colliders {
+            physics.edit_collider(handle, |c| crate::vehicle::set_collider_enabled(c, enabled));
+        }
+        physics.refresh_queries();
+    }
     /// The active state that the trigger sets on `node`. None: the trigger does not set it.
     pub fn visible(&self, node: u32) -> Option<bool> {
         self.shown.filter(|_| self.nodes.contains(&node))

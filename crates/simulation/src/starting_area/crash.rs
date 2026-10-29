@@ -10,14 +10,6 @@ use crate::vehicle::PhysicsWorld;
 use crate::world::ObjectKey;
 use rapier3d::math::Vector;
 
-/// Source `SetActive` on the trigger node: its enabled colliders follow it.
-fn set_colliders(physics: &mut PhysicsWorld, blood: &Blood, enabled: bool) {
-    for &(_, handle) in &blood.colliders {
-        physics.edit_collider(handle, |c| crate::vehicle::set_collider_enabled(c, enabled));
-    }
-    physics.refresh_queries();
-}
-
 /// Source `carscript.Stuff` speed: forward speed in km/h. The port has no `whlocked`.
 pub(super) fn forward_kmh(physics: &PhysicsWorld, key: &ObjectKey) -> f32 {
     physics.snapshot(key).speed_mps.abs() * 3.6
@@ -103,7 +95,7 @@ impl GarageRuntime {
     /// Source `washtriggerscript.GotDirty` on the car blood, then `SBlood01` at the trigger.
     fn got_dirty(&mut self, key: &ObjectKey, car: ItemId, blood: &mut Blood, clip: Option<u32>) {
         blood.got_dirty();
-        set_colliders(&mut self.physics, blood, true);
+        blood.set_colliders(&mut self.physics, true);
         self.area.interaction.cleaning.register_generated_wash(
             WashOwner::Car(car),
             blood.permission,
@@ -128,7 +120,7 @@ impl GarageRuntime {
             let key = self.area.items.object_key(car);
             if let Some(blood) = self.vehicles.get_mut(&key).and_then(|v| v.blood.as_mut()) {
                 blood.got_clean();
-                set_colliders(&mut self.physics, blood, false);
+                blood.set_colliders(&mut self.physics, false);
             }
         }
     }
