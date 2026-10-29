@@ -195,9 +195,7 @@ impl SaveSnapshot {
             };
             pose(&s.pose)?;
             data(
-                unit(s.condition)
-                    && s.temperature.is_none_or(f32::is_finite)
-                    && s.valve.is_none_or(unit),
+                s.temperature.is_none_or(f32::is_finite) && s.valve.is_none_or(unit),
                 "Generated scalar state",
             )?;
             data(
@@ -225,6 +223,15 @@ impl SaveSnapshot {
             }
             if let Some(m) = &s.mechanism {
                 data(finite(&m.degrees) && unit(m.slide), "Generated mechanism")?;
+            }
+            for (i, c) in s.conditions.iter().enumerate() {
+                data(
+                    c.state <= 4
+                        && c.color.iter().all(|v| v.is_finite())
+                        && c.repair_progress.is_finite()
+                        && !s.conditions[..i].iter().any(|o| o.source == c.source),
+                    "Generated part condition",
+                )?;
             }
             if s.held {
                 links(

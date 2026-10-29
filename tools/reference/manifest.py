@@ -11,6 +11,7 @@ from .parts import recover_part_slots
 from .driving import recover_driving
 from .lighting import rgba
 from .player_movement import recover_player_movement
+from .car_camera import recover_car_camera
 
 
 def component_mass(source, components) -> float:
@@ -56,7 +57,7 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
     assets=[]
     for asset_id,(name,readers) in enumerate(roots.items(),1):
         report=reports[name]
-        assets.append({'id':asset_id,'mesh_count':report['mesh_count'],'material_count':report['material_count'],'usage':'player_prototype' if name=='player' else 'ragdoll_prototype' if name=='ragdoll' else 'item_prototype' if name.startswith('item_') else 'food_prototype' if name=='food' else 'road_lamp_prototype' if name=='road_lamp' else 'sky_prototype' if name=='sky' else 'sky_traffic' if name.startswith('sky_') else 'unique_scene','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
+        assets.append({'id':asset_id,'mesh_count':report['mesh_count'],'material_count':report['material_count'],'usage':'player_prototype' if name=='player' else 'ragdoll_prototype' if name=='ragdoll' else 'item_prototype' if name.startswith('item_') else 'food_prototype' if name=='food' else 'road_lamp_prototype' if name=='road_lamp' else 'sky_prototype' if name=='sky' else 'sky_traffic' if name.startswith('sky_') else 'creature_prototype' if name.startswith('creature_') else 'unique_scene','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
         records=[]
         for root in readers:records.extend(source.hierarchy(root,activate_root=True))
         for entry,record in zip(report['nodes'],records,strict=True):
@@ -195,6 +196,13 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
                     'sensor':value['m_IsTrigger'],'enabled':bool(value['m_Enabled']) and (nodes[node-1]['active'] or food_geometry),'membership':1<<layer,'filter':matrix[layer],
                     'friction':friction,'restitution':restitution,'geometry':geometry(source,exporter,reader,node_readers[node],owner['pose'],owner['dynamic']),
                     'step_surface':step_surface(source,objects[node]['game_object']),'tag':collider_tag(source,objects[node]['game_object'])})
+    def tank_explosion(source,reader,full):
+        # tankscript.TryExplode destroys parentDest too. The runtime removes only the tank item.
+        dest=source.resolve(reader,full['parentDest'])
+        if dest is not None and by_source.get(key(dest))!=node_of(reader):raise ValueError(f'Tank parentDest outside the tank: {key(reader)}')
+        return {'never_explode':bool(full['neverExplode']),'always_explode':bool(full['alwaysExplode']),'always_explode_force':full['alwaysExplodeForce'],
+            'force_needed':full['explosionForceNeededToExplode'],'explosion_type':full['explosionType'],'no_shoot_hole':bool(full['noShootHole']),
+            'no_shoot_explode':bool(full['noShootExplode']),'parent_dest':None}
     tanks=[];openings=[]
     for node,group in components.items():
         if not nodes[node-1]['active']:continue
@@ -203,7 +211,7 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
             owner=body_for(node)
             tanks.append({'item':item_components[key(reader)],'source':source_id(reader),'capacity_liters':value['maxC'],'fluids':fluid_entries(value),'openings':[],
                 'no_drink':bool(full['noDrink']),'no_fill_this':bool(full['noFillThis']),'no_fill_from':bool(full['noFillFrom']),'slow_oil':bool(full['slowOil']),
-                'role':'portable' if bodies[owner-1]['dynamic'] else 'fixed'})
+                'role':'portable' if bodies[owner-1]['dynamic'] else 'fixed','explosion':tank_explosion(source,reader,full)})
     for node,group in components.items():
         if not nodes[node-1]['active']:continue
         for reader in group.get('tankcapscript',[]):
@@ -270,6 +278,7 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
         obj_rotation_sensitivity=defaults[4],look_sensitivity=[defaults[0]*defaults[1],defaults[0]*defaults[2]])
     scroll_slider=source.resolve(settings_reader,settings['tabControls']['sliders'][3]);scroll_definition=source.read(scroll_slider)
     player_record['scroll_sensitivity']=scroll_definition['defValue']*(scroll_definition['valueMultipler'] if scroll_definition['valueMultipler'] else 1.)
+    player_record['car_camera']=recover_car_camera(source,player_reader,player,main)
     player_record['camera_culling_mask']=recover_camera_visibility(source)['normal_view_mask']
     player_record['action_masks']=recover_masks(player)
     time_reader=source.get('globalgamemanagers',8)

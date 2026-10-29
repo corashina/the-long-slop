@@ -128,6 +128,7 @@ window.gameGamepad=(axes,buttons)=>{gamepad.poll();axes.set(gamepad.axes);button
 // `steer` to `handbrake` are the last Rust `DrivingControls`, shown only on the Controls screen.
 window.gameDrivingState=(gear,assists,seated,steer,throttle,brake,clutch,handbrake)=>{window.gameState.gear=gear;window.gameState.drivingAssists=assists;menu?.drivingState(assists);feedback?.drivingState(gear,seated);if(menu?.model.state==='controls')steeringWheel?.live(steer,throttle,brake,clutch,handbrake);};
 window.gameActions=()=>{const a=actions;actions=0;return a;};
+const CAMERA_VIEWS=['First person','Outside','Drop cam','Map'];
 window.gameState = { speedKmh: 0, camera: 'First person', x: 0, y: 0, z: 0, contacts: 0,
   frameSteps: 0, totalSteps: 0, activeSurfaces: 0, colliderCount: 0, absoluteX: 0, absoluteY: 0, absoluteZ: 0,
   originX: 0, originY: 0, originZ: 0, rebases: 0, travelM: 0, preparedRoads: 0, fuelLiters: 0,
@@ -138,7 +139,7 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, surfaces, colliders, a
   if(lastFrameTime!==null)peakFrameMs=Math.max(peakFrameMs,now-lastFrameTime);
   lastFrameTime=now;
   const state = window.gameState;
-  state.speedKmh = kmh; state.camera = mode ? 'First person' : 'Chase';
+  state.speedKmh = kmh; state.camera = CAMERA_VIEWS[mode];
   state.x = x; state.y = y; state.z = z; state.contacts = contacts;
   state.frameSteps = steps; state.totalSteps += steps; state.activeSurfaces = surfaces; state.colliderCount = colliders;
   state.absoluteX = absoluteX; state.absoluteY = absoluteY; state.absoluteZ = absoluteZ;
@@ -151,7 +152,7 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, surfaces, colliders, a
   if(playing&&!wasPlaying)toggles=readAutosaveToggles(toggleStorage);
   wasPlaying=playing;
   if(autosave.tick(now/1000,playing,autosaveSafe,seated,toggles)&&!autosaving&&!saveSession.pending)runAutosave();
-  feedback?.setVisible(started&&!paused&&!dead&&!sleeping&&Boolean(mode)&&menu?.model.state==='playing');
+  feedback?.setVisible(started&&!paused&&!dead&&!sleeping&&mode===0&&menu?.model.state==='playing');
   survival?.setVisible(started&&!paused&&!sleeping&&menu?.model.state==='playing');
 };
 window.gameRadioFeedback=(volume,frequency,am)=>{record.radioVolume=volume;record.radioFrequency=frequency;record.radioAm=am;if(record.context===11||record.context===12)feedback?.update(record);};

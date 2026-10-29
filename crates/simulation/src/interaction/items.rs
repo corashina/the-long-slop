@@ -52,7 +52,6 @@ pub struct ItemState {
     pub location: ItemLocation,
     pub pose: VehiclePose,
     pub local_pose: VehiclePose,
-    pub generated_condition: Option<f32>,
     pub temperature: Option<f32>,
     pub fluid: Option<FluidContainer>,
     pub food: Option<FoodState>,
@@ -268,7 +267,6 @@ impl ItemStore {
                     .map_or(ItemLocation::World, ItemLocation::Attached),
                 pose,
                 local_pose,
-                generated_condition: None,
                 temperature: None,
                 fluid,
                 food: (item.id == reference.survival.starter_food).then_some(FoodState {
@@ -652,7 +650,6 @@ impl ItemStore {
                 position: [0.0; 3],
                 rotation: [0.0, 0.0, 0.0, 1.0],
             },
-            generated_condition: Some(1.),
             temperature: None,
             fluid: None,
             food: None,
@@ -691,7 +688,6 @@ impl ItemStore {
                 position: [0.; 3],
                 rotation: [0., 0., 0., 1.],
             },
-            generated_condition: None,
             temperature: None,
             fluid: None,
             inactive_pose: None,
@@ -731,7 +727,6 @@ impl ItemStore {
                 position: [0.; 3],
                 rotation: [0., 0., 0., 1.],
             },
-            generated_condition: None,
             temperature: None,
             fluid: None,
             inactive_pose: None,
@@ -791,6 +786,7 @@ impl ItemStore {
     ) -> Option<crate::world::ObjectSnapshot> {
         let state = self.get(id)?;
         Some(crate::world::ObjectSnapshot {
+            conditions: Vec::new(),
             lamp: None,
             lamp_broken: None,
             dial: None,
@@ -810,7 +806,6 @@ impl ItemStore {
                 position: self.origin.absolute(state.pose.position),
                 rotation: state.pose.rotation,
             },
-            condition: state.generated_condition.unwrap_or(1.),
             food: None,
             temperature: state.temperature,
             fluids: state.fluid.as_ref().map(crate::fluids::FluidSnapshot::from),
@@ -824,7 +819,6 @@ impl ItemStore {
     ) -> Result<(), ReferenceError> {
         if !snapshot.pose.position.iter().all(|v| v.is_finite())
             || !snapshot.pose.rotation.iter().all(|v| v.is_finite())
-            || !snapshot.condition.is_finite()
             || !snapshot
                 .linear_velocity
                 .iter()
@@ -850,9 +844,6 @@ impl ItemStore {
             .get_mut(id)
             .ok_or_else(|| ReferenceError("Missing generated snapshot target".into()))?;
         item.pose = pose;
-        if let Some(condition) = &mut item.generated_condition {
-            *condition = snapshot.condition;
-        }
         item.temperature = snapshot.temperature;
         item.buried = snapshot.buried;
         if let Some(entries) = &snapshot.fluids {

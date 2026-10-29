@@ -40,13 +40,13 @@ mod survival;
 pub mod wear;
 mod weather;
 mod world_step;
+pub use explosions::explosive_imported;
 pub use survival::DrinkResult;
 pub use survival::active_part as active_food_part;
 pub use survival::saved_food;
 pub use world_step::WorldInput;
 
 pub struct StartingArea {
-    pub conditions: crate::conditions::ConditionStore,
     pub bodies: HashMap<BodyId, RigidBodyHandle>,
     pub items: ItemStore,
     pub interaction: InteractionState,
@@ -77,7 +77,6 @@ impl StartingArea {
         physics: &mut PhysicsWorld,
         origin: [f64; 3],
     ) -> Result<Self, ReferenceError> {
-        let conditions = crate::conditions::ConditionStore::new(reference)?;
         let mut items = ItemStore::new(reference)?;
         let mut interaction = InteractionState::new(reference)?;
         let mut bodies = HashMap::with_capacity(reference.bodies.len());
@@ -276,7 +275,6 @@ impl StartingArea {
             })
             .collect();
         Ok(Self {
-            conditions,
             inventory: crate::inventory::InventoryState::new(&reference.inventory),
             inventory_offsets: [None; 4],
             inventory_clutch_conflict: reference.driving.bindings.iter().any(|binding| {
@@ -725,11 +723,13 @@ pub struct GarageRuntime {
     weather_bindings: weather::WeatherBindings,
     sky: crate::sky_traffic::SkyTraffic,
     pub flyers: crate::flyers::Flyers,
+    pub creatures: crate::creatures::Creatures,
     pub urine: crate::interaction::fluid_contact::FluidContact,
     urine_reference: crate::reference::FluidParticleReference,
     urine_emission: [f32; 2],
     sleep_camera: Option<crate::sleep::SleepCamera>,
-    pub sleep_camera_allowed: bool,
+    /// Source `otherView()`: a seated outside view, drop cam or map view shows. The driver sets it.
+    pub other_view: bool,
     pub audio_motion_revision: u32,
     pub simulation_seconds: f64,
     survival_draw: u64,
@@ -845,11 +845,11 @@ impl GarageRuntime {
             stream.request_at(spawn, spawn);
         }
         let mut wheels = crate::interaction::wheels::WheelAssemblies::new(reference)?;
-        wheels.refresh_conditions(&area.conditions, &area.items);
+        wheels.refresh_conditions(&area.interaction.conditions);
         wheels.sync(&mut area.items, &mut physics)?;
         area.interaction
             .cleaning
-            .sync_wash_colliders(&area.conditions, &mut physics);
+            .sync_wash_colliders(&area.interaction.conditions, &mut physics);
         physics.refresh_queries();
         area.items.sync_poses(&physics);
         area.commit_poses(&physics, true);
@@ -902,11 +902,12 @@ impl GarageRuntime {
             weather_bindings,
             sky: crate::sky_traffic::SkyTraffic::new(&reference.sky, seed as u64),
             flyers: crate::flyers::Flyers::new(seed as u64),
+            creatures: crate::creatures::Creatures::new(reference, seed as u64, 0.)?,
             survival: crate::survival::SurvivalState::new(&reference.survival),
             hearing: crate::hearing::HearingState::new(reference)?,
             sleep: crate::sleep::SleepState::new(&reference.sleep),
             sleep_camera: None,
-            sleep_camera_allowed: true,
+            other_view: false,
             audio_motion_revision: 0,
             simulation_seconds: 0.,
             survival_draw: 0,
@@ -1143,7 +1144,7 @@ impl GarageRuntime {
 
     pub fn step(&mut self, reference: &ReferenceManifest, mut input: FrameInput) {
         self.wheels
-            .refresh_conditions(&self.area.conditions, &self.area.items);
+            .refresh_conditions(&self.area.interaction.conditions);
         if let Err(error) = self.sync_world_activity(reference) {
             self.stream.fail(ReferenceError(error.to_string()));
         }
@@ -1526,6 +1527,7 @@ impl GarageRuntime {
         self.advance_weather(reference, FIXED_DT);
         self.advance_sky(reference, FIXED_DT);
         self.advance_flyers(reference, FIXED_DT);
+        self.advance_creatures(reference, FIXED_DT);
         self.area
             .interaction
             .mechanisms
@@ -1729,6 +1731,7 @@ impl GarageRuntime {
             }));
             self.urine.rebase(shift);
             self.flyers.rebase(shift);
+            self.creatures.rebase(shift);
             if let Some(audio) = &mut self.audio {
                 audio.rebase(std::array::from_fn(|i| {
                     (self.area.origin[i] - old_origin[i]) as f32
@@ -1763,7 +1766,7 @@ impl GarageRuntime {
             crate::sleep::SleepInput {
                 held: sleep_held,
                 active: !self.paused,
-                camera_allowed: self.sleep_camera_allowed || !self.area.player.seated(),
+                camera_allowed: !self.other_view || !self.area.player.seated(),
                 dead: self.needs_output().dead,
                 show_text: self.area.player.show_sleep_text(),
             },
@@ -1822,6 +1825,36 @@ impl GarageRuntime {
                 },
             );
         }
+    }
+
+    /// Rabbits run in every state. Source `aispawn` sits on the Player.
+    fn advance_creatures(&mut self, reference: &ReferenceManifest, dt: f32) {
+        let player = &self.area.player;
+        let body = crate::vehicle::to_rapier(player.body_pose(&self.physics));
+        let head = rapier3d::math::Vector::from_array(player.focus_position(&self.physics));
+        let (stream, origin) = (&self.stream, self.stream.origin);
+        let supports = |p: rapier3d::math::Vector| {
+            let p = origin.absolute(p.to_array());
+            stream.supports(crate::world::WorldBounds {
+                min: p.map(|v| v - 2.),
+                max: p.map(|v| v + 2.),
+            })
+        };
+        self.creatures.step(
+            &reference.creatures.rabbit,
+            &mut self.physics,
+            &crate::creatures::StepInput {
+                now: self.simulation_seconds,
+                dt,
+                player: crate::creatures::spawner::Player {
+                    position: body.translation,
+                    rotation: body.rotation,
+                },
+                head: (head, player.body_handle()),
+                origin: &origin,
+                supports: &supports,
+            },
+        );
     }
 
     pub fn sky(&self) -> &crate::sky_traffic::SkyTraffic {
@@ -2252,6 +2285,7 @@ impl GarageRuntime {
             ((1.0
                 - self
                     .area
+                    .interaction
                     .conditions
                     .item_quality(radiator.item)
                     .unwrap_or(1.0))

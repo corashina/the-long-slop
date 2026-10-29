@@ -531,11 +531,11 @@ impl GarageRuntime {
                 .interaction
                 .drop_held(&mut self.area.items, &mut self.physics);
         }
-        self.area.interaction.remove_consumable(item, body);
         if matches!(
             self.area.items.object_key(item),
             crate::world::ObjectKey::Generated(_)
         ) {
+            self.area.interaction.forget_removed(item, body);
             self.physics.edit_body(body, |body| body.set_enabled(false));
             let state = self.area.items.get_mut(item).unwrap();
             state.location = ItemLocation::World;
@@ -543,6 +543,24 @@ impl GarageRuntime {
             self.physics.refresh_queries();
             return Ok(());
         }
+        self.remove_imported_item(item);
+        self.area.foods.retain(|id| *id != item);
+        Ok(())
+    }
+    /// Destroy of an imported item and the items on its body: its body leaves the world, and
+    /// the item stays as a removed record for the save. The caller first releases it from the
+    /// player.
+    pub(super) fn remove_imported_item(&mut self, item: ItemId) {
+        let Some(body) = self.area.items.get(item).and_then(|s| s.body) else {
+            return;
+        };
+        let on_body: Vec<ItemId> = self
+            .area
+            .items
+            .iter()
+            .filter(|s| s.body == Some(body))
+            .map(|s| s.id)
+            .collect();
         let body_id = self.area.items.body_id(item).unwrap();
         self.physics.remove_body(body);
         self.physics.refresh_queries();
@@ -556,13 +574,14 @@ impl GarageRuntime {
             self.area.bodies.remove(&body_id);
             self.area.render_poses.retain(|(id, _, _)| *id != body_id);
         }
-        self.area.item_render_poses.retain(|(id, _, _)| *id != item);
-        let state = self.area.items.set_body(item, None).unwrap();
-        state.location = ItemLocation::World;
-        state.removed = true;
-        self.area.inventory.forget(item);
-        self.area.foods.retain(|id| *id != item);
-        Ok(())
+        for id in on_body {
+            self.area.interaction.forget_removed(id, body);
+            self.area.item_render_poses.retain(|(i, _, _)| *i != id);
+            let state = self.area.items.set_body(id, None).unwrap();
+            state.location = ItemLocation::World;
+            state.removed = true;
+            self.area.inventory.forget(id);
+        }
     }
 }
 

@@ -70,6 +70,8 @@ pub struct ContentInstance {
     pub content: SpawnedContent,
     pub item: Option<ItemId>,
     pub baseline: Option<super::ObjectSnapshot>,
+    /// Store entries of `content.inputs.conditions`: entry, input index, prototype node.
+    pub conditions: Vec<(crate::reference::ConditionId, usize, usize)>,
 }
 impl ContentInstance {
     pub fn take_visual_change(
@@ -95,6 +97,7 @@ impl ContentInstance {
     pub fn for_structure(placement: Placement) -> Self {
         Self {
             visual_revision: 0,
+            conditions: Vec::new(),
             visual_published: u64::MAX,
             visual_ready: true,
             visual_caps: 0,
@@ -120,7 +123,6 @@ impl ContentInstance {
                 lights: Vec::new(),
                 fluid: None,
                 tanks: Vec::new(),
-                condition: 1.,
                 buried: false,
                 distance_offset: [0.; 3],
                 ammo: None,
@@ -512,7 +514,6 @@ impl SourceContents {
                     lights: Vec::new(),
                     fluid: None,
                     tanks: Vec::new(),
-                    condition: 1.,
                     buried: false,
                     distance_offset: [0.; 3],
                     ammo: None,
@@ -579,6 +580,7 @@ impl SourceContents {
                 }
                 self.push_active(ContentInstance {
                     visual_revision: 0,
+                    conditions: Vec::new(),
                     visual_published: u64::MAX,
                     visual_ready: true,
                     visual_caps: 0,
@@ -742,6 +744,7 @@ impl SourceContents {
                 {
                     self.push_active(ContentInstance {
                         visual_revision: 0,
+                        conditions: Vec::new(),
                         visual_published: u64::MAX,
                         visual_ready: true,
                         visual_caps: 0,
@@ -870,6 +873,7 @@ impl SourceContents {
             } else {
                 self.push_active(ContentInstance {
                     visual_revision: 0,
+                    conditions: Vec::new(),
                     visual_published: u64::MAX,
                     visual_ready: true,
                     visual_caps: 0,

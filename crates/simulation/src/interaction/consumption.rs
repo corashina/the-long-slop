@@ -32,7 +32,8 @@ impl InteractionState {
         }
     }
 
-    pub fn remove_consumable(&mut self, id: ItemId, body: RigidBodyHandle) {
+    /// Forget the bindings of a removed item: an eaten food, an exploded tank or its cap.
+    pub fn forget_removed(&mut self, id: ItemId, body: RigidBodyHandle) {
         self.collider_bindings.retain(|_, binding| {
             binding.use_owner != Some(id)
                 && binding.pickup_owner != Some(id)
@@ -51,6 +52,7 @@ impl InteractionState {
         self.usable_items.remove(&id);
         self.filling_items.remove(&id);
         self.tank_rules.remove(&id);
+        self.forget_openings(id);
         self.carry.forget_food(id);
         self.bodies.retain(|_, handle| *handle != body);
         self.mechanism_bodies.remove(&id);

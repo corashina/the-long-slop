@@ -384,7 +384,9 @@ impl GunReference {
             } => {
                 nodes.extend([mag, mag_pos]);
                 check(
-                    m.world.prototypes.iter().any(|p| p.source == *mag_prefab),
+                    m.item_prototypes
+                        .iter()
+                        .any(|p| p.source == *mag_prefab && p.behavior.ammo_rules.is_some()),
                     "magazine prefab",
                 )?;
             }

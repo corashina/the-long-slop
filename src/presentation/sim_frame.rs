@@ -2,8 +2,8 @@
 use bevy::ecs as bevy_ecs;
 use bevy::prelude::*;
 use simulation::boundary::{
-    Change, Feedback, Handle, ItemRow, MaterialRow, NodePoseRow, ParticleGroupRow, ParticleRow,
-    PoseKey, PoseRow, RopeAim, SimFrame, SpawnData,
+    Change, Feedback, Handle, ItemRow, MaterialRow, NodeColorRow, NodePoseRow, ParticleGroupRow,
+    ParticleRow, PoseKey, PoseRow, RopeAim, SimFrame, SpawnData,
 };
 use simulation::conditions::ConditionState;
 use simulation::reference::{ConditionId, ItemId, NodeId, SourceId};
@@ -33,6 +33,7 @@ pub(crate) struct StructureView {
     pub poses: Vec<NodePoseRow>,
     pub hidden: Vec<u32>,
     pub materials: Vec<MaterialRow>,
+    pub colors: Vec<NodeColorRow>,
     pub caps: Vec<GeneratedCapVisual>,
 }
 
@@ -160,6 +161,9 @@ impl SimFrameResource {
             view.materials.clear();
             view.materials
                 .extend_from_slice(&frame.node_materials[range(row.materials)]);
+            view.colors.clear();
+            view.colors
+                .extend_from_slice(&frame.node_colors[range(row.colors)]);
             self.changed_structures.push(row.slot);
         }
     }

@@ -9,7 +9,7 @@ from .survival import component, managed_evidence, finite_record
 SELECTED = ((75443,74,1,'item_pack'),(51722,62,1,'item_box'),(61587,216,1,'item_shovel'),
             (70812,217,1,'item_sunglasses'),(53838,218,1,'item_hat'),(53837,221,1,'item_cap'),
             (63605,245,1,'item_cone'),(63259,92,1,'item_pumpkin'),(54495,230,1,'item_cigarette'),
-            (83430,61,6,'item_siphon_hose'),(51557,312,1,'item_tumbleweed'))
+            (83430,61,6,'item_siphon_hose'),(51557,312,1,'item_tumbleweed'),(51878,215,1,'item_smg_magazine'))
 # Checked Gib and reducedGib GameObjects of selected breakablescripts: beer, box, cacti, vase, wc,
 # then box, vase and wc reduced gibs. Box gib Transforms are 81642 and 81645.
 GIBS = (14653,39185,24388,39184,39189,39188,39187,39186,23303,39984)
@@ -155,11 +155,17 @@ def recover_item_prototypes(source, manifest, output) -> list[dict]:
             target=source.resolve(c,source.read(c)[field])
             if target is None or target.type.name!=kind:raise ValueError(f'Invalid prototype {field}: {key(c)}')
             return target
-        behavior={'pack':None,'ammo':None,'cigarette_prefab':None,'spawn':None,'breakable':None,'mount':None,
+        behavior={'pack':None,'ammo':None,'ammo_rules':None,'cigarette_prefab':None,'spawn':None,'breakable':None,'mount':None,
             'melee':None,'attack_target':None,'attack_trigger':None,'gib':None,'gib_pieces':[],'scale_destroy':[],'clips':[],'contact_sound_source':None,'contact_clips':[]}
         if item_id==74:
             c=component(source,root,'cigiscript');behavior.update(pack=source_id(c),ammo=source_id(component(source,root,'ammoscript')),
                 cigarette_prefab=source_id(link(c,'prefab','GameObject')))
+        elif item_id==215:
+            # geppityuscript.Reload(unload) spawns this magazine with the gun rounds.
+            c=component(source,root,'ammoscript');d=source.read(c)
+            if not d['isMag'] or d['w']['m_PathID']:raise ValueError(f'Magazine ammoscript is not a loose magazine: {key(c)}')
+            behavior.update(ammo=source_id(c),ammo_rules={'kind':d['tipus'],'count':d['fammo'] if d['floatOrInt'] else float(d['ammo']),
+                'maximum':d['max'],'float':bool(d['floatOrInt']),'is_mag':True})
         elif item_id==62:
             c=component(source,root,'breakablescript');spawn=component(source,root,'spawnInBoxScript')
             behavior.update(breakable=source_id(c),spawn=source_id(spawn),mount=source_id(link(spawn,'mount','MonoBehaviour')))
@@ -226,7 +232,7 @@ def validate_item_prototypes(prototypes, manifest) -> None:
     if ([(p['id'],p['item_id']) for p in prototypes[:len(SELECTED)]]!=expected or len(gibs)!=len(GIBS)
         or any(p['item_id'] is not None or p['id']['file']!='sharedassets1.assets' for p in gibs)
         or (gibs[1]['id']['path_id'],gibs[5]['id']['path_id'])!=tuple(BOX_GIBS)):raise ValueError('Selected prototype identities')
-    counts={pid:(count,*geometry) for (pid,_,count,_),geometry in zip(SELECTED,((1,3),(2,3),(2,3),(3,25),(2,4),(1,2),(12,2),(3,2),(1,7),(6,0),(1,1)),strict=True)}
+    counts={pid:(count,*geometry) for (pid,_,count,_),geometry in zip(SELECTED,((1,3),(2,3),(2,3),(3,25),(2,4),(1,2),(12,2),(3,2),(1,7),(6,0),(1,1),(1,1)),strict=True)}
     counts.update(BOX_GIBS)
     nodes={n['id']:n for n in manifest['nodes']};assets={a['id']:a for a in manifest['assets']}
     def unique(values):
@@ -268,7 +274,7 @@ def validate_item_prototypes(prototypes, manifest) -> None:
             pickup=x['pickup'];source=pickup['source']
             exceptions={(81642,135313):77169,(81642,140775):82214,(81645,135314):77170}
             exception=exceptions.get((p['id']['path_id'],source['path_id']))
-            expected_icon={61:None,74:4624,62:None,216:4553,None:4623,217:4557,218:4527,221:4529,245:None,92:4590,230:None,312:4569}[p['item_id']] if exception is None else None
+            expected_icon={61:None,74:4624,62:None,216:4553,None:4623,217:4557,218:4527,221:4529,245:None,92:4590,230:None,312:4569,215:4580}[p['item_id']] if exception is None else None
             icon=pickup['inventory_icon']
             if source['file']!='sharedassets1.assets' or pickup['can_hold_right_hand']!=(p['item_id']==216):raise ValueError('Pickup source eligibility')
             # Hose segment eligibility and icons are not checked yet against build 11140890.

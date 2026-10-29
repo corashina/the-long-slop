@@ -641,6 +641,14 @@ impl WorldStream {
                         );
                     }
                     crate::world::content_mechanisms::sync(content, items, interaction, physics);
+                    super::content_conditions::bind(
+                        content,
+                        instance,
+                        prototype,
+                        &self.contents.rules,
+                        &self.reference,
+                        interaction,
+                    )?;
                     let root = crate::world::placement::node_pose(
                         prototype,
                         prototype.bodies[body_index].node as usize,
@@ -1169,7 +1177,7 @@ impl WorldStream {
                 index += 1;
                 continue;
             }
-            let content = self.contents.remove_active(index);
+            let mut content = self.contents.remove_active(index);
             // Hitches end while the bodies still exist.
             for item in content
                 .item
@@ -1225,6 +1233,7 @@ impl WorldStream {
                     .mechanisms
                     .remove_generated(item, &content.nodes);
             }
+            super::content_conditions::unbind(&mut content, interaction);
             for binding in &content.bindings {
                 wheels.remove_generated(binding.item);
                 if let Some(instance) = self
@@ -1323,7 +1332,6 @@ fn bind_pickup(
     state.hit_sound = hit;
     if !child {
         state.fluid = content.content.fluid.clone();
-        state.generated_condition = Some(content.content.condition);
         state.buried = content.content.buried;
     }
     state.local_pose =
@@ -1666,6 +1674,7 @@ pub(super) fn rollback(
             .mechanisms
             .remove_generated(item, &content.nodes);
     }
+    super::content_conditions::unbind(content, interaction);
     for (_, collider) in &instance.colliders {
         physics.edit_collider(*collider, |collider| {
             collider.user_data &= STEP_SURFACE_MASK;
@@ -1839,6 +1848,9 @@ pub fn restore_item(
     if let Some(mechanism) = snapshot.mechanism {
         interaction.mechanisms.restore(id, mechanism)?;
     }
+    interaction
+        .conditions
+        .restore_item(id, &snapshot.conditions)?;
     if let (Some(parent), Some(attachment), Some(_)) = (resolved, &snapshot.attachment, volume) {
         changes::restore_lock(
             id,

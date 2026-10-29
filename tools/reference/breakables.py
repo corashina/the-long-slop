@@ -26,10 +26,10 @@ def owners(source, manifest):
     return result
 
 
-def breakable(source, c) -> dict:
-    """One breakablescript, as Start leaves it."""
+def breakable(source, c, actor=False) -> dict:
+    """One breakablescript, as Start leaves it. `actor`: the creature runtime owns its AI link."""
     d = source.read(c)
-    if d['AI']['m_PathID'] or d['newAI']['m_PathID']:
+    if not actor and (d['AI']['m_PathID'] or d['newAI']['m_PathID']):
         raise ValueError(f'breakablescript AI link is not supported before X03: {key(c)}')
     # flashlightscript.Start sets lamp. A set lamp field is not audited.
     if d['lamp']['m_PathID'] or d['destroyed']:

@@ -1,6 +1,6 @@
 //! Presentation views of the world structures. A view goes out when its state changes.
 use super::{GarageRuntime, VehicleRuntime};
-use crate::boundary::{Change, MaterialRow, NodePoseRow, SimFrame, StructureRow};
+use crate::boundary::{Change, MaterialRow, NodeColorRow, NodePoseRow, SimFrame, StructureRow};
 use crate::interaction::items::{ItemLocation, ItemState, ItemStore};
 use crate::reference::{
     ItemId, ReferenceError, ReferenceManifest, SourceId, Transform, WorldPrototypeReference,
@@ -46,6 +46,8 @@ pub struct StructureViews {
     wing_poses: Vec<Transform>,
     /// Hidden gun parts of the written slot. Reused each slot.
     gun_hidden: Vec<u32>,
+    /// `GarageRuntime::other_view` of the written worn flags.
+    other_view: bool,
 }
 
 impl GarageRuntime {
@@ -67,6 +69,7 @@ impl GarageRuntime {
         frame.structure_poses.clear();
         frame.hidden_nodes.clear();
         frame.node_materials.clear();
+        frame.node_colors.clear();
         let views = &mut self.structure_views;
         views.select(
             reference,
@@ -84,6 +87,20 @@ impl GarageRuntime {
                 views.selection.push(slot as usize);
             }
         }
+        if views.other_view != self.other_view {
+            views.other_view = self.other_view;
+            // Rewrite the worn flags of worn items.
+            for (slot, entry) in views.entries.iter().enumerate() {
+                if entry.as_ref().and_then(|e| e.food).is_some_and(|id| {
+                    self.area
+                        .items
+                        .get(id)
+                        .is_some_and(|item| matches!(item.location, ItemLocation::Worn(_)))
+                }) {
+                    views.selection.push(slot);
+                }
+            }
+        }
         let inputs = Inputs {
             reference,
             stream: &self.stream,
@@ -94,6 +111,7 @@ impl GarageRuntime {
             powertrain: &self.powertrain,
             flyers: &self.flyers,
             seconds: self.simulation_seconds,
+            other_view: self.other_view,
         };
         let result = views.write(&inputs, frame);
         self.physics.clear_presentation_bodies();
@@ -114,6 +132,7 @@ struct Inputs<'a> {
     powertrain: &'a crate::simulation::powertrain::PowertrainParts,
     flyers: &'a crate::flyers::Flyers,
     seconds: f64,
+    other_view: bool,
 }
 
 impl StructureViews {
@@ -371,10 +390,12 @@ impl StructureViews {
         if let Some(item) = food {
             check_food(reference, prototype, item)?;
         }
-        if entry
-            .food
-            .and_then(|id| items.get(id))
-            .is_some_and(|item| matches!(item.location, ItemLocation::Worn(_)))
+        // Source `wearedRenderer.make = !otherView()`: other views show worn items.
+        if !inputs.other_view
+            && entry
+                .food
+                .and_then(|id| items.get(id))
+                .is_some_and(|item| matches!(item.location, ItemLocation::Worn(_)))
         {
             row.flags |= StructureRow::WORN;
         }
@@ -635,6 +656,38 @@ impl StructureViews {
             }
         }
         row.materials = [start, frame.node_materials.len() as u32];
+        // partconditionscript colors. The renderer keeps the construction color without a row.
+        let start = frame.node_colors.len() as u32;
+        for (i, node) in prototype.nodes.iter().enumerate() {
+            let Some(look) = appearance.iter().rev().find(|a| {
+                a.node == node.source && (a.color.is_some() || a.color_material.is_some())
+            }) else {
+                continue;
+            };
+            let color = look.color.or_else(|| {
+                let id = look.color_material.as_ref()?;
+                reference
+                    .rendering
+                    .materials
+                    .iter()
+                    .find(|m| &m.source == id)
+                    .map(|m| m.color)
+                    .or_else(|| {
+                        prototype
+                            .deferred_materials
+                            .iter()
+                            .find(|m| &m.source == id)
+                            .and_then(|m| m.colors.get("_Color").copied())
+                    })
+            });
+            if let Some(color) = color {
+                frame.node_colors.push(NodeColorRow {
+                    node: i as u32,
+                    color,
+                });
+            }
+        }
+        row.colors = [start, frame.node_colors.len() as u32];
         frame.structures.push(row);
         Ok(())
     }

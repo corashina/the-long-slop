@@ -6,6 +6,7 @@ pub mod cigarettes;
 pub mod computer;
 pub mod conditions;
 pub mod consumables;
+pub mod creatures;
 pub mod decals;
 pub mod fixed_assets;
 pub mod gpu_prepare;

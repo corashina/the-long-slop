@@ -61,15 +61,11 @@ impl GarageRuntime {
                 continue;
             }
             let snapshot = crate::world::ObjectSnapshot {
+                conditions: Vec::new(),
                 pose: crate::world::AbsolutePose {
                     position: item.pose.position,
                     rotation: item.pose.rotation,
                 },
-                condition: self
-                    .area
-                    .conditions
-                    .item_quality(ids.item(&item.instance)?)
-                    .unwrap_or(1.),
                 food: self
                     .area
                     .items
@@ -277,6 +273,7 @@ impl GarageRuntime {
         )?;
         candidate
             .area
+            .interaction
             .conditions
             .restore_save(reference, &saved.conditions)?;
         candidate
@@ -290,7 +287,7 @@ impl GarageRuntime {
             .restore_save(&ids, &saved.items, reference)?;
         candidate
             .wheels
-            .refresh_conditions(&candidate.area.conditions, &candidate.area.items);
+            .refresh_conditions(&candidate.area.interaction.conditions);
         candidate
             .wheels
             .restore_save(&mut candidate.area.items, &mut candidate.physics)?;
@@ -386,6 +383,13 @@ impl GarageRuntime {
             candidate.simulation_seconds,
             &saved.weather,
         );
+        candidate.creatures.restore(
+            &reference.creatures.rabbit,
+            &mut candidate.physics,
+            &candidate.stream.origin,
+            &saved.rabbits,
+            candidate.simulation_seconds,
+        )?;
         let spawned = super::spawned::restore_save(
             reference,
             &mut candidate.area,
@@ -478,6 +482,16 @@ impl GarageRuntime {
         }
         candidate.area.update_glasses(&candidate.stream);
         let starter = reference.survival.starter_food;
+        for tank in &reference.tanks {
+            if candidate
+                .area
+                .items
+                .get(tank.item)
+                .is_some_and(|i| i.removed)
+            {
+                candidate.remove_imported_item(tank.item);
+            }
+        }
         if candidate.area.items.get(starter).is_some_and(|i| i.removed) {
             candidate.area.items.get_mut(starter).unwrap().removed = false;
             candidate.remove_consumable(starter)?;
@@ -535,7 +549,6 @@ impl GarageRuntime {
         &self,
         reference: &ReferenceManifest,
         source: &SourceStamp,
-        view: CameraSave,
         saved_at: &str,
     ) -> Result<SaveSnapshot, SaveError> {
         if self.restore_pending() {
@@ -590,7 +603,7 @@ impl GarageRuntime {
             &required,
         );
         self.keep_object_states(&mut world.changes);
-        let (surfaces, washes) = self.area.conditions.capture_save(reference)?;
+        let (surfaces, washes) = self.area.interaction.conditions.capture_save(reference)?;
         let tools = self.area.interaction.cleaning.capture_save(reference)?;
         let mut snapshot = SaveSnapshot {
             conditions: ConditionSnapshot {
@@ -645,7 +658,6 @@ impl GarageRuntime {
                 driven_km: self.driven_km,
             },
             lighting: self.lighting.capture_save(&reference.lighting, &ids)?,
-            view: ViewSnapshot { camera: view },
             spawned: self.area.spawned.capture_save(
                 reference,
                 &self.area.items,
@@ -657,6 +669,7 @@ impl GarageRuntime {
             weather: self
                 .weather
                 .snapshot(&reference.weather, self.simulation_seconds),
+            rabbits: self.creatures.snapshot(&self.physics, origin),
         };
         if let Some(pending) = &self.pending_restore {
             for saved in &pending.items {
@@ -772,14 +785,11 @@ impl StartingArea {
             if record.parent_body.is_some() {
                 continue;
             }
+            // An eaten food or an exploded tank has no body.
             if reference
                 .items
                 .iter()
-                .any(|i| i.body == record.id && i.id == reference.survival.starter_food)
-                && self
-                    .items
-                    .get(reference.survival.starter_food)
-                    .is_some_and(|i| i.removed)
+                .any(|i| i.body == record.id && self.items.get(i.id).is_some_and(|s| s.removed))
             {
                 continue;
             }

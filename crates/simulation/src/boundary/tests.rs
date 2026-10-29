@@ -32,7 +32,7 @@ fn frame_round_trips() {
             motion_revision: 2,
             far_plane: 1500.,
             sleep_camera: row(9.),
-            seat_car: PoseRow::default(),
+            view_camera: PoseRow::default(),
             prepared_roads: 12,
             glasses: GlassesState::encode(Some(GlassesState {
                 profile: 3,
@@ -102,6 +102,15 @@ fn frame_round_trips() {
             offset: [10., 0., 5.],
             heading: [0., 0., 0., 1.],
         }],
+        creatures: vec![CreatureRow {
+            id: 2,
+            flags: PoseRow::VISIBLE,
+            position: [1., 2., 3.],
+            rotation: [0., 0., 0., 1.],
+            scale: 0.8,
+            phase: 0.25,
+            value: 0.5,
+        }],
         conditions: vec![ConditionRow {
             id: 4,
             state: 2,
@@ -166,6 +175,7 @@ fn frame_round_trips() {
             poses: [0, 1],
             hidden: [0, 1],
             materials: [0, 1],
+            colors: [0, 1],
         }],
         structure_poses: vec![NodePoseRow {
             node: 2,
@@ -176,6 +186,10 @@ fn frame_round_trips() {
         }],
         hidden_nodes: vec![5],
         node_materials: vec![MaterialRow { node: 1, source: 0 }],
+        node_colors: vec![NodeColorRow {
+            node: 1,
+            color: [0.5, 0.25, 0.125, 1.],
+        }],
         changes: vec![
             Change::Spawn {
                 handle: Handle(1),

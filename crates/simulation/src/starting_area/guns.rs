@@ -49,15 +49,7 @@ impl GarageRuntime {
         let held = hand_gun.and_then(|item| {
             let rule = interaction.carry.rule(item)?;
             let gun = interaction.guns.weapon_for(&rule.source)?;
-            let condition = self
-                .area
-                .conditions
-                .item_state(item)
-                .map(f32::from)
-                .or_else(|| {
-                    let quality = self.area.items.get(item)?.generated_condition?;
-                    Some((1. - quality) * 4.)
-                });
+            let condition = interaction.conditions.item_state(item).map(f32::from);
             Some(HeldGun {
                 item,
                 gun,
@@ -89,6 +81,15 @@ impl GarageRuntime {
         }
         for sound in interaction.guns.take_sounds() {
             if let Some(audio) = &mut self.audio {
+                // `PlayClipAtPoint` destroys the copy after the clip length.
+                let seconds = audio
+                    .reference
+                    .clips
+                    .iter()
+                    .find(|c| c.id == sound.clip)
+                    .map_or(0., |c| c.source_duration_seconds as f32);
+                self.creatures
+                    .sound(sound.position, sound.gain, self.simulation_seconds, seconds);
                 audio.survival_event(crate::audio::SurvivalAudioEvent {
                     session: audio.session,
                     emitter: 0,
@@ -187,9 +188,8 @@ impl GarageRuntime {
         .map(|t| t.item);
         let interaction = &self.area.interaction;
         let guns = &interaction.guns;
-        let stream = &self.stream;
         let gun = |id: Option<ItemId>| id.filter(|id| guns.runtime(*id).is_some());
-        let ammo = |id: Option<ItemId>| id.and_then(|id| Some((id, stream.ammo_item(id)?)));
+        let ammo = |id: Option<ItemId>| id.and_then(|id| Some((id, self.ammo_item(id)?)));
         let hand = interaction.equipment.item();
         let carried = interaction.held();
         let mut prompt = 0;
@@ -268,33 +268,127 @@ impl GarageRuntime {
         }
         self.area.interaction.guns.prompt = prompt;
         if let Some((gun, source, unload)) = action {
-            self.reload_gun(gun, source, unload);
+            self.reload_gun(reference, gun, source, unload);
         }
     }
+    /// The loose ammo or magazine of a world item or a spawned magazine.
+    fn ammo_item(&self, id: ItemId) -> Option<AmmoItem> {
+        self.stream
+            .ammo_item(id)
+            .or_else(|| self.area.spawned.ammo(id))
+    }
     /// `weaponscript.Reload(source, unload)`. A used magazine leaves the player and the world.
-    fn reload_gun(&mut self, gun: ItemId, source: ItemId, unload: bool) {
-        let Some(mut other) = self.stream.ammo_item(source) else {
+    /// A magazine gun drops its old magazine at `magPos`.
+    pub(crate) fn reload_gun(
+        &mut self,
+        reference: &ReferenceManifest,
+        gun: ItemId,
+        source: ItemId,
+        unload: bool,
+    ) {
+        let Some(mut other) = self.ammo_item(source) else {
             return;
         };
+        let interaction = &self.area.interaction;
+        let held =
+            interaction.held() == Some(source) || interaction.equipment.item() == Some(source);
+        let drop = interaction
+            .guns
+            .mag_drop(gun, &self.area.items, &self.physics)
+            .map(|(pose, prefab)| (pose, prefab.clone()));
         let position = self.item_position(gun);
-        let used = self
+        let result = self
             .area
             .interaction
             .guns
-            .reload(gun, &mut other, unload, position);
-        self.stream
-            .set_ammo_item(source, other, &mut self.area.items);
+            .reload(gun, &mut other, unload, held, position);
+        self.set_ammo_item(source, other);
         self.area.items.mark_dirty(gun);
-        if !used || self.area.interaction.equipment.item() == Some(source) {
+        if let (true, Some((pose, _))) = (result.to_mag_pos, &drop) {
+            self.move_item(source, *pose);
+        }
+        if let (Some(rounds), Some((pose, prefab))) = (result.dropped, &drop) {
+            self.drop_magazine(reference, prefab, *pose, rounds);
+        }
+        if result.used {
+            self.consume_magazine(source);
+        }
+    }
+    fn set_ammo_item(&mut self, id: ItemId, ammo: AmmoItem) {
+        if self.area.spawned.contains(id) {
+            self.area.spawned.set_ammo(id, ammo);
+            self.area.items.mark_dirty(id);
+        } else {
+            self.stream.set_ammo_item(id, ammo, &mut self.area.items);
+        }
+    }
+    /// The magazine went into a gun: `Destroy`.
+    fn consume_magazine(&mut self, source: ItemId) {
+        let area = &mut self.area;
+        if area.interaction.held() == Some(source) {
+            area.interaction
+                .drop_held(&mut area.items, &mut self.physics);
+        }
+        if area.interaction.equipment.item() == Some(source) {
+            area.interaction
+                .equipment
+                .detach(&mut area.items, &mut self.physics);
+        }
+        area.inventory.forget(source);
+        if area.spawned.contains(source) {
+            super::spawned::despawn(area, &mut self.physics, source).expect("spawned magazine");
+        } else {
+            self.stream
+                .remove_ammo_item(source, &mut area.items, &mut self.physics);
+        }
+    }
+    /// `Instantiate(magPrefab, magPos)` with the gun rounds.
+    fn drop_magazine(
+        &mut self,
+        reference: &ReferenceManifest,
+        prefab: &crate::reference::SourceId,
+        pose: rapier3d::math::Pose,
+        rounds: f32,
+    ) {
+        let prototype = reference
+            .item_prototypes
+            .iter()
+            .position(|p| &p.source == prefab)
+            .expect("validated magazine prefab");
+        let ids = super::spawned::spawn_prototype(
+            reference,
+            &mut self.area,
+            &mut self.physics,
+            prototype,
+            crate::vehicle::from_rapier(&pose),
+        )
+        .expect("validated magazine prefab");
+        for id in ids {
+            if let Some(mut ammo) = self.area.spawned.ammo(id) {
+                ammo.ammo.count = rounds;
+                self.area.spawned.set_ammo(id, ammo);
+            }
+        }
+        self.area.items.sync_poses(&self.physics);
+    }
+    /// Moves a world item body to `pose` at rest.
+    fn move_item(&mut self, item: ItemId, pose: rapier3d::math::Pose) {
+        let Some(body) = self
+            .area
+            .items
+            .get(item)
+            .filter(|s| s.location == crate::interaction::items::ItemLocation::World)
+            .and_then(|s| s.body)
+        else {
             return;
-        }
-        if self.area.interaction.held() == Some(source) {
-            self.area
-                .interaction
-                .drop_held(&mut self.area.items, &mut self.physics);
-        }
-        self.area.inventory.forget(source);
-        self.stream
-            .remove_ammo_item(source, &mut self.area.items, &mut self.physics);
+        };
+        let local = to_rapier(self.area.items.get(item).unwrap().local_pose);
+        self.physics.edit_body(body, |b| {
+            b.set_position(pose * local.inverse(), true);
+            b.set_linvel(rapier3d::math::Vector::ZERO, true);
+            b.set_angvel(rapier3d::math::Vector::ZERO, true);
+        });
+        self.physics.refresh_queries();
+        self.area.items.sync_poses(&self.physics);
     }
 }

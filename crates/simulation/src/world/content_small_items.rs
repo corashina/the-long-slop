@@ -714,11 +714,11 @@ mod tests {
 
     fn snapshot(ammo: Option<f32>, glow: Option<f32>) -> ObjectSnapshot {
         ObjectSnapshot {
+            conditions: Vec::new(),
             pose: AbsolutePose {
                 position: [1., 2., 3.],
                 rotation: [0., 0., 0., 1.],
             },
-            condition: 1.,
             food: None,
             temperature: None,
             fluids: None,

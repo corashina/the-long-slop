@@ -1,0 +1,235 @@
+//! Scene instances of the live rabbits. Each node takes the blend tree frame of its row.
+//! The GPU skins the meshes.
+use super::materials::SourceMaterial;
+use super::reference::{ReferenceVisuals, bind_node};
+use super::sim_frame::SimFrameResource;
+use crate::app::{Drive, RuntimeReference};
+use crate::reference::SourceId;
+use bevy::ecs as bevy_ecs;
+use bevy::gltf::GltfExtras;
+use bevy::prelude::*;
+use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
+use simulation::boundary::PoseRow;
+use simulation::creatures::rig::{Rig, RigPose};
+use simulation::vehicle::VehiclePose;
+use std::collections::HashMap;
+
+#[derive(Component)]
+pub(crate) struct CreatureScene;
+
+struct Instance {
+    root: Entity,
+    ready: bool,
+    bound: bool,
+    shown: bool,
+    /// Rig node index and entity.
+    nodes: Vec<(usize, Entity)>,
+    primitives: Vec<Entity>,
+    pose: RigPose,
+}
+
+#[derive(Resource, Default)]
+pub struct CreatureVisuals {
+    rig: Option<Rig>,
+    /// Rabbit id to scene instance.
+    instances: HashMap<u32, Instance>,
+    generation: u64,
+}
+
+impl CreatureVisuals {
+    pub(crate) fn reset(&mut self, world: &mut World) {
+        self.generation = self.generation.wrapping_add(1);
+        for (_, instance) in self.instances.drain() {
+            world.despawn(instance.root);
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct Identity {
+    reference_id: Option<SourceId>,
+}
+
+fn descends(mut entity: Entity, root: Entity, parents: &Query<&ChildOf>) -> bool {
+    while let Ok(link) = parents.get(entity) {
+        entity = link.parent();
+        if entity == root {
+            return true;
+        }
+    }
+    false
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn sync(
+    mut commands: Commands,
+    reference: Res<RuntimeReference>,
+    drive: Res<Drive>,
+    frame: Res<SimFrameResource>,
+    visuals: Res<ReferenceVisuals>,
+    gltfs: Res<Assets<bevy::gltf::Gltf>>,
+    mut creatures: ResMut<CreatureVisuals>,
+    extras: Query<(Entity, &GltfExtras)>,
+    parents: Query<&ChildOf>,
+    primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
+    source_materials: Query<(), With<MeshMaterial3d<SourceMaterial>>>,
+    mut transforms: Query<&mut Transform>,
+    mut visibility: Query<&mut Visibility, With<CreatureScene>>,
+) {
+    if !visuals.bound {
+        return;
+    }
+    let manifest = &reference.0;
+    let r = &manifest.creatures.rabbit;
+    let creatures = &mut *creatures;
+    if creatures.rig.is_none() {
+        match Rig::new(&manifest.nodes, r.root, &r.animator) {
+            Ok(rig) => creatures.rig = Some(rig),
+            Err(error) => {
+                error!("Rabbit rig: {error}");
+                return;
+            }
+        }
+    }
+    let rig = creatures.rig.as_ref().unwrap();
+    let rows = &frame.frame.creatures;
+    creatures.instances.retain(|id, instance| {
+        let keep = rows.iter().any(|row| row.id == *id);
+        if !keep {
+            commands.entity(instance.root).despawn();
+        }
+        keep
+    });
+    for row in rows {
+        let Some(instance) = creatures.instances.get_mut(&row.id) else {
+            let Some(gltf) = visuals
+                .gltfs
+                .iter()
+                .find(|(id, _)| *id == r.asset)
+                .and_then(|(_, handle)| gltfs.get(handle))
+            else {
+                continue;
+            };
+            let (id, generation) = (row.id, creatures.generation);
+            let root = commands
+                .spawn((
+                    CreatureScene,
+                    WorldAssetRoot(gltf.scenes[0].clone()),
+                    Transform::default(),
+                    Visibility::Hidden,
+                ))
+                .observe(
+                    move |event: On<WorldInstanceReady>, mut creatures: ResMut<CreatureVisuals>| {
+                        if creatures.generation != generation {
+                            return;
+                        }
+                        if let Some(instance) = creatures.instances.get_mut(&id)
+                            && instance.root == event.entity
+                        {
+                            instance.ready = true;
+                        }
+                    },
+                )
+                .id();
+            creatures.instances.insert(
+                row.id,
+                Instance {
+                    root,
+                    ready: false,
+                    bound: false,
+                    shown: false,
+                    nodes: Vec::with_capacity(rig.len()),
+                    primitives: Vec::new(),
+                    pose: rig.pose(),
+                },
+            );
+            continue;
+        };
+        if !instance.ready {
+            continue;
+        }
+        if !instance.bound {
+            for (entity, extra) in &extras {
+                if !descends(entity, instance.root, &parents) {
+                    continue;
+                }
+                let Ok(identity) = serde_json::from_str::<Identity>(&extra.value) else {
+                    continue;
+                };
+                let Some(node) = identity.reference_id.and_then(|source| {
+                    manifest
+                        .nodes
+                        .iter()
+                        .find(|node| node.source == source && node.asset == r.asset)
+                }) else {
+                    continue;
+                };
+                let Some(index) = rig.index(node.id) else {
+                    continue;
+                };
+                if !instance.nodes.iter().any(|(i, _)| *i == index)
+                    && bind_node(&mut commands, node, entity, extra, &primitives).is_ok()
+                {
+                    instance.nodes.push((index, entity));
+                }
+            }
+            if instance.nodes.len() != rig.len() {
+                continue;
+            }
+            for (primitive, _) in &primitives {
+                if descends(primitive, instance.root, &parents) {
+                    instance.primitives.push(primitive);
+                }
+            }
+            instance.bound = true;
+        }
+        if !instance.shown {
+            // Show the rabbit once its meshes use source materials, as other source meshes do.
+            if instance.primitives.is_empty()
+                || !instance
+                    .primitives
+                    .iter()
+                    .all(|primitive| source_materials.contains(*primitive))
+            {
+                continue;
+            }
+            instance.shown = true;
+        }
+        let visible = row.flags & PoseRow::VISIBLE != 0;
+        if let Ok(mut v) = visibility.get_mut(instance.root) {
+            v.set_if_neq(if visible {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            });
+        }
+        if !visible {
+            continue;
+        }
+        let pose = drive.rendered_body_pose(VehiclePose {
+            position: row.position,
+            rotation: row.rotation,
+        });
+        if let Ok(mut transform) = transforms.get_mut(instance.root) {
+            transform.set_if_neq(super::transform(pose).with_scale(Vec3::splat(row.scale)));
+        }
+        rig.sample(&r.animator, row.phase, row.value, 1., &mut instance.pose);
+        for (index, entity) in &instance.nodes {
+            let Ok(mut transform) = transforms.get_mut(*entity) else {
+                continue;
+            };
+            // The scene root carries the root pose and scale.
+            let local = if *index == 0 {
+                Transform::IDENTITY
+            } else {
+                let f = &instance.pose.local[*index];
+                Transform {
+                    translation: Vec3::from_array(f.position.to_array()),
+                    rotation: Quat::from_array(f.rotation.to_array()),
+                    scale: Vec3::from_array(f.scale.to_array()),
+                }
+            };
+            transform.set_if_neq(local);
+        }
+    }
+}

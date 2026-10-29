@@ -18,7 +18,7 @@ pub struct ConditionRecord {
     pub repair_decay_rate: f32,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConditionStartup {
     pub state: u8,

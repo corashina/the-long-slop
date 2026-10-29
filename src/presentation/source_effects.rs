@@ -53,7 +53,9 @@ fn snapshot_input(
     input.delta_seconds = sim.frame.state.perf.frame_seconds();
     input.grading_temperature = sim.frame.lighting.cycle.grading_temperature;
     input.dead_weight = sim.frame.state.dead_weight;
-    input.glasses = (effects.0)
+    // Source `PPVSunGlasses.enabled = !otherView()`.
+    let other_view = sim.frame.state.flags & simulation::boundary::StateBlock::OTHER_VIEW != 0;
+    input.glasses = (effects.0 && !other_view)
         .then(|| sim.frame.state.glasses())
         .flatten()
         .map(|g| g.profile);

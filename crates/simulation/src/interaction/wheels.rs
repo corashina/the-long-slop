@@ -98,18 +98,9 @@ pub struct WheelAssemblies {
 }
 
 impl WheelAssemblies {
-    pub fn refresh_conditions(
-        &mut self,
-        conditions: &crate::conditions::ConditionStore,
-        items: &ItemStore,
-    ) {
+    pub fn refresh_conditions(&mut self, conditions: &crate::conditions::ConditionStore) {
         for part in &mut self.parts {
-            if let Some(quality) = conditions
-                .item_quality(part.item)
-                .or_else(|| items.get(part.item).and_then(|i| i.generated_condition))
-            {
-                part.quality = quality;
-            }
+            part.quality = conditions.item_quality(part.item).unwrap_or(1.);
         }
     }
     /// Rebuilds the imported wheel parts from restored item locations. A tire attached to a
@@ -387,7 +378,8 @@ impl WheelAssemblies {
         }
         self.indices.insert(rule.item, self.parts.len());
         self.parts.push(Part {
-            quality: item.generated_condition.expect("generated wheel condition"),
+            // `refresh_conditions` reads the store each step.
+            quality: 1.,
             item: rule.item,
             rim,
             radius: rule.radius,

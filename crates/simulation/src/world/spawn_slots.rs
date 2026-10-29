@@ -90,7 +90,6 @@ impl SpawnEvaluation<'_> {
                         lights: Vec::new(),
                         fluid: None,
                         tanks: Vec::new(),
-                        condition: 1.,
                         buried: flag(save.fields, "buried")?,
                         distance_offset: self.distance_offset(&child, save)?,
                         ammo: None,
