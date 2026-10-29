@@ -1003,9 +1003,6 @@ fn update_hud(mut drive: ResMut<Drive>, mut sim: ResMut<SimFrameResource>) {
         hud.cooldown_remaining,
         hud.sleep_progress,
     );
-    if hud.flags & HudBlock::CAR == 0 {
-        return;
-    }
     let seated = state.flags & StateBlock::SEATED != 0;
     game_update(
         hud.speed_kmh,
