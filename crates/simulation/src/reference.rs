@@ -727,6 +727,7 @@ pub struct PlayerReference {
     pub obj_rotation_sensitivity: f32,
     pub look_sensitivity: [f32; 2],
     pub scroll_sensitivity: f32,
+    pub car_camera: CarCameraReference,
     pub camera_culling_mask: u32,
     /// Source `fpscontroller.pointRange`: pointing ray length.
     pub point_range: f32,

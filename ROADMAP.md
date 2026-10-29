@@ -1,6 +1,6 @@
 # Project roadmap
 
-Updated: 2026-10-26. Goal: recreate The Long Drive for the web.
+Updated: 2026-10-29. Goal: recreate The Long Drive for the web.
 Behavior authority: Steam build `11140890` and its decompiled code in `.cache/reference-library/decompiled/managed/Assembly-CSharp.cs`.
 Save format authority: [save schema](crates/simulation/src/save/schema.rs).
 
@@ -251,6 +251,19 @@ Run the X03a test pass (sky traffic) in the same run:
 5. Save and load near the bats (save schema 27). Old saves do not load.
 6. Check F3 next to the bats. Compare with the frame rate rule.
 
+Run the X10 test pass (car camera modes) in the same run:
+
+1. Re-export, then rebuild. Old exports and saves do not load (save schema 32).
+2. Sit in the Lada driver seat. Tap C: the outside view orbits the car with the mouse. Pitch stops at about 89 degrees.
+3. Hold Q and move the mouse: the view pans up to 1.5 m. Shift+Q pans forward and back.
+4. Scroll: zoom from 1 to 30 m. Hold Tab: the view goes back to 5 m and the default angle.
+5. Drive: the view turns behind the car, faster at higher speed.
+6. Tap C: back to the cockpit. Repeat on the passenger seat and on a sled or bike seat.
+7. Hold C for 0.4 s: the camera stays at its spot and turns with the mouse. Hold C again: it follows the car. Tap C: back to the view before.
+8. Press M in a seat: the camera rises over 1/3 s and looks down. Scroll sets the height from 2.5 to 200 m. Q and the mouse pan. Tab recenters. Press M again: the camera comes back down.
+9. In each other view: E does not get out or use things, prompts and the crosshair hide, worn items show, and the sunglasses tint is off. Sleep is not possible.
+10. Check F3 in each view. Compare with the frame rate rule.
+
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X02 | Weapons and damage | L | Starting-area tanks (garage fuel can) explode and leak, cacti breaks, SMG magazine drop on unload, AI parts of the damage model (X03). [G01, G03, G06, C06] |
@@ -259,6 +272,5 @@ Run the X03a test pass (sky traffic) in the same run:
 | X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. [M13] |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. [K01-K09, K11-K14, F04] |
 | X09 | Car crash damage | L | `carscript.DamageStuff`: parts fall off by crash speed and condition, horn, blood, death on hard crashes; blasts call it with power x 5. [B23] |
-| X10 | Car camera modes | M | Port `fpscontroller` outside view (mouse orbit, Q pan, scroll zoom 1-30 m, Tab recenter) on every seat, drop cam (hold C 0.4 s) and map view (M). Replace the fixed chase camera. |
 
 Not planned: multiplayer, VR, stereo 3D, mod events, Steam features, developer tools. [N01-N08]

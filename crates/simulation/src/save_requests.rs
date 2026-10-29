@@ -1,10 +1,10 @@
 //! Browser save requests in the simulation: capture, prepare and commit.
 use crate::boundary::{Change, SaveCommand, SimFrame, StateBlock};
 use crate::candidate::CandidateDriver;
-use crate::driver::{CameraMode, SimDriver};
+use crate::driver::SimDriver;
 use crate::reference::ReferenceManifest;
 use crate::save::fresh_permit::FreshSessionPermit;
-use crate::save::{CameraSave, SaveError, SaveSnapshot, SourceStamp};
+use crate::save::{SaveError, SaveSnapshot, SourceStamp};
 use crate::starting_area::GarageRuntime;
 use crate::world::GameMode;
 use serde::{Deserialize, Serialize};
@@ -173,11 +173,6 @@ impl SimDriver {
                     let snapshot = self.runtime.capture_save(
                         reference,
                         &self.save.source,
-                        if self.camera == CameraMode::Chase {
-                            CameraSave::Chase
-                        } else {
-                            CameraSave::FirstPerson
-                        },
                         payload
                             .get("date")
                             .and_then(serde_json::Value::as_str)
@@ -214,34 +209,25 @@ impl SimDriver {
                     self.save.prepared = Some(Prepared::Fresh(permit));
                     return Ok(Some(request.id.to_string()));
                 }
-                let (mut runtime, camera) = if request.kind == "Prepare" {
+                let mut runtime = if request.kind == "Prepare" {
                     let saved = payload.get("save").ok_or_else(|| invalid("Missing save"))?;
                     let saved = SaveSnapshot::deserialize(saved)
                         .map_err(|error| SaveError::CorruptData(error.to_string()))?;
-                    let runtime = GarageRuntime::from_save(
+                    GarageRuntime::from_save(
                         reference,
                         &self.save.source,
                         &saved,
                         mode,
                         draw_distance,
-                    )?;
-                    let camera = if saved.view.camera == CameraSave::Chase {
-                        CameraMode::Chase
-                    } else {
-                        CameraMode::Cockpit
-                    };
-                    (runtime, camera)
+                    )?
                 } else {
-                    (
-                        GarageRuntime::new(reference, mode, draw_distance)?,
-                        CameraMode::default(),
-                    )
+                    GarageRuntime::new(reference, mode, draw_distance)?
                 };
                 runtime.started = true;
                 runtime.paused = true;
                 self.save.prepared = Some(Prepared::Candidate {
                     id: request.id,
-                    driver: Box::new(CandidateDriver::new(runtime, camera, self.sent.fork())),
+                    driver: Box::new(CandidateDriver::new(runtime, self.sent.fork())),
                 });
                 Ok(None)
             }
@@ -257,7 +243,6 @@ impl SimDriver {
             .as_ref()
             .map_or(1, |audio| audio.session.wrapping_add(1));
         let settings = self.runtime.driving_input.settings;
-        let camera = driver.camera;
         // Assignment drops the old stream and terminates its road actor first.
         self.runtime = driver.runtime;
         // The renderer takes the candidate copy with the candidate scene.
@@ -276,7 +261,7 @@ impl SimDriver {
             audio.reset(session);
             audio.sync_lamps(&reference.lighting, &runtime.lighting);
         }
-        self.restart(camera);
+        self.restart();
         self.runtime.advance_instruments(reference, 0., true);
         // The candidate frames consumed the sent state of the new frame stream.
         self.runtime.reset_frame_outputs();

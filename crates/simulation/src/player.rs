@@ -105,6 +105,8 @@ pub struct SeatValues {
     pub yaw_unlimited: bool,
     /// Source `lookInsteadOfLean`: lean input turns the camera, and recenter does nothing.
     pub look_instead_of_lean: bool,
+    /// Source `rootOrigin`: the outside view pivots on the seat body.
+    pub root_origin: bool,
     pub pitch_limits_degrees: [f32; 2],
     pub default_pitch_degrees: f32,
     pub driver: bool,
@@ -123,6 +125,7 @@ impl SeatValues {
             yaw_limits_degrees: seat.yaw_limits_degrees,
             yaw_unlimited: seat.yaw_unlimited,
             look_instead_of_lean: seat.look_instead_of_lean,
+            root_origin: seat.root_origin,
             pitch_limits_degrees: seat.pitch_limits_degrees,
             default_pitch_degrees: seat.default_pitch_degrees,
             driver: seat.driver,
@@ -149,6 +152,8 @@ struct Occupancy {
     /// Owner body, resolved on enter and restore.
     body: RigidBodyHandle,
     local_pose: Pose,
+    /// Main seatscript node relative to the owner body.
+    node_pose: Pose,
     values: SeatValues,
     /// Body frames relative to the owner body.
     frames: body::SeatFrames,
@@ -745,6 +750,7 @@ impl PlayerState {
             owner: seat.owner.clone(),
             body: seat.body,
             local_pose: to_rapier(pose),
+            node_pose: to_rapier(seat.node_pose),
             values: SeatValues::item(&self.reference, &seat.seat),
             frames: seat.frames,
         }
@@ -840,6 +846,9 @@ impl PlayerState {
         physics.refresh_queries();
         true
     }
+    pub fn reference(&self) -> &PlayerReference {
+        &self.reference
+    }
     pub fn seated(&self) -> bool {
         self.occupancy.is_some()
     }
@@ -856,6 +865,28 @@ impl PlayerState {
             SeatOwner::Vehicle(vehicle) => Some(vehicle),
             SeatOwner::Item(_) => None,
         }
+    }
+    /// Source `CarCamParent` anchors of the occupied seat: `seat.transform.position + up` (or the root
+    /// with `rootOrigin`), the seat position, the seat body velocity and the player root.
+    pub fn camera_seat(&self, physics: &PhysicsWorld) -> Option<crate::car_camera::CameraSeat> {
+        let seat = self.occupancy.as_ref()?;
+        let body = &physics.rapier().bodies[seat.body];
+        let node = *body.position() * seat.node_pose;
+        let origin = if seat.values.root_origin {
+            *body.position()
+        } else {
+            node
+        };
+        let up = origin.rotation * Vector::Y;
+        let player = self.body_pose(physics);
+        Some(crate::car_camera::CameraSeat {
+            pivot: glam::Vec3::from_array((origin.translation + up).to_array()),
+            up: glam::Vec3::from_array(up.to_array()),
+            seat: glam::Vec3::from_array(node.translation.to_array()),
+            velocity: glam::Vec3::from_array(body.linvel().to_array()),
+            player: glam::Vec3::from_array(player.position),
+            player_rotation: glam::Quat::from_array(player.rotation),
+        })
     }
     /// The body of the seat owner: car chassis or item body.
     pub fn seat_body(&self) -> Option<RigidBodyHandle> {

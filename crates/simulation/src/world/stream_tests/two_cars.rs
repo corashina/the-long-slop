@@ -180,12 +180,7 @@ fn two_ladas_drive_save_and_load() {
     run.sleep.restore(0.25, run.simulation_seconds);
 
     let snapshot = run
-        .capture_save(
-            &reference,
-            &stamp,
-            crate::save::CameraSave::FirstPerson,
-            "2026-10-26T12:00:00Z",
-        )
+        .capture_save(&reference, &stamp, "2026-10-26T12:00:00Z")
         .unwrap();
     let snapshot: crate::save::SaveSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
@@ -239,12 +234,7 @@ fn two_ladas_drive_save_and_load() {
     }
     assert_eq!(loaded.vehicles[&a].steer, 0.4);
     let recaptured = loaded
-        .capture_save(
-            &reference,
-            &stamp,
-            crate::save::CameraSave::FirstPerson,
-            "2026-10-26T12:00:00Z",
-        )
+        .capture_save(&reference, &stamp, "2026-10-26T12:00:00Z")
         .unwrap();
     for key in [&a, &b] {
         assert_eq!(

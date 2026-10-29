@@ -5,7 +5,7 @@ mod sim_link;
 use crate::browser::*;
 use crate::presentation::{
     self,
-    camera::{CameraMode, DriveCamera},
+    camera::DriveCamera,
     reference::{BodyVisual, CapVisual, ItemVisual, ReferenceVisuals, ValveVisibility},
 };
 use crate::reference::ReferenceManifest;
@@ -871,15 +871,25 @@ fn fill(drive: &mut Drive, frame: &mut SimFrameResource) {
     frame.apply_changes();
     frame.index_particles();
 }
-/// Camera of `state`: the sleep camera, the chase camera, else the player `view`.
+/// Camera of `state`: the sleep camera, the seated view camera, else the player `view`.
 pub(crate) fn frame_camera(state: &StateBlock, view: VehiclePose) -> Transform {
     let pose = |row: PoseRow| presentation::transform(row.pose());
     if state.sleep_camera.flags & PoseRow::ACTIVE != 0 {
         pose(state.sleep_camera)
-    } else if state.flags & StateBlock::CHASE != 0 && state.seat_car.flags & PoseRow::ACTIVE != 0 {
-        presentation::camera::pose(CameraMode::Chase, state.seat_car.pose())
+    } else if state.view_camera.flags & PoseRow::ACTIVE != 0 {
+        pose(state.view_camera)
     } else {
         presentation::transform(view)
+    }
+}
+/// `gameState.camera`: 0 first person, 1 outside view, 2 drop cam, 3 map view.
+fn view_code(flags: u32) -> u32 {
+    if flags & StateBlock::DROP_CAM != 0 {
+        2
+    } else if flags & StateBlock::MAP_VIEW != 0 {
+        3
+    } else {
+        u32::from(flags & StateBlock::OTHER_VIEW != 0)
     }
 }
 fn update_camera(
@@ -997,7 +1007,7 @@ fn update_hud(mut drive: ResMut<Drive>, mut sim: ResMut<SimFrameResource>) {
     let seated = state.flags & StateBlock::SEATED != 0;
     game_update(
         hud.speed_kmh,
-        (state.flags & StateBlock::CHASE == 0 || !seated) as u32,
+        view_code(state.flags),
         hud.focus[0],
         hud.focus[1],
         hud.focus[2],
