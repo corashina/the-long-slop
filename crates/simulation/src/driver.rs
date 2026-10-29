@@ -263,7 +263,7 @@ impl SimDriver {
         }
         let real = self.delta_seconds as f32;
         let delta = real * self.runtime.clock_factors(reference).time_scale;
-        self.runtime.area.conditions.update(delta, true);
+        self.runtime.area.interaction.conditions.update(delta, true);
         let frame = self
             .runtime
             .advance_inventory_frame(reference, raw, delta, self.rendered);

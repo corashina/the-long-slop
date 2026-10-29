@@ -208,6 +208,8 @@ struct WheelSlotRule {
 }
 
 pub struct InteractionState {
+    /// Garage surfaces and world part conditions.
+    pub conditions: crate::conditions::ConditionStore,
     pub cleaning: cleaning::CleaningTools,
     pub buried: buried::BuriedItems,
     pub melee: melee::MeleeState,
@@ -517,6 +519,7 @@ impl InteractionState {
             }
         }
         Ok(Self {
+            conditions: crate::conditions::ConditionStore::new(reference)?,
             cleaning: cleaning::CleaningTools::new(reference)?,
             buried: buried::BuriedItems::default(),
             melee: melee::MeleeState::new(reference)?,

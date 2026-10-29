@@ -4408,7 +4408,7 @@ fn g08_frame_blocked_states_do_not_mutate() {
                     .conditions
                     .surfaces
                     .iter()
-                    .map(|s| format!("{:?}", run.area.conditions.get(s.id)))
+                    .map(|s| format!("{:?}", run.area.interaction.conditions.get(s.id)))
                     .collect::<Vec<_>>()
             )
         };

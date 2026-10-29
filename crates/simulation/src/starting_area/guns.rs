@@ -49,8 +49,7 @@ impl GarageRuntime {
         let held = hand_gun.and_then(|item| {
             let rule = interaction.carry.rule(item)?;
             let gun = interaction.guns.weapon_for(&rule.source)?;
-            let condition = self
-                .area
+            let condition = interaction
                 .conditions
                 .item_state(item)
                 .map(f32::from)

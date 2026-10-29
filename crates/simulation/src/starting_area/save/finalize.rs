@@ -53,7 +53,7 @@ impl RestoreFinalizer<'_> {
         self.area
             .interaction
             .cleaning
-            .sync_wash_colliders(&self.area.conditions, self.physics);
+            .sync_wash_colliders(&self.area.interaction.conditions, self.physics);
         self.physics.refresh_queries();
         Ok(())
     }
@@ -71,7 +71,7 @@ impl RestoreFinalizer<'_> {
             .interaction
             .sync_parts(&mut self.area.items, self.physics)?;
         self.wheels
-            .refresh_conditions(&self.area.conditions, &self.area.items);
+            .refresh_conditions(&self.area.interaction.conditions, &self.area.items);
         self.wheels.sync(&mut self.area.items, self.physics)?;
         self.area.sync_equipment(reference, self.physics);
         self.area.items.sync_poses(self.physics);
