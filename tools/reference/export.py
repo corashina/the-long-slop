@@ -369,6 +369,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     from .explosions import recover_explosions, validate_explosions
     # Before audio: explosion and ear ring clips join source.item_clips.
     manifest['explosions'] = recover_explosions(source, manifest, output)
+    from .crash import recover_crash, validate_crash
+    manifest['crash'] = recover_crash(source, manifest, output)
     from .breakables import recover_breakables, recover_gib_constants
     # Before audio: breakable clips join source.item_clips.
     manifest['breakables'] = recover_breakables(source, manifest)
@@ -393,6 +395,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     validate_melee(manifest['melee'], manifest)
     validate_guns(manifest['guns'], manifest)
     validate_explosions(manifest['explosions'], manifest)
+    validate_crash(manifest['crash'], manifest)
     validate_skid(manifest['skid'])
     validate_clothing(manifest['clothing'],manifest)
     evidence=json.loads((output/'conditions-evidence.json').read_bytes())

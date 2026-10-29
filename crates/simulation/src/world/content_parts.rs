@@ -211,6 +211,7 @@ pub(super) fn bind(
             enable_if_dismounted: linked_nodes("enableIfDismounted")?,
             disable_if_mounted: linked_nodes("disableIfMounted")?,
             disable_if_dismounted: linked_nodes("disableIfDismounted")?,
+            fall_off_category: fall_off_category(part.fields)?,
         };
         let pose = interaction.mechanisms.node_pose(recipe.node).unwrap();
         let mut members = vec![(item, content.nodes[pickup_node], mass)];
@@ -266,4 +267,12 @@ pub(super) fn nearest_owner(
         node = prototype.nodes[i].parent.map(|n| n as usize);
     }
     Ok(content.item)
+}
+
+/// Source `partscript.fallOffCategory`: a `mainscript.defFallOffChance` index.
+pub(super) fn fall_off_category<'a>(f: impl FieldAccess<'a>) -> Result<u8, ReferenceError> {
+    u8::try_from(integer(f, "fallOffCategory")?)
+        .ok()
+        .filter(|c| usize::from(*c) < FALL_OFF_CATEGORIES)
+        .ok_or_else(|| ReferenceError("Invalid source fallOffCategory".into()))
 }

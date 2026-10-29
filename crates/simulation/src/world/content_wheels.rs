@@ -166,6 +166,7 @@ pub(super) fn bind(
                 part.fields,
                 "localRotationAfterMount",
             )?),
+            fall_off_category: super::content_parts::fall_off_category(part.fields)?,
         };
         interaction.register_generated_wheel(&recipe, rim.is_some(), wheels.rules());
         wheels.register_generated(
