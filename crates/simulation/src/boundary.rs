@@ -362,6 +362,8 @@ impl StateBlock {
     pub const DROP_CAM: u32 = 1 << 14;
     /// The other view is the map view.
     pub const MAP_VIEW: u32 = 1 << 15;
+    /// fpscontroller `Bbinoculars`: the view camera is the binocular camera.
+    pub const BINOCULARS: u32 = 1 << 16;
 }
 
 /// Valve of one opening: 0 closed, 1 open.
@@ -603,6 +605,8 @@ impl StructureRow {
     pub const DISPLAY_ON: u32 = 1 << 3;
     /// The player wears the item. The camera does not draw its wearable renderers.
     pub const WORN: u32 = 1 << 4;
+    /// The camera does not draw any renderer of the structure.
+    pub const CAMERA_HIDDEN: u32 = 1 << 5;
 }
 
 /// One node write of a structure view. `node` indexes the prototype nodes,

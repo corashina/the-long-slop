@@ -1,3 +1,4 @@
+pub mod binoculars;
 pub mod buried;
 pub mod carry;
 pub mod cigarettes;
@@ -212,6 +213,7 @@ pub struct InteractionState {
     /// Garage surfaces and world part conditions.
     pub conditions: crate::conditions::ConditionStore,
     pub cleaning: cleaning::CleaningTools,
+    pub binoculars: binoculars::Binoculars,
     pub buried: buried::BuriedItems,
     pub melee: melee::MeleeState,
     pub guns: guns::GunState,
@@ -348,6 +350,7 @@ impl InteractionState {
     pub fn retained_binding_bytes(&self) -> usize {
         use memory::{map, set, vector};
         map(&self.light_controls)
+            + self.binoculars.heap_bytes()
             + map(&self.light_nodes)
             + set(&self.usable_light_controls)
             + map(&self.dial_knobs)
@@ -521,6 +524,7 @@ impl InteractionState {
         Ok(Self {
             conditions: crate::conditions::ConditionStore::new(reference)?,
             cleaning: cleaning::CleaningTools::new(reference)?,
+            binoculars: binoculars::Binoculars::new(&reference.small_items.binoculars),
             buried: buried::BuriedItems::default(),
             melee: melee::MeleeState::new(reference)?,
             guns: guns::GunState::new(reference)?,
@@ -691,6 +695,12 @@ impl InteractionState {
     }
     pub fn held(&self) -> Option<ItemId> {
         self.carry.held()
+    }
+    /// fpscontroller `noLMBUse` of a carried or equipped tool.
+    pub fn reserves_lmb(&self) -> bool {
+        let (equipped, carried) = (self.equipment.item(), self.held());
+        self.cleaning.reserves_lmb(equipped, carried)
+            || self.binoculars.reserves_lmb(equipped, carried)
     }
     pub fn can_equip_carried(
         &self,
@@ -1565,10 +1575,18 @@ impl InteractionState {
         fluid_scale: f32,
     ) -> InteractionOutcome {
         self.finish_cancelled_input(player, physics);
-        if self
-            .cleaning
-            .reserves_lmb(self.equipment.item(), self.held())
-        {
+        let binoculars = self.binoculars.step(
+            self.equipment.item(),
+            self.held(),
+            input.held & keys::PRIMARY != 0,
+            input.wheel,
+            dt,
+        );
+        if binoculars.is_some() {
+            // fpscontroller: BcanTune. The wheel focuses and does not move the carried item.
+            input.wheel = 0.;
+        }
+        if self.reserves_lmb() {
             input.held &= !keys::PRIMARY;
             input.pressed &= !keys::PRIMARY;
             input.released &= !keys::PRIMARY;

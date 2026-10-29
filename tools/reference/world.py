@@ -40,7 +40,11 @@ RULE_CLASSES = {'roadscript', 'buildingscript', 'newRandomStuffSpawnScript', 'st
     # Towing (V05): the trailer grip spawns at Start.
     'attachgripscript',
     # Explosions (X02 part 4): explosive props.
-    'explosivescript'}
+    'explosivescript',
+    # Binoculars (S2).
+    'tavcsoscript'}
+# Catalog items that only StartSpawnItems holds. No spawner reaches them.
+START_ONLY_ITEMS = {85}
 # ediblescript components of the selected food prototypes (survival.FOOD_FIELDS and GTurd).
 EDIBLE_COMPONENTS = {('sharedassets1.assets',path_id) for path_id in (134641,134643,134644,134645,134646,134647,149631)}
 def selected_actions(source, scripts, actions):
@@ -402,7 +406,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     # Include direct supported nested prefab links. Keep every rule even for excluded draws.
     excluded=[]
     required_categories=set()
-    required_items=set()
+    required_items=set(START_ONLY_ITEMS)
     def catalog_items(name,is_item):
         if is_item:
             matches=[i['index'] for i in catalog['items'] if i['name']==name]

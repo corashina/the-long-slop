@@ -63,6 +63,7 @@ pub struct UiReference {
     pub hose_prompts: HosePrompts,
     pub computer_prompts: ComputerPrompts,
     pub ammo_prompts: AmmoPrompts,
+    pub binocular_prompts: BinocularPrompts,
     pub need_sliders: HashMap<String, NeedSlider>,
     pub sprites: Vec<UiSprite>,
     pub pairs: Vec<MenuPair>,
@@ -96,6 +97,12 @@ pub struct AmmoPrompts {
     pub reload: String,
     pub unload: String,
 }
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BinocularPrompts {
+    pub r#use: String,
+    pub focus: String,
+}
 impl UiReference {
     pub fn validate(&self) -> Result<(), ReferenceError> {
         require(
@@ -117,6 +124,10 @@ impl UiReference {
         require(
             !self.ammo_prompts.reload.is_empty() && !self.ammo_prompts.unload.is_empty(),
             "ammo prompts",
+        )?;
+        require(
+            !self.binocular_prompts.r#use.is_empty() && !self.binocular_prompts.focus.is_empty(),
+            "binocular prompts",
         )?;
         for role in ["food", "water", "hp", "bladder", "bowel", "sleep"] {
             let slider = self

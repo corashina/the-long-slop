@@ -464,11 +464,7 @@ impl GarageRuntime {
             origin: self.stream.origin.offset,
         };
         // fpscontroller: a gun in the hand sets noLMBUse.
-        let mut primary_reserved = gun_held
-            || self.area.interaction.cleaning.reserves_lmb(
-                self.area.interaction.equipment.item(),
-                self.area.interaction.held(),
-            );
+        let mut primary_reserved = gun_held || self.area.interaction.reserves_lmb();
         self.area
             .interaction
             .cleaning

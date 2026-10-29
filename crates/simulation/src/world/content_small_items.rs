@@ -1,4 +1,4 @@
-//! Source spray bottles (spricniscript) and genie lamps (ginlampscript) on generated items.
+//! Source spray bottles (spricniscript), genie lamps (ginlampscript) and binoculars (tavcsoscript) on generated items.
 use super::WorldStream;
 use super::content_index::ContentSlot;
 use crate::conditions::ConditionStore;
@@ -56,6 +56,8 @@ struct Effect {
 pub struct SmallItems {
     sprays: Vec<SprayBinding>,
     lamps: Vec<LampBinding>,
+    /// Binoculars bound in `InteractionState::binoculars`.
+    binoculars: Vec<(GeneratedId, ItemId)>,
     pub(super) ammo: Vec<super::content_ammo::AmmoBinding>,
     /// Prototypes checked for gun ammo.
     ammo_prototypes: std::collections::HashMap<SourceId, bool>,
@@ -102,6 +104,7 @@ impl SmallItems {
         Self {
             sprays: Vec::new(),
             lamps: Vec::new(),
+            binoculars: Vec::new(),
             ammo: Vec::new(),
             ammo_prototypes: std::collections::HashMap::new(),
             explosives: Vec::new(),
@@ -125,6 +128,7 @@ impl SmallItems {
     pub fn heap_bytes(&self) -> usize {
         self.sprays.capacity() * std::mem::size_of::<SprayBinding>()
             + self.lamps.capacity() * std::mem::size_of::<LampBinding>()
+            + self.binoculars.capacity() * std::mem::size_of::<(GeneratedId, ItemId)>()
             + self.ammo.capacity() * std::mem::size_of::<super::content_ammo::AmmoBinding>()
             + self.explosives.capacity()
                 * std::mem::size_of::<super::content_explosives::ExplosiveBinding>()
@@ -195,6 +199,16 @@ impl WorldStream {
                 self.small_items.lamps.swap_remove(i);
             }
         }
+        let contents = &self.contents.active;
+        self.small_items.binoculars.retain(|(parent, item)| {
+            let active = contents
+                .iter()
+                .any(|c| &c.content.placement.id == parent && c.item == Some(*item));
+            if !active {
+                interaction.binoculars.unbind(*item);
+            }
+            active
+        });
         let small = &mut self.small_items;
         small.ammo.retain(|b| {
             self.contents
@@ -204,6 +218,7 @@ impl WorldStream {
         });
         let spray = &reference.small_items.spray_bottle.prototype;
         let lamp = &reference.small_items.genie_lamp.prototype;
+        let binoculars = &reference.small_items.binoculars.prototype;
         let mut complete = true;
         for slot in 0..self.contents.active.len() {
             let content = &self.contents.active[slot];
@@ -211,7 +226,7 @@ impl WorldStream {
                 continue;
             };
             let prototype = &content.content.placement.prototype;
-            let ammo = if prototype == spray || prototype == lamp {
+            let ammo = if prototype == spray || prototype == lamp || prototype == binoculars {
                 false
             } else if let Some(&ammo) = self.small_items.ammo_prototypes.get(prototype) {
                 ammo
@@ -223,9 +238,10 @@ impl WorldStream {
             };
             let content = &self.contents.active[slot];
             let prototype = &content.content.placement.prototype;
-            if (prototype != spray && prototype != lamp && !ammo)
+            if (prototype != spray && prototype != lamp && prototype != binoculars && !ammo)
                 || self.small_items.sprays.iter().any(|b| b.item == item)
                 || self.small_items.lamps.iter().any(|b| b.item == item)
+                || self.small_items.binoculars.iter().any(|b| b.1 == item)
                 || self.small_items.ammo.iter().any(|b| b.item == item)
             {
                 continue;
@@ -237,6 +253,11 @@ impl WorldStream {
             if ammo {
                 let binding = self.bind_ammo(slot, item)?;
                 self.small_items.ammo.push(binding);
+            } else if prototype == binoculars {
+                let camera = self.binocular_camera(reference, slot)?;
+                interaction.binoculars.bind(item, camera);
+                let parent = self.contents.active[slot].content.placement.id.clone();
+                self.small_items.binoculars.push((parent, item));
             } else if prototype == spray {
                 let binding = self.bind_spray(reference, slot, item)?;
                 interaction
@@ -263,6 +284,29 @@ impl WorldStream {
             .iter()
             .find(|p| p.source == placement.prototype)
             .ok_or_else(|| ReferenceError("Small item prototype missing".into()))
+    }
+    /// `CamR` relative to the item pose, which is the pickup node pose.
+    fn binocular_camera(
+        &self,
+        reference: &ReferenceManifest,
+        slot: usize,
+    ) -> Result<Pose, ReferenceError> {
+        let placement = &self.contents.active[slot].content.placement;
+        let prototype = self.small_item_prototype(slot)?;
+        let rules = &self.contents.rules;
+        let pickup = rules
+            .component(&self.reference, &placement.prototype, "pickupable")?
+            .ok_or_else(|| ReferenceError("Binoculars have no pickup".into()))?;
+        let root = node_index(prototype, rules.root(&self.reference, pickup.source)?)?;
+        let place = |index| {
+            crate::world::placement::place_pose(
+                placement.pose,
+                placement.scale,
+                crate::world::placement::node_pose(prototype, index),
+            )
+        };
+        let camera = node_index(prototype, &reference.small_items.binoculars.camera)?;
+        Ok(relative(place(root), place(camera)))
     }
     fn saved(&self, parent: &GeneratedId) -> Option<&crate::world::ObjectSnapshot> {
         self.changes

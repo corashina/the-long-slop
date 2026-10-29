@@ -14,12 +14,15 @@ struct Params {
     tint: Vec4,
     dirt: Vec4,
     grading: Vec4,
+    /// Masked vignette: linear color, then opacity. Opacity 0 is off.
+    vignette: Vec4,
 }
 pub struct MainInputs<'a> {
     pub bloom: &'a TextureView,
     pub exposure: [&'a TextureView; 2],
     pub dirt: &'a TextureView,
     pub dirt_extent: [u32; 2],
+    pub vignette_mask: &'a TextureView,
     pub lut: &'a TextureView,
     pub sample_scale: f32,
 }
@@ -30,6 +33,7 @@ pub struct UberPass {
     sequence: DitherSequence,
     pending: Option<DitherSequence>,
     extent: [u32; 2],
+    vignette_opacity: f32,
 }
 impl UberPass {
     pub fn new(
@@ -70,6 +74,10 @@ impl UberPass {
                     (7, texture_2d(TextureSampleType::Float { filterable: true })),
                     (8, texture_3d(TextureSampleType::Float { filterable: true })),
                     (9, sampler(SamplerBindingType::Filtering)),
+                    (
+                        10,
+                        texture_2d(TextureSampleType::Float { filterable: true }),
+                    ),
                 ),
             )
             .to_vec(),
@@ -117,6 +125,7 @@ impl UberPass {
             tint: Vec4::ONE,
             dirt: Vec4::new(1., 1., 0., 0.),
             grading: Vec4::new(1. / 33., 32., record.grading.post_exposure.exp2(), 0.),
+            vignette: Vec4::ZERO,
         };
         if input.dirt_extent.contains(&0) {
             return Err("Source bloom dirt extent is invalid".into());
@@ -134,6 +143,13 @@ impl UberPass {
             super::bloom::gamma_to_linear(c[2]),
             c[3],
         ]);
+        let v = record.binoculars.color;
+        params.vignette = Vec4::new(
+            super::bloom::gamma_to_linear(v[0]),
+            super::bloom::gamma_to_linear(v[1]),
+            super::bloom::gamma_to_linear(v[2]),
+            0.,
+        );
         let image_aspect = input.dirt_extent[0] as f32 / input.dirt_extent[1] as f32;
         let screen_aspect = extent[0] as f32 / extent[1] as f32;
         if image_aspect > screen_aspect {
@@ -179,6 +195,7 @@ impl UberPass {
                         (7, input.dirt),
                         (8, input.lut),
                         (9, &repeat),
+                        (10, input.vignette_mask),
                     ))
                     .to_vec(),
                 );
@@ -196,6 +213,7 @@ impl UberPass {
             sequence: previous.map_or_else(DitherSequence::default, |old| old.sequence),
             pending: None,
             extent,
+            vignette_opacity: record.binoculars.opacity,
         })
     }
     pub fn recreate(&mut self) {
@@ -205,6 +223,10 @@ impl UberPass {
     /// Grading post exposure in EV. `encode` writes it.
     pub fn set_post_exposure(&mut self, post_exposure: f32) {
         self.uniform.get_mut().grading.z = post_exposure.exp2();
+    }
+    /// The binocular volume applies with weight 1, or not at all. `encode` writes it.
+    pub fn set_vignette(&mut self, on: bool) {
+        self.uniform.get_mut().vignette.w = if on { self.vignette_opacity } else { 0. };
     }
     pub fn noise_index(&self) -> u32 {
         self.sequence.noise_index()

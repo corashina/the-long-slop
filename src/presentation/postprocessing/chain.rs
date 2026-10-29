@@ -37,6 +37,8 @@ pub struct PostTextures<'a> {
     pub noise: [&'a TextureView; 64],
     pub dirt: &'a TextureView,
     pub dirt_extent: [u32; 2],
+    /// `BinocularVignette::mask`.
+    pub vignette_mask: &'a TextureView,
 }
 #[derive(Clone, Copy)]
 pub struct PostFrame {
@@ -48,6 +50,8 @@ pub struct PostFrame {
     pub dead_weight: f32,
     /// `PPVSunGlasses` lens: index in `clothing.glasses_profiles`. None is no lens grading.
     pub glasses: Option<u32>,
+    /// The binocular volume applies its masked vignette.
+    pub binoculars: bool,
 }
 struct ColorTarget {
     _texture: Texture,
@@ -251,6 +255,7 @@ impl SourcePostChain {
             exposure: main.exposure.views(),
             dirt: textures.dirt,
             dirt_extent: textures.dirt_extent,
+            vignette_mask: textures.vignette_mask,
             lut: main.lut.output(),
             sample_scale: main.bloom.layout.sample_scale,
         };
@@ -399,6 +404,7 @@ impl SourcePostChain {
         if !self.main.lut_baked {
             self.main.lut.encode(encoder, cache);
         }
+        self.uber.set_vignette(frame.binoculars);
         if !self.uber.encode(
             encoder,
             device,

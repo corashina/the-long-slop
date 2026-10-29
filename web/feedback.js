@@ -1,7 +1,7 @@
 import {applyLayout} from './ui-layout.js';
 export function formatGear(gear){return gear<0?'R':gear===0?'N':String(gear);}
 /** Item prompt bits (Rust `ItemPrompt`). */
-export const PROMPT={ATTACH:1,COIL:2,DRAIN:4,RELOAD:8,UNLOAD:16};
+export const PROMPT={ATTACH:1,COIL:2,DRAIN:4,RELOAD:8,UNLOAD:16,LOOK:32,FOCUS:64};
 /** Computer prompt bits (Rust `ComputerPrompt`). TYPING routes the keyboard to the computer. */
 export const COMPUTER={TURN_ON:1,TURN_OFF:2,USE:4,CONNECT:8,DISCONNECT:16,TYPING:32};
 export const ACTION={USE:1,DOOR:2,PICKUP:4,DROP:8,MOUNT:16,DISMOUNT:32,FILL:64,TUNE:128,ENTER:256,EXIT:512,SWITCH:1024,PUSH:2048,GRIP:4096,THROW:8192,ROTATE:32768,RELEASE_GRIP:65536,PRIMARY_SWITCH:131072,SCROLL:262144,CONSUME:524288,DRINK:1048576,HELD_SWITCH:2097152,WASH:4194304,SCRUB:8388608,EQUIP:16777216,RECENTER:33554432,RELEASE_EQUIPMENT:67108864,RELEASE_EQUIPMENT_SEATED:134217728,TAKE_ONE:268435456,SMOKE:536870912,PUT_ON:1073741824,CRANK:2147483648};
@@ -94,6 +94,8 @@ export function createFeedback(ui,manifest) {
   [0,'drain','[LMB]: '+ui.hose_prompts.drain,PROMPT.DRAIN],
   [0,'reload','[R]: '+ui.ammo_prompts.reload,PROMPT.RELOAD],
   [0,'unload','[E]: '+ui.ammo_prompts.unload,PROMPT.UNLOAD],
+  [0,'binocularsUse','[LMB]: '+ui.binocular_prompts.use,PROMPT.LOOK],
+  [0,'binocularsFocus','[MMB]: '+ui.binocular_prompts.focus,PROMPT.FOCUS],
   [0,'computerTurnOn','[R]: '+ui.computer_prompts.turnon,0,COMPUTER.TURN_ON],
   [0,'computerTurnOff','[R]: '+ui.computer_prompts.turnoff,0,COMPUTER.TURN_OFF],
   [0,'computerUse','[LMB]: '+ui.computer_prompts.use,0,COMPUTER.USE],

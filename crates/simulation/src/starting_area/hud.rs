@@ -175,12 +175,17 @@ impl GarageRuntime {
         let throw_charge = self.area.interaction.throw_charge();
         let throw_active = self.area.interaction.throw_active();
         let weight = self.area.interaction.carry.weight_factors(&self.physics);
-        let crosshair = crate::interaction::crosshair::crosshair(
-            &available,
-            info.carrying,
-            self.area.interaction.guns.crosshair().is_some(),
-            weight[1],
-        );
+        // mainscript.CrossHairStuff hides the crosshair while the player uses binoculars.
+        let crosshair = if self.area.interaction.binoculars.active().is_some() {
+            0
+        } else {
+            crate::interaction::crosshair::crosshair(
+                &available,
+                info.carrying,
+                self.area.interaction.guns.crosshair().is_some(),
+                weight[1],
+            )
+        };
         let stamp = FeedbackStamp {
             condition: condition.to_bits(),
             held,

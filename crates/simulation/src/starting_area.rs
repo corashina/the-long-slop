@@ -1165,9 +1165,15 @@ impl GarageRuntime {
             .interaction
             .dragging_mechanism()
             .is_some_and(|id| self.area.interaction.mechanisms.slideable(id));
+        let interaction = &self.area.interaction;
+        let binoculars = input.held & keys::PRIMARY != 0
+            && interaction
+                .binoculars
+                .reserves_lmb(interaction.equipment.item(), interaction.held());
         let duck_allowed = PlayerStepContext::can_duck(
             input,
-            availability.actions.0 & crate::interaction::feedback::ActionMask::TUNE != 0,
+            availability.actions.0 & crate::interaction::feedback::ActionMask::TUNE != 0
+                || binoculars,
             picked_up,
         );
         PlayerStepContext {
@@ -1177,6 +1183,7 @@ impl GarageRuntime {
             picked_up,
             recenter_consumed: picked_up && (input.held | input.pressed) & keys::RECENTER != 0,
             movement_multiplier,
+            binoculars,
         }
     }
 

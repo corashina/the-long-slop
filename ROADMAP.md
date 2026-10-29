@@ -26,7 +26,6 @@ Finish the home, garage, Lada, and nearby driving first. The 2026-10-29 audit fo
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| S2 | Binoculars | M | The garage binoculars (`tavcsoscript`): hold LMB to look through them, scroll sets focus and zoom, vignette. Depth of field stays in X06. |
 | S3 | Tune icons | S | Radio knobs and the sink tap show their own mouse wheel image (`usablescript.img`, `tankcapscript.img`). Today they show the cap image. |
 | S4 | Garage creep and names | S | Barrel `BARREL (7)` creeps and wire brush `Drotkefe (1)` spins on its shelf. The car hover name shows "Car02kFull". |
 
@@ -48,7 +47,7 @@ All tasks are done.
 | --- | --- | --- | --- |
 | X03 | Creatures | XL | Ground UFO, EMP and green-eyed evil rabbits, human monster (attacks hurt the player), breakablescript `DamageFrom` for AI. Rabbits do not yet sense the player hum. |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. |
-| X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field (also in binoculars), heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. |
+| X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binocular lens distortion and chromatic aberration, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. |
 
 Not planned: multiplayer, VR, stereo 3D, mod events, Steam features, developer tools.
 
@@ -72,6 +71,7 @@ Prepare once:
 6. Check player sounds: hits, footsteps, ambience, muffling in buildings.
 7. Check the music box, radios, compass, clock, and small items.
 8. Crosshair icons (S1): look at a car door, a sliding and a vertical sliding usable, a light switch, a radio knob, a tuneable cap and a seat. Push the Lada, hold the hose at a cap and a trailer grip at the hitch, fill a can. Carry a light, a medium and a heavy item. Each case shows the source icons together, and the heavy item shows the too heavy icon.
+9. Binoculars (S2): pick up the garage binoculars and hold LMB. The view zooms through the lens with the black two-circle mask, the binoculars and the crosshair hide, and look speed drops. Scroll changes the zoom between 3 and 4 degrees. Release LMB to return. Try it with the binoculars equipped too.
 
 ### Car parts and repair (section 2)
 

@@ -144,6 +144,21 @@ impl GarageRuntime {
             look: crate::boundary::LookBlock::default(),
             perf: self.perf_block(),
         };
+        // fpscontroller LateUpdate: the camera moves to the binocular `CamR` with its FOV.
+        if let Some(b) = area.interaction.binoculars.active()
+            && let Some(item) = area.items.get(b.item)
+        {
+            let camera = crate::vehicle::to_rapier(item.pose) * b.camera;
+            frame.state.view_camera = PoseRow::new(
+                VehiclePose {
+                    position: camera.translation.to_array(),
+                    rotation: area.player.view(&self.physics).camera_pose.rotation,
+                },
+                PoseRow::ACTIVE,
+            );
+            frame.state.fov_degrees = b.fov_degrees;
+            frame.state.flags |= StateBlock::BINOCULARS;
+        }
         frame.valves.clear();
         frame.valves.extend(
             area.interaction
