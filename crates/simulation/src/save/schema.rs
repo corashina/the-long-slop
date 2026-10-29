@@ -66,6 +66,20 @@ pub struct SaveSnapshot {
     pub cigarettes: CigarettesSnapshot,
     /// Source save_sandstorm and the storm spawner timer.
     pub weather: WeatherSnapshot,
+    /// Spawner rabbits. The spawner timer is not saved: the source coroutine restarts.
+    pub rabbits: Vec<RabbitSnapshot>,
+}
+/// Source save_prefab pose and save_nyulscript.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RabbitSnapshot {
+    pub pose: AbsolutePose,
+    pub size: f32,
+    /// `breakable.shootHealth`.
+    pub shoot_health: f32,
+    pub alive: bool,
+    pub eyes: bool,
+    pub ears: bool,
 }
 /// Source sandstormLastTime (negated) and sandstormNextTime.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

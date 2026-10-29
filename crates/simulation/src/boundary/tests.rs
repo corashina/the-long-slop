@@ -102,6 +102,15 @@ fn frame_round_trips() {
             offset: [10., 0., 5.],
             heading: [0., 0., 0., 1.],
         }],
+        creatures: vec![CreatureRow {
+            id: 2,
+            flags: PoseRow::VISIBLE,
+            position: [1., 2., 3.],
+            rotation: [0., 0., 0., 1.],
+            scale: 0.8,
+            phase: 0.25,
+            value: 0.5,
+        }],
         conditions: vec![ConditionRow {
             id: 4,
             state: 2,

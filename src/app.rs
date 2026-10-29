@@ -268,6 +268,7 @@ pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
                     presentation::ragdoll::sync,
                     presentation::outfit_preview::sync,
                     presentation::sky_traffic::sync,
+                    presentation::creatures::sync,
                 )
                     .chain(),
                 presentation::lighting::sync_control_visuals,
@@ -314,6 +315,7 @@ fn setup(
         &reference.0.clothing.characters,
     ));
     commands.insert_resource(presentation::sky_traffic::SkyTrafficVisuals::default());
+    commands.insert_resource(presentation::creatures::CreatureVisuals::default());
     if let Err(error) =
         presentation::materials::load_materials(&mut commands, &server, &reference.0)
     {

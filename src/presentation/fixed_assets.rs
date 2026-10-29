@@ -132,6 +132,7 @@ impl SourceFixedAssets {
                         | AssetUsage::PlayerPrototype
                         | AssetUsage::RagdollPrototype
                         | AssetUsage::SkyTraffic
+                        | AssetUsage::CreaturePrototype
                 )
             })
             .map(|a| Root {
