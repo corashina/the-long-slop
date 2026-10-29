@@ -291,8 +291,11 @@ impl GarageRuntime {
         let cleaning = &self.area.interaction.cleaning;
         frame.brush_poses.clear();
         frame.brush_poses.extend(
-            (0..reference.conditions.brushes.len())
-                .map(|i| PoseRow::new(cleaning.model_pose(i, &self.area.items), 0)),
+            reference
+                .conditions
+                .brushes
+                .iter()
+                .map(|b| PoseRow::new(cleaning.model_pose(b.item, &self.area.items), 0)),
         );
         frame.spray_colors.clear();
         frame.spray_colors.extend(

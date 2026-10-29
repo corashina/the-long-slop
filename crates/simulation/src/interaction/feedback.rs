@@ -464,11 +464,7 @@ impl InteractionState {
         reference: &ReferenceManifest,
     ) -> Option<(f32, f32)> {
         let item = aim.focus_target?.item;
-        let tool = reference
-            .conditions
-            .sprays
-            .iter()
-            .find(|t| t.item == item)?;
+        let tool = self.cleaning.spray_tool(item, reference)?;
         if tool.hide_look_at_count || (self.held() == Some(item) && tool.hide_carried_count) {
             return None;
         }
@@ -503,7 +499,7 @@ impl InteractionState {
             actions: a.actions,
             context: if a
                 .item
-                .is_some_and(|id| reference.conditions.sprays.iter().any(|t| t.item == id))
+                .is_some_and(|id| self.cleaning.spray_tool(id, reference).is_some())
             {
                 FeedbackContext::Paint
             } else {

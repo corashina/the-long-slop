@@ -239,6 +239,7 @@ pub struct WorldStream {
     lamp_bindings: Vec<content_lamps::LampBinding>,
     dial_bindings: Vec<content_dials::DialBinding>,
     pub small_items: content_small_items::SmallItems,
+    tools: content_tools::Tools,
     pub computers: content_computers::Computers,
     cobwebs: content_cobwebs::Cobwebs,
     /// Changed world conditions of this frame and the looks of one condition. Reused buffers.
@@ -881,6 +882,7 @@ impl WorldStream {
             lamp_bindings: Vec::new(),
             dial_bindings: Vec::new(),
             small_items: content_small_items::SmallItems::new(reference),
+            tools: content_tools::Tools::default(),
             computers: content_computers::Computers::default(),
             cobwebs: content_cobwebs::Cobwebs::new(reference),
             condition_changes: Vec::new(),
@@ -4352,6 +4354,10 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
+        if let Err(error) = self.sync_tools(reference, items, interaction) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         if let Err(error) = self.sync_cobwebs(reference, interaction, physics) {
             self.binding_reserved = 0;
             return Err(error);
@@ -5115,6 +5121,7 @@ impl WorldStream {
                     .map(content_followers::FollowerBinding::heap_bytes)
                     .sum::<usize>()
                 + self.follower_prototypes.capacity() * std::mem::size_of::<usize>()
+                + self.tools.heap_bytes()
                 + self.detector_bindings.capacity()
                     * std::mem::size_of::<content_detectors::DetectorBinding>()
                 + self
@@ -5445,6 +5452,9 @@ pub mod content_trailers;
 
 #[path = "content_small_items.rs"]
 pub mod content_small_items;
+
+#[path = "content_tools.rs"]
+pub mod content_tools;
 
 #[path = "content_ammo.rs"]
 mod content_ammo;

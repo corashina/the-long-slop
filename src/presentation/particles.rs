@@ -271,6 +271,11 @@ enum Owner {
     Sky(u32),
     /// The `emberScript` particle of one cigarette.
     Ember(crate::reference::ItemId),
+    /// A loot tool: its item and `conditions.prototype_tools` index; `Group::source` is the system.
+    LootTool {
+        item: crate::reference::ItemId,
+        tool: usize,
+    },
     /// Player mouth smoke (`fpscontroller.smokeParticle`).
     Exhale,
     /// A washtriggerscript `particleOnDestroy`; the wash effect.
@@ -609,7 +614,7 @@ fn sync_particles(
             );
         }
         for (tool, b) in reference.0.conditions.sprays.iter().enumerate() {
-            for (particle, p) in b.particles.iter().enumerate() {
+            for (particle, p) in b.tool.particles.iter().enumerate() {
                 add_group(
                     &mut state,
                     Owner::Spray(tool),
@@ -692,7 +697,11 @@ fn sync_particles(
     for g in &mut state.groups {
         if matches!(
             g.owner,
-            Owner::Ember(_) | Owner::Car { .. } | Owner::Storm(_) | Owner::Sky(_)
+            Owner::Ember(_)
+                | Owner::Car { .. }
+                | Owner::Storm(_)
+                | Owner::Sky(_)
+                | Owner::LootTool { .. }
         ) {
             g.active = sim
                 .particle_group(key(g.owner, g.source))
@@ -722,6 +731,42 @@ fn sync_particles(
             owner,
             0,
             ember,
+            &lighting,
+            &mut commands,
+            &mut materials,
+        );
+    }
+    // Loot tools come and go. A gone tool frees its groups for the next copy of its prototype.
+    for row in groups
+        .iter()
+        .filter(|r| r.kind == ParticleGroupRow::LOOT_TOOL)
+    {
+        let (tool, source) = (row.b as usize, row.source as usize);
+        let owner = Owner::LootTool {
+            item: ItemId(row.a),
+            tool,
+        };
+        if state
+            .groups
+            .iter()
+            .any(|g| g.active && g.owner == owner && g.source == source)
+        {
+            continue;
+        }
+        if let Some(g) = state.groups.iter_mut().find(|g| {
+            !g.active
+                && g.source == source
+                && matches!(g.owner, Owner::LootTool { tool: t, .. } if t == tool)
+        }) {
+            g.owner = owner;
+            g.active = true;
+            continue;
+        }
+        add_group(
+            &mut state,
+            owner,
+            source,
+            loot_tool_particle(&reference.0, tool, source),
             &lighting,
             &mut commands,
             &mut materials,
@@ -819,7 +864,7 @@ fn sync_particles(
     let state = &mut *state;
     for g in &mut state.groups {
         let p = match g.owner {
-            Owner::Spray(tool) => &reference.0.conditions.sprays[tool].particles[g.source],
+            Owner::Spray(tool) => &reference.0.conditions.sprays[tool].tool.particles[g.source],
             Owner::Brush(tool) => &reference.0.conditions.brushes[tool].tool.particles[g.source],
             Owner::Wash(wash) => &reference.0.conditions.washes[wash].particles[g.source],
             Owner::SprayBottle(0) => &reference.0.small_items.spray_bottle.spray,
@@ -839,6 +884,7 @@ fn sync_particles(
                 .expect("sky contrail group"),
             Owner::Urine | Owner::Outlet(_) => &references[g.source],
             Owner::Ember(_) => ember.expect("ember group has its record"),
+            Owner::LootTool { tool, .. } => loot_tool_particle(&reference.0, tool, g.source),
             Owner::Exhale => &reference.0.small_items.exhale.particle,
             Owner::Cobweb(effect) => &reference.0.small_items.wash_effects[effect].particle,
         };
@@ -920,6 +966,7 @@ fn key(owner: Owner, source: usize) -> ParticleGroupKey {
         Owner::Food => (ParticleGroupRow::FOOD, 0, 0, 0),
         Owner::Sky(id) => (ParticleGroupRow::SKY, id, 0, 0),
         Owner::Ember(id) => (ParticleGroupRow::EMBER, id.0, 0, 0),
+        Owner::LootTool { item, tool } => (ParticleGroupRow::LOOT_TOOL, item.0, tool as u32, 0),
         Owner::Exhale => (ParticleGroupRow::EXHALE, 0, 0, 0),
         Owner::Cobweb(effect) => (ParticleGroupRow::COBWEB, effect as u32, 0, 0),
     };
@@ -929,6 +976,18 @@ fn key(owner: Owner, source: usize) -> ParticleGroupKey {
         b,
         c,
         source: source as u32,
+    }
+}
+
+/// Particle system `source` of loot tool `tool`.
+fn loot_tool_particle(
+    reference: &crate::reference::ReferenceManifest,
+    tool: usize,
+    source: usize,
+) -> &crate::reference::ParticleReference {
+    match &reference.conditions.prototype_tools[tool].kind {
+        crate::reference::PrototypeTool::Brush { tool, .. } => &tool.particles[source],
+        crate::reference::PrototypeTool::Spray { tool, .. } => &tool.particles[source],
     }
 }
 

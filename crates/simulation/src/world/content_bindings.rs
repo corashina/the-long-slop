@@ -82,6 +82,13 @@ impl WorldStream {
                     .and_then(|c| c.snapshot.as_ref())
                     .and_then(|s| s.radio)
             });
+            // An unbound loot tool keeps its saved state.
+            snapshot.tool = self.tool_value(id, interaction).unwrap_or_else(|| {
+                self.changes
+                    .get(&key)
+                    .and_then(|c| c.snapshot.as_ref())
+                    .and_then(|s| s.tool)
+            });
             snapshot.detector = self.detector_value(id).or_else(|| {
                 self.changes
                     .get(&key)

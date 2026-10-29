@@ -129,6 +129,7 @@ impl GarageRuntime {
             .iter()
             .chain(&audio.cars.events)
             .chain(&audio.voice_loops)
+            .chain(&audio.tool_loops)
         {
             out.push(AudioCall::Survival {
                 kind: e.kind,

@@ -409,7 +409,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
     for c in components:
         if c.type.name == 'AudioSource' and key(c) not in car_sources: voice(c)
     # fpscontroller.pointKefe slide voice. The player root is not an audio root.
-    point = manifest['conditions']['player_brush']['voice_source']
+    point = manifest['conditions']['player_brush']['tool']['voice_source']
     if point: voice(source.get(point['file'], point['path_id']),
         [method('objSlideOnColliderScript', 'Update'), method('objSlideOnColliderScript', 'Disable')])
     # AirPlaneSpawnScript.Update spawns the sky prefabs. Their loop sources play on awake.
@@ -443,6 +443,14 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
             'settings': {**audio['shared']['settings'], 'priority': priority}, 'mixer': audio['shared']['mixer'],
             'doppler': prefab_data['DopplerLevel'], 'pan': prefab_data['Pan2D']})
     # randomFlyer.Sound plays its clip through mainscript.PlayClipAtPoint at AudioPriorities[3].
+    # Loot tool loops: one car voice template for each prototype tool, at its root offset.
+    for tool in manifest['conditions']['prototype_tools']:
+        (kind,record),=tool['kind'].items()
+        voice_source=record['tool']['voice_source']
+        if voice_source is None or (kind=='brush' and not record['tool']['has_sound']):continue
+        reader=source.get(voice_source['file'],voice_source['path_id'])
+        root=source.get(tool['prototype']['file'],tool['prototype']['path_id'])
+        record['sound']=car_sound(reader,root,None)
     flyer['voice'] = shared_voice(PRIORITIES[3])
     # nyulscript.Die plays a random Sdie clip through mainscript.PlayClipAtPoint at AudioPriorities[3].
     rabbit = manifest['creatures']['rabbit']

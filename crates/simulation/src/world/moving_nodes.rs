@@ -79,8 +79,20 @@ pub(super) fn moving_nodes_of(
             buttons.push(button);
         }
     }
+    // Loot brush models slide on their contact.
+    let model = reference
+        .conditions
+        .prototype_tools
+        .iter()
+        .find(|t| t.prototype == prototype.source)
+        .and_then(|t| match &t.kind {
+            crate::reference::PrototypeTool::Brush { nodes, .. } => nodes.model.as_ref(),
+            crate::reference::PrototypeTool::Spray { .. } => None,
+        });
     for (node, flag) in prototype.nodes.iter().zip(&mut moving) {
-        *flag |= node.source == *trigger || buttons.contains(&&node.source);
+        *flag |= node.source == *trigger
+            || buttons.contains(&&node.source)
+            || model == Some(&node.source);
     }
     Ok(moving)
 }

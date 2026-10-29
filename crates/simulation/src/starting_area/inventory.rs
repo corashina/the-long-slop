@@ -553,6 +553,14 @@ impl GarageRuntime {
             &self.physics,
             &self.area.interaction.parts,
         );
+        for item in self.area.interaction.cleaning.take_changed() {
+            self.area.items.mark_dirty(item);
+        }
+        self.stream.sync_tool_looks(
+            &self.area.interaction.cleaning,
+            &self.area.interaction.conditions,
+            &self.area.items,
+        );
         self.area
             .interaction
             .cleaning

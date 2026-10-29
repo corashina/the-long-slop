@@ -394,6 +394,6 @@ impl CarSounds {
 }
 
 /// The authored clip of a loop template. Validation requires one.
-fn template_clip(templates: &[CarVoiceReference], voice: u32) -> u32 {
+pub(crate) fn template_clip(templates: &[CarVoiceReference], voice: u32) -> u32 {
     templates[voice as usize - 1].clip.unwrap_or(0)
 }
