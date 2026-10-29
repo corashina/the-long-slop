@@ -258,6 +258,92 @@ pub struct BlendReference {
     pub thresholds: Vec<f32>,
     pub clips: Vec<MotionClip>,
     pub overlay: OverlayLayer,
+    pub actions: AnimatorActions,
+}
+
+/// Base layer states that `nyulscript.Roar` and `Attack` start through their triggers.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnimatorActions {
+    /// Any state goes here on the `Roar` trigger.
+    pub roar: ActionState,
+    /// `Idle,move` goes here on the `Attack` trigger at its exit time.
+    pub attack: ActionState,
+}
+
+/// One single-clip state and its transitions in and back to `Idle,move`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionState {
+    pub clip: MotionClip,
+    pub speed: f32,
+    pub r#loop: bool,
+    pub enter: ActionTransition,
+    pub leave: ActionTransition,
+}
+
+/// A fixed-duration transition. `exit_time` is the normalized source state time; none means
+/// the transition waits only for its trigger. `offset` is the normalized start time of the target.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionTransition {
+    pub exit_time: Option<f32>,
+    pub duration: f32,
+    pub offset: f32,
+}
+
+/// Source `nyulscript` evil behaviour: `GetEvil`, `SeeTarget`, `Roar`, `Attack`, the idle growl.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EvilReference {
+    pub source: SourceId,
+    /// Degrees.
+    pub attack_angle: f32,
+    pub attack_distance: f32,
+    pub attack_duration: f32,
+    pub attack_cooldown: f32,
+    /// `move.modifierValue` while attacking.
+    pub attack_modifier: f32,
+    pub roar_duration: f32,
+    pub target_forget_time: f32,
+    /// Seconds between idle growls.
+    pub idle_time: [f32; 2],
+    /// Compared with the squared player distance, as in the source.
+    pub idle_distance: f32,
+    pub roar_pitch: f32,
+    /// Audio clip ids. They play through `die_voice`, the `PlayClipAtPoint` template.
+    pub roar_clips: Vec<u32>,
+    pub idle_clips: Vec<u32>,
+    pub attack_clips: Vec<u32>,
+    pub eye_materials: EyeMaterials,
+    pub trigger: AttackTrigger,
+}
+
+/// `EyeEvil` and `EyeGreen` in the rabbit asset.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EyeMaterials {
+    pub evil: LightingMaterialLink,
+    pub green: LightingMaterialLink,
+}
+
+/// The `PlayerDeathTrigger` sphere and its `playerdeathtriggerscript` damage per second.
+/// Geometry is in the space of its node, like `LiveCollider`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AttackTrigger {
+    pub node: NodeId,
+    pub damage_player: f32,
+    pub damage_breakable: f32,
+    pub source: SourceId,
+    pub sensor: bool,
+    pub membership: u32,
+    pub filter: u32,
+    pub friction: f32,
+    pub restitution: f32,
+    pub geometry: ColliderGeometry,
+    pub step_surface: Option<StepSurface>,
+    pub tag: Option<ColliderTag>,
 }
 
 /// Animator layer 1 `piszmog`: an override layer that loops one clip.
@@ -287,6 +373,7 @@ pub struct RabbitReference {
     pub body: CreatureBody,
     pub ragdoll: CreatureRagdoll,
     pub animator: BlendReference,
+    pub evil: EvilReference,
     /// `Sdie` audio clip ids.
     pub die_clips: Vec<u32>,
     /// One-shot car voice template of `mainscript.PlayClipAtPoint`.
@@ -481,7 +568,52 @@ impl RabbitReference {
                 }),
             "rabbit blend tree",
         )?;
+        require(
+            [&a.actions.roar, &a.actions.attack].iter().all(|s| {
+                s.speed > 0.
+                    && s.clip.start_time < s.clip.stop_time
+                    && s.clip
+                        .tracks
+                        .iter()
+                        .all(|t| self.local(m, NodeId(t.node)) && t.keys_valid(s.clip.stop_time))
+                    && [s.enter, s.leave].iter().all(|t| {
+                        t.duration >= 0.
+                            && t.offset.is_finite()
+                            && t.exit_time.is_none_or(|e| (0. ..=1.).contains(&e))
+                    })
+                    && s.leave.exit_time.is_some()
+            }),
+            "rabbit actions",
+        )?;
+        let e = &self.evil;
         let clips = m.audio["clips"].as_array();
+        let clip = |id: &u32| {
+            clips.is_some_and(|c| c.iter().any(|c| c["id"].as_u64() == Some(u64::from(*id))))
+        };
+        require(
+            finite(&[
+                e.attack_angle,
+                e.attack_distance,
+                e.attack_cooldown,
+                e.attack_modifier,
+                e.target_forget_time,
+                e.idle_distance,
+                e.roar_pitch,
+                e.trigger.damage_player,
+                e.trigger.damage_breakable,
+            ]) && e.attack_duration > 0.
+                && e.roar_duration > 0.
+                && range(&e.idle_time)
+                && [&e.roar_clips, &e.idle_clips, &e.attack_clips]
+                    .iter()
+                    .all(|c| !c.is_empty() && c.iter().all(clip))
+                && [&e.eye_materials.evil, &e.eye_materials.green]
+                    .iter()
+                    .all(|l| l.asset == self.asset)
+                && e.trigger.sensor
+                && self.local(m, e.trigger.node),
+            "rabbit evil",
+        )?;
         require(
             !self.die_clips.is_empty()
                 && self.die_clips.iter().all(|id| {

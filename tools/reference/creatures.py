@@ -32,6 +32,11 @@ EVIDENCE = [
     'RB.mass = num;',
     'anim.SetFloat("RunValue", Mathf.Clamp(runValue * 2f, 0f, 1f));',
     'component.GetComponent<stimulscript>().SetAudioValue(volume);',
+    'if (size > 0.75f)',
+    'else if (angle < attackAngle && dist < attackDist && Time.time - lastAttackTime > attackCooldown + attackDuration)',
+    'nyul.SeeTarget(angleFromTarget, distFromTarget);',
+    'playerDeathTrigger.SetActive(value: true);',
+    'stimuls[0].value = max * maxSoundValue;',
 ]
 
 
@@ -48,6 +53,11 @@ def prepare_creatures(source, roots):
     root = prefab_root(source)
     roots['creature_rabbit'] = [root]
     source.creature_root = key(root)
+    # The eye renderers use neither material at start. gltf.py adds them to the rabbit asset.
+    nyul = component(source, root, 'nyulscript')
+    d = source.read(nyul)
+    source.extra_root_materials = {key(root): [source.resolve(nyul, d[f]) for f in ('EyeEvil', 'EyeGreen')]}
+    source.extra_material_indices = {}
 
 
 def ray_direction(euler):
@@ -127,6 +137,45 @@ def renderer_transform(source, renderer):
     return source.transform_for(source.resolve(renderer, source.read(renderer)['m_GameObject']))
 
 
+def evil_record(source, nyul, node, matrix, by_reader, asset):
+    """`GetEvil`, `SeeTarget`, `Roar`, `Attack`, the idle growl and the `PlayerDeathTrigger` of `nyulscript`."""
+    d = source.read(nyul)
+    if d['minRoarTime'] != 0 or d['idleSound'] or d['roaring'] or d['attacking']:
+        raise ValueError('nyulscript evil start state differs')
+    def clips(field):
+        readers = [source.resolve(nyul, c) for c in d[field]]
+        if not readers or any(r is None or r.type.name != 'AudioClip' for r in readers):
+            raise ValueError(f'Rabbit {field} clips differ')
+        return [source_id(r) for r in readers]
+    trigger = source.resolve(nyul, d['playerDeathTrigger'])
+    script = source.resolve(nyul, d['attackTriggerScript'])
+    t = source.read(script)
+    if source.read(trigger)['m_IsActive'] or key(source.resolve(script, t['m_GameObject'])) != key(trigger):
+        raise ValueError('Rabbit attack trigger start state differs')
+    sphere = source.resolve(script, t['selfCol'])
+    if sphere is None or sphere.type.name != 'SphereCollider' or not source.read(sphere)['m_IsTrigger']:
+        raise ValueError('Rabbit attack trigger collider differs')
+    owner = by_reader[key(source.transform_for(trigger))]
+    pose = world_pose(source, owner['reader']); pose['scale'] = [1., 1., 1.]
+    materials = getattr(source, 'extra_material_indices', {})
+    def eye(field):
+        material = source.resolve(nyul, d[field])
+        index = materials.get((source.creature_root, key(material)))
+        if index is None:
+            raise ValueError(f'Rabbit {field} material was not exported')
+        return {'asset': asset, 'gltf_material': index, 'source': source_id(material), 'condition_key': None}
+    return {'source': source_id(nyul), 'attack_angle': d['attackAngle'], 'attack_distance': d['attackDist'],
+        'attack_duration': d['attackDuration'], 'attack_cooldown': d['attackCooldown'], 'attack_modifier': d['attackModifier'],
+        'roar_duration': d['roarDuration'], 'target_forget_time': d['targetForgetTime'], 'idle_time': [d['minIdle'], d['maxIdle']],
+        'idle_distance': d['idleDistance'],
+        # nyulscript.Roar passes pitch 0.985 to PlayClipAtPoint.
+        'roar_pitch': 0.985,
+        'roar_clips': clips('Sroar'), 'idle_clips': clips('Sidle'), 'attack_clips': clips('Sattack'),
+        'eye_materials': {'evil': eye('EyeEvil'), 'green': eye('EyeGreen')},
+        'trigger': {'node': node(owner['reader']), 'damage_player': t['damagePlayer'], 'damage_breakable': t['damageBreakable'],
+            **collider_record(source, matrix, sphere, owner, pose, True)}}
+
+
 def damage_record(source, nyul, node):
     d = source.read(nyul)
     reader = source.resolve(nyul, d['breakable'])
@@ -196,7 +245,46 @@ def animator_record(source, animator, node):
         raise ValueError('Rabbit overlay mask has no tracks')
     return {'source': source_id(animator), 'parameter': names[blend['m_BlendEventID']],
         'thresholds': thresholds, 'clips': clips,
-        'overlay': {'weight': layers[1]['m_DefaultWeight'], 'clip': overlay}}
+        'overlay': {'weight': layers[1]['m_DefaultWeight'], 'clip': overlay},
+        'actions': animator_actions(source, animator, c, names, slots, bind)}
+
+
+def animator_actions(source, animator, c, names, slots, bind):
+    """Base layer states `Roar` and `Attack`. `nyulscript.Roar` and `Attack` set their triggers.
+    Any state goes to `Roar`. `Idle,move` goes to `Attack` at its exit time. Both go back to `Idle,move` at their exit time."""
+    kinds = {v['m_ID']: v['m_Type'] for v in c['m_Values']['data']['m_ValueArray']}
+    if sorted((names[i], t) for i, t in kinds.items()) != [('Attack', 9), ('Roar', 9), ('RunValue', 1)]:
+        raise ValueError('Rabbit Animator parameters differ')
+    machine = c['m_StateMachineArray'][0]['data']
+    states = [s['data'] for s in machine['m_StateConstantArray']]
+    if [names[s['m_NameID']] for s in states] != ['Idle,move', 'Roar', 'Attack'] or machine['m_DefaultState'] != 0:
+        raise ValueError('Rabbit Animator states differ')
+    def transition(t, trigger, exit_time):
+        conditions = [x['data'] for x in t['m_ConditionConstantArray']]
+        expected = [] if trigger is None else [(trigger, 1)]
+        if ([(names[x['m_EventID']], x['m_ConditionMode']) for x in conditions] != expected
+                or t['m_HasExitTime'] != exit_time or not t['m_HasFixedDuration'] or t['m_InterruptionSource'] != 0):
+            raise ValueError('Rabbit Animator transition differs')
+        return {'exit_time': t['m_ExitTime'] if exit_time else None, 'duration': t['m_TransitionDuration'],
+            'offset': t['m_TransitionOffset']}
+    def outgoing(index):
+        return [t['data'] for t in states[index]['m_TransitionConstantArray']]
+    [to_attack] = outgoing(0)
+    [roar_back] = outgoing(1)
+    [attack_back] = outgoing(2)
+    [to_roar] = [t['data'] for t in machine['m_AnyStateTransitionConstantArray']]
+    if [to_attack['m_DestinationState'], roar_back['m_DestinationState'], attack_back['m_DestinationState'],
+            to_roar['m_DestinationState']] != [2, 0, 0, 1]:
+        raise ValueError('Rabbit Animator transition targets differ')
+    def action(index, enter, leave):
+        s = states[index]
+        [leaf] = s['m_BlendTreeConstantArray'][0]['data']['m_NodeArray']
+        if leaf['data']['m_ChildIndices'] or s['m_SpeedParamID'] or s['m_CycleOffset'] or s['m_Mirror']:
+            raise ValueError('Rabbit action state differs')
+        [clip] = motion_clips(source, [source_id(slots[leaf['data']['m_ClipID']])], animator, bind)
+        return {'clip': clip, 'speed': s['m_Speed'], 'loop': bool(s['m_Loop']), 'enter': enter, 'leave': leave}
+    return {'roar': action(1, transition(to_roar, 'Roar', False), transition(roar_back, None, True)),
+        'attack': action(2, transition(to_attack, 'Attack', True), transition(attack_back, None, True))}
 
 
 def recover_creatures(source, manifest, output):
@@ -267,6 +355,7 @@ def recover_creatures(source, manifest, output):
         'ragdoll': {'source': source_id(ragdoll), 'bodies': bodies, 'colliders': colliders, 'joints': joints,
                     'pickups': [pickups[b['node']] for b in bodies]},
         'animator': animator_record(source, source.resolve(nyul, source.read(nyul)['anim']), node),
+        'evil': evil_record(source, nyul, node, matrix, by_reader, asset['id']),
         # recover_audio replaces these AudioClip identities with clip ids and sets the shared one-shot voice.
         'die_clips': [source_id(c) for c in clips], 'die_voice': None,
         'evidence': managed_evidence(source, EVIDENCE)},
@@ -279,6 +368,8 @@ def recover_stimuli(source):
     `root` is the top Transform of the owner hierarchy. Sound values come from `audio_sources` or from code."""
     scripts = {key(o) for o in source.objects.values() if o.type.name == 'MonoScript' and source.read(o)['m_ClassName'] == STIMULUS_CLASS}
     rows = []
+    # Audio-driven stimuli by their AudioSource set. audio.py binds them to engine, horn, radio and detector voices.
+    source.stimuli_by_audio = {}
     for o in source.objects.values():
         if o.type.name != 'MonoBehaviour':
             continue
@@ -286,6 +377,11 @@ def recover_stimuli(source):
             continue
         d = source.read(o)
         transform = source.transform_for(source.resolve(o, d['m_GameObject']))
+        sources = frozenset(key(a) for a in (source.resolve(o, p) for p in d['audioSources']) if a is not None)
+        if sources and not d['DontStartCheckingAudioSources']:
+            if sources in source.stimuli_by_audio:
+                raise ValueError('Two stimulscripts check the same AudioSources')
+            source.stimuli_by_audio[sources] = (o, transform)
         top = transform
         while (father := source.resolve(top, source.read(top)['m_Father'])) is not None:
             top = father
@@ -345,7 +441,31 @@ def validate_creatures(c, manifest):
             raise ValueError('Invalid rabbit clip')
     if not 0 < anim['overlay']['weight'] <= 1 or not anim['overlay']['clip']['tracks']:
         raise ValueError('Invalid rabbit overlay layer')
+    for name, a in anim['actions'].items():
+        record(a, {'clip': lambda v: None, 'speed': number, 'loop': boolean,
+            'enter': lambda v: record(v, {'exit_time': lambda x: None, 'duration': number, 'offset': number}),
+            'leave': lambda v: record(v, {'exit_time': number, 'duration': number, 'offset': number})})
+        clip = a['clip']
+        if (a['speed'] <= 0 or not clip['start_time'] < clip['stop_time'] or any(not local(t['node']) for t in clip['tracks'])
+                or not 0 <= a['leave']['exit_time'] <= 1 or a['leave']['duration'] < 0 or a['enter']['duration'] < 0):
+            raise ValueError(f'Invalid rabbit {name} action')
+    if set(anim['actions']) != {'roar', 'attack'}:
+        raise ValueError('Rabbit actions differ')
+    e = r['evil']
+    material = lambda v: record(v, {'asset': u32, 'gltf_material': u32, 'source': source_shape, 'condition_key': lambda x: None})
+    record(e, {'source': source_shape, 'attack_angle': number, 'attack_distance': number, 'attack_duration': number,
+        'attack_cooldown': number, 'attack_modifier': number, 'roar_duration': number, 'target_forget_time': number,
+        'idle_time': pair, 'idle_distance': number, 'roar_pitch': number, 'roar_clips': array(u32), 'idle_clips': array(u32),
+        'attack_clips': array(u32), 'eye_materials': lambda v: record(v, {'evil': material, 'green': material}),
+        'trigger': lambda v: None})
+    t = e['trigger']
+    if (not local(t['node']) or not t['sensor'] or t['damage_player'] < 0 or t['damage_breakable'] < 0
+            or any(m['asset'] != r['asset'] for m in e['eye_materials'].values())
+            or not 0 <= e['idle_time'][0] <= e['idle_time'][1] or min(e['attack_duration'], e['roar_duration']) <= 0):
+        raise ValueError('Invalid rabbit evil record')
     clips = {x['id'] for x in manifest['audio']['clips']}
+    if any(not e[f] or any(x not in clips for x in e[f]) for f in ('roar_clips', 'idle_clips', 'attack_clips')):
+        raise ValueError('Invalid rabbit evil sounds')
     shots = {v['id'] for v in manifest['audio']['car_voices'] if v['one_shot']}
     if not r['die_clips'] or any(x not in clips for x in r['die_clips']) or r['die_voice'] not in shots:
         raise ValueError('Invalid rabbit die sounds')

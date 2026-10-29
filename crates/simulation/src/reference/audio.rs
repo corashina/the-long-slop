@@ -75,6 +75,13 @@ record!(RadioAudioReference {
 });
 // radioscript SS, SC and SC2 settings shared by the world radios in `sources` (portable and car radios).
 record!(PortableRadioAudioReference { sources: Vec<SourceId>, voices: [AudioVoiceReference; 3] });
+// The stimulscript of one radioscript voice (0 SS, 1 SC, 2 SC2). `offset` is in the radio item frame.
+record!(RadioStimulusReference {
+    radio: SourceId,
+    voice: u8,
+    offset: [f32; 3],
+    max_sound_value: f32
+});
 record!(MechanismAudioReference {
     source: SourceId, emitter: u32, movement_voice: Option<u32>, audio_multiplier: f32,
     slide_multiplier: f32, rotation_gain: f32, slide_gain: f32, gain_smoothing: f32,
@@ -141,6 +148,7 @@ record!(AudioReference {
     voices: Vec<AudioVoiceReference>, car_voices: Vec<CarVoiceReference>, mixers: Vec<AudioMixerReference>,
     bindings: Vec<AudioEventBinding>, radio: RadioAudioReference,
     portable_radios: Vec<PortableRadioAudioReference>,
+    radio_stimuli: Vec<RadioStimulusReference>,
     mechanisms: Vec<MechanismAudioReference>, fluids: Vec<FluidAudioReference>,
     interiors: Vec<AudioInteriorReference>, routes: Vec<AudioRouteReference>, lamps: Vec<LampAudioReference>,
     silent_actions: Vec<String>, managed: AudioManagedEvidence, native: AudioNativeEvidence,
@@ -325,6 +333,15 @@ impl AudioReference {
                     !g.sources.is_empty() && g.sources.iter().all(|s| radio_sources.insert(s))
                 }),
             "world radio voice groups",
+        )?;
+        require(
+            self.radio_stimuli.iter().all(|r| {
+                radio_sources.contains(&r.radio)
+                    && r.voice < 3
+                    && r.offset.iter().all(|v| v.is_finite())
+                    && r.max_sound_value >= 0.
+            }),
+            "radio stimuli",
         )?;
         let portable = self
             .portable_radios
