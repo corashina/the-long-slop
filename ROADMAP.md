@@ -144,6 +144,16 @@ Run the X05 part 1 test pass on Tomasz's PC:
 3. Sleep, wake, save and load: the sleep hint stays off until the cooldown ends.
 4. Old saves do not load (save schema 23).
 
+Run the X05 part 2 test pass (world part repair and paint) in the same run:
+
+1. Rebuild. Old saves do not load (save schema 32).
+2. Run `cargo test --lib lada_part_paint_and_repair -- --ignored`.
+3. Brush rust off a Lada part and a roadside car part. Rub dirt off with the sponge. The material changes at once.
+4. Paint a Lada door and a loose part with spray paint. The color changes while you spray.
+5. Repair a tire. The HUD condition and the wheel grip follow it.
+6. A state change binds a new material. Check the part does not blink for a frame.
+7. Check F3 while spraying and near many roadside cars. Compare with the frame rate rule.
+
 Run the X04b test pass (save slots, autosave) in the same run:
 
 1. Run `cargo test --lib x04b -- --ignored`.
@@ -256,7 +266,7 @@ Run the X03a test pass (sky traffic) in the same run:
 | X02 | Weapons and damage | L | Starting-area tanks (garage fuel can) explode and leak, cacti breaks, SMG magazine drop on unload, AI parts of the damage model (X03). [G01, G03, G06, C06] |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters (attacks hurt the player), vultures, sandworm, UFO, EMP. [H01-H06, H09-H11, B17, F21] |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |
-| X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. [M13] |
+| X05 | Save every remaining state | XL | Save and unload of world part conditions (`save_partcondition`); live repair and paint are done. Other fields grow with their features. [M13] |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. [K01-K09, K11-K14, F04] |
 | X09 | Car crash damage | L | `carscript.DamageStuff`: parts fall off by crash speed and condition, horn, blood, death on hard crashes; blasts call it with power x 5. [B23] |
 

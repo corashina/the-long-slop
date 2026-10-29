@@ -27,6 +27,8 @@ mod sled;
 mod towing;
 #[path = "stream_tests/two_cars.rs"]
 mod two_cars;
+#[path = "stream_tests/world_conditions.rs"]
+mod world_conditions;
 
 use super::*;
 use crate::starting_area::GarageRuntime;
