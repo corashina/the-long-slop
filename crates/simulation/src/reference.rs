@@ -63,6 +63,8 @@ pub mod crash;
 pub use crash::*;
 pub mod breakables;
 pub use breakables::*;
+pub mod creatures;
+pub use creatures::*;
 pub mod wheel_effects;
 pub use wheel_effects::{EffectGains, SkidReference, WheelEffectsReference, WheelGains};
 pub mod plates;
@@ -166,6 +168,7 @@ pub enum AssetUsage {
     PlayerPrototype,
     RagdollPrototype,
     StationPrototype,
+    CreaturePrototype,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -913,6 +916,7 @@ pub struct ReferenceManifest {
     pub particles: Vec<ParticleReference>,
     pub weather: WeatherReference,
     pub sky: SkyReference,
+    pub creatures: CreaturesReference,
     pub ambient: AmbientReference,
     pub world: std::sync::Arc<WorldReference>,
     pub ui: UiReference,
@@ -1166,6 +1170,7 @@ impl ReferenceManifest {
         particles::validate_particles(self)?;
         self.weather.validate(self)?;
         self.sky.validate(self)?;
+        self.creatures.validate(self)?;
         self.ambient.validate()?;
         self.plates.validate(self)?;
         require(

@@ -123,7 +123,6 @@ impl WorldStream {
                 .ok_or_else(|| ReferenceError("Generated lamp controller root missing".into()))?;
             let baseline = ObjectSnapshot {
                 pose: instance.placement.pose,
-                condition: 1.,
                 food: None,
                 temperature: None,
                 fluids: None,
@@ -657,7 +656,6 @@ mod tests {
                     position: [0.; 3],
                     rotation: [0., 0., 0., 1.],
                 },
-                condition: 1.,
                 food: None,
                 temperature: None,
                 fluids: None,

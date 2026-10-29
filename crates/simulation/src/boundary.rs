@@ -570,7 +570,7 @@ pub struct BudgetRow {
 }
 
 /// Presentation view of one world structure slot. The renderer keeps the last view of each slot.
-/// Ranges index `SimFrame::structure_poses`, `hidden_nodes` and `node_materials`.
+/// Ranges index `SimFrame::structure_poses`, `hidden_nodes`, `node_materials` and `node_colors`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 pub struct StructureRow {
@@ -583,6 +583,7 @@ pub struct StructureRow {
     pub poses: [u32; 2],
     pub hidden: [u32; 2],
     pub materials: [u32; 2],
+    pub colors: [u32; 2],
 }
 
 impl StructureRow {
@@ -619,6 +620,14 @@ impl NodePoseRow {
     pub const BODY: u32 = 2;
     /// A content node pose in stream space.
     pub const CONTENT: u32 = 3;
+}
+
+/// The condition color of the renderers of one prototype node.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct NodeColorRow {
+    pub node: u32,
+    pub color: [f32; 4],
 }
 
 /// The material that the renderers of one prototype node show.
@@ -692,6 +701,20 @@ pub struct PlaneRow {
     pub prefab: u32,
     pub offset: [f32; 3],
     pub heading: [f32; 4],
+}
+
+/// One rabbit in physics space. The renderer samples the blend tree at `phase` and `value`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct CreatureRow {
+    pub id: u32,
+    /// `PoseRow::VISIBLE`.
+    pub flags: u32,
+    pub position: [f32; 3],
+    pub rotation: [f32; 4],
+    pub scale: f32,
+    pub phase: f32,
+    pub value: f32,
 }
 
 /// One bullet hole in stream space. `kind` indexes `GunsReference::decals`.
@@ -896,6 +919,7 @@ pub struct SimFrame {
     /// Live bullet holes, oldest first.
     pub decals: Vec<DecalRow>,
     pub planes: Vec<PlaneRow>,
+    pub creatures: Vec<CreatureRow>,
     pub conditions: Vec<ConditionRow>,
     /// 1 when the wash shows, in `ConditionRecord::washes` order.
     pub washes: Vec<u8>,
@@ -919,6 +943,7 @@ pub struct SimFrame {
     /// Prototype nodes that the structure hides.
     pub hidden_nodes: Vec<u32>,
     pub node_materials: Vec<MaterialRow>,
+    pub node_colors: Vec<NodeColorRow>,
     pub changes: Vec<Change>,
     /// Changes of the renderer world copy.
     pub world: crate::world::WorldDelta,
@@ -1113,6 +1138,7 @@ fn write(frame: &SimFrame, out: &mut Vec<u8>) {
     put_rows(out, &frame.particles);
     put_rows(out, &frame.decals);
     put_rows(out, &frame.planes);
+    put_rows(out, &frame.creatures);
     put_rows(out, &frame.conditions);
     put_rows(out, &frame.washes);
     put_rows(out, &frame.brush_poses);
@@ -1122,6 +1148,7 @@ fn write(frame: &SimFrame, out: &mut Vec<u8>) {
     put_rows(out, &frame.structure_poses);
     put_rows(out, &frame.hidden_nodes);
     put_rows(out, &frame.node_materials);
+    put_rows(out, &frame.node_colors);
     put(out, &frame.lighting);
     put_list(out, &frame.lights);
     put_list(out, &frame.lamp_materials);
@@ -1164,6 +1191,7 @@ fn read(rest: &mut &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     take_rows(rest, &mut frame.particles)?;
     take_rows(rest, &mut frame.decals)?;
     take_rows(rest, &mut frame.planes)?;
+    take_rows(rest, &mut frame.creatures)?;
     take_rows(rest, &mut frame.conditions)?;
     take_rows(rest, &mut frame.washes)?;
     take_rows(rest, &mut frame.brush_poses)?;
@@ -1173,6 +1201,7 @@ fn read(rest: &mut &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     take_rows(rest, &mut frame.structure_poses)?;
     take_rows(rest, &mut frame.hidden_nodes)?;
     take_rows(rest, &mut frame.node_materials)?;
+    take_rows(rest, &mut frame.node_colors)?;
     frame.lighting = take_value(rest)?;
     take_list(rest, &mut frame.lights)?;
     take_list(rest, &mut frame.lamp_materials)?;

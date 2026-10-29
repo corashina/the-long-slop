@@ -49,15 +49,7 @@ impl GarageRuntime {
         let held = hand_gun.and_then(|item| {
             let rule = interaction.carry.rule(item)?;
             let gun = interaction.guns.weapon_for(&rule.source)?;
-            let condition = self
-                .area
-                .conditions
-                .item_state(item)
-                .map(f32::from)
-                .or_else(|| {
-                    let quality = self.area.items.get(item)?.generated_condition?;
-                    Some((1. - quality) * 4.)
-                });
+            let condition = interaction.conditions.item_state(item).map(f32::from);
             Some(HeldGun {
                 item,
                 gun,
@@ -89,6 +81,15 @@ impl GarageRuntime {
         }
         for sound in interaction.guns.take_sounds() {
             if let Some(audio) = &mut self.audio {
+                // `PlayClipAtPoint` destroys the copy after the clip length.
+                let seconds = audio
+                    .reference
+                    .clips
+                    .iter()
+                    .find(|c| c.id == sound.clip)
+                    .map_or(0., |c| c.source_duration_seconds as f32);
+                self.creatures
+                    .sound(sound.position, sound.gain, self.simulation_seconds, seconds);
                 audio.survival_event(crate::audio::SurvivalAudioEvent {
                     session: audio.session,
                     emitter: 0,

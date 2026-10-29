@@ -641,6 +641,14 @@ impl WorldStream {
                         );
                     }
                     crate::world::content_mechanisms::sync(content, items, interaction, physics);
+                    super::content_conditions::bind(
+                        content,
+                        instance,
+                        prototype,
+                        &self.contents.rules,
+                        &self.reference,
+                        interaction,
+                    )?;
                     let root = crate::world::placement::node_pose(
                         prototype,
                         prototype.bodies[body_index].node as usize,
@@ -1323,7 +1331,6 @@ fn bind_pickup(
     state.hit_sound = hit;
     if !child {
         state.fluid = content.content.fluid.clone();
-        state.generated_condition = Some(content.content.condition);
         state.buried = content.content.buried;
     }
     state.local_pose =
@@ -1666,6 +1673,7 @@ pub(super) fn rollback(
             .mechanisms
             .remove_generated(item, &content.nodes);
     }
+    super::content_conditions::unbind(content, instance, interaction);
     for (_, collider) in &instance.colliders {
         physics.edit_collider(*collider, |collider| {
             collider.user_data &= STEP_SURFACE_MASK;

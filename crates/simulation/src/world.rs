@@ -38,7 +38,7 @@ pub use road::{
 };
 pub use road_worker::{RoadJobId, RoadPoll, RoadWorker};
 mod instances;
-pub use instances::{StructureInstance, StructureRecipe, TriggerRoles};
+pub use instances::{StructureInstance, StructureRecipe, TriggerRoles, scaled_geometry};
 pub mod metrics;
 pub use metrics::WorldMetrics;
 pub mod renderer_facts;

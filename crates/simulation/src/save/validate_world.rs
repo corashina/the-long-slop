@@ -195,9 +195,7 @@ impl SaveSnapshot {
             };
             pose(&s.pose)?;
             data(
-                unit(s.condition)
-                    && s.temperature.is_none_or(f32::is_finite)
-                    && s.valve.is_none_or(unit),
+                s.temperature.is_none_or(f32::is_finite) && s.valve.is_none_or(unit),
                 "Generated scalar state",
             )?;
             data(

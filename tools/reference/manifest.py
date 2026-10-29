@@ -57,7 +57,7 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
     assets=[]
     for asset_id,(name,readers) in enumerate(roots.items(),1):
         report=reports[name]
-        assets.append({'id':asset_id,'mesh_count':report['mesh_count'],'material_count':report['material_count'],'usage':'player_prototype' if name=='player' else 'ragdoll_prototype' if name=='ragdoll' else 'item_prototype' if name.startswith('item_') else 'food_prototype' if name=='food' else 'road_lamp_prototype' if name=='road_lamp' else 'sky_prototype' if name=='sky' else 'sky_traffic' if name.startswith('sky_') else 'unique_scene','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
+        assets.append({'id':asset_id,'mesh_count':report['mesh_count'],'material_count':report['material_count'],'usage':'player_prototype' if name=='player' else 'ragdoll_prototype' if name=='ragdoll' else 'item_prototype' if name.startswith('item_') else 'food_prototype' if name=='food' else 'road_lamp_prototype' if name=='road_lamp' else 'sky_prototype' if name=='sky' else 'sky_traffic' if name.startswith('sky_') else 'creature_prototype' if name.startswith('creature_') else 'unique_scene','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
         records=[]
         for root in readers:records.extend(source.hierarchy(root,activate_root=True))
         for entry,record in zip(report['nodes'],records,strict=True):

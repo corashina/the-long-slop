@@ -241,6 +241,9 @@ pub struct WorldStream {
     pub small_items: content_small_items::SmallItems,
     pub computers: content_computers::Computers,
     cobwebs: content_cobwebs::Cobwebs,
+    /// Changed world conditions of this frame and the looks of one condition. Reused buffers.
+    condition_changes: Vec<crate::reference::ConditionId>,
+    condition_looks: Vec<super::NodeAppearance>,
     /// Session and active revision whose dial items are all bound.
     dial_scan: Option<(u64, u64)>,
     level_bindings: Vec<content_levels::LevelBinding>,
@@ -875,6 +878,8 @@ impl WorldStream {
             small_items: content_small_items::SmallItems::new(reference),
             computers: content_computers::Computers::default(),
             cobwebs: content_cobwebs::Cobwebs::new(reference),
+            condition_changes: Vec::new(),
+            condition_looks: Vec::new(),
             dial_scan: None,
             level_bindings: Vec::new(),
             level_scan: None,
@@ -4337,6 +4342,10 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
+        if let Err(error) = self.sync_condition_appearance(interaction) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         if let Err(error) = self.sync_computers(reference, items, interaction, physics) {
             self.binding_reserved = 0;
             return Err(error);
@@ -5423,6 +5432,9 @@ mod content_lamps;
 
 #[path = "content_cobwebs.rs"]
 mod content_cobwebs;
+
+#[path = "content_conditions.rs"]
+pub(super) mod content_conditions;
 
 #[path = "content_levels.rs"]
 mod content_levels;

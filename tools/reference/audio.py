@@ -442,6 +442,10 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
             'doppler': prefab_data['DopplerLevel'], 'pan': prefab_data['Pan2D']})
     # randomFlyer.Sound plays its clip through mainscript.PlayClipAtPoint at AudioPriorities[3].
     flyer['voice'] = shared_voice(PRIORITIES[3])
+    # nyulscript.Die plays a random Sdie clip through mainscript.PlayClipAtPoint at AudioPriorities[3].
+    rabbit = manifest['creatures']['rabbit']
+    rabbit['die_clips'] = [clip(source.get(c['file'], c['path_id'])) for c in rabbit['die_clips']]
+    rabbit['die_voice'] = shared_voice(PRIORITIES[3])
     def binding(owner, trigger, pointers, gain, pitch, priority, evidence, route=None, voice_id=None):
         choices = [clip(source.resolve(owner, p)) for p in pointers if p['m_PathID']]
         if not choices: return None

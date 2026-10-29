@@ -1,8 +1,8 @@
 //! Renderer data of one tick.
 use super::GarageRuntime;
 use crate::boundary::{
-    BudgetRow, Change, CigaretteRow, ConditionRow, PlaneRow, PoseRow, SimFrame, StateBlock,
-    ValveRow,
+    BudgetRow, Change, CigaretteRow, ConditionRow, CreatureRow, PlaneRow, PoseRow, SimFrame,
+    StateBlock, ValveRow,
 };
 use crate::interaction::cigarettes::EmberPhase;
 use crate::interaction::items::ItemLocation;
@@ -167,6 +167,18 @@ impl GarageRuntime {
                 offset: plane.offset.to_array(),
                 heading: plane.heading.to_array(),
             }));
+        frame.creatures.clear();
+        frame
+            .creatures
+            .extend(self.creatures.views(&self.physics).map(|v| CreatureRow {
+                id: v.id,
+                flags: if v.visible { PoseRow::VISIBLE } else { 0 },
+                position: v.pose.translation.to_array(),
+                rotation: v.pose.rotation.to_array(),
+                scale: v.scale,
+                phase: v.phase,
+                value: v.value,
+            }));
         let lighting = &self.lighting;
         frame.lighting.cycle.clone_from(lighting.cycle.output());
         frame.lighting.road_lamp = lighting.road_lamp_output(&reference.lighting);
@@ -206,7 +218,7 @@ impl GarageRuntime {
         }
     }
     fn fill_conditions(&mut self, reference: &ReferenceManifest, frame: &mut SimFrame) {
-        let store = &mut self.area.conditions;
+        let store = &mut self.area.interaction.conditions;
         frame.conditions.clear();
         if self.conditions_sent {
             while let Some(id) = store.take_changed() {

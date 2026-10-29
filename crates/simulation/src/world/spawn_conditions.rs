@@ -270,11 +270,6 @@ impl SpawnEvaluation<'_> {
             self.start_condition(parent, record, None, depth + 1)?;
         }
         let states = self.initialization.conditions[i].states;
-        if !flag(record.fields, "isChild")? {
-            if let Some(content) = self.output.iter_mut().find(|c| c.placement.id == parent.id) {
-                content.condition = 1. - states[0] as f32 * 0.25;
-            }
-        }
         for child in array(record.fields, "childs")? {
             let child = self.rules.get(self.reference, value_link(child)?)?;
             let c = self.condition_index(parent, child)?;
