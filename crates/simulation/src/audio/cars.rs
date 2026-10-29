@@ -82,6 +82,8 @@ pub struct CarSoundInput<'a> {
     pub horn_hit: Option<f32>,
     pub ambient_temperature: f32,
     pub wheels: &'a crate::wheel_effects::WheelEffects,
+    /// Source `carscript` coolant boil fraction.
+    pub boil: f32,
     pub skid: &'a SkidReference,
     pub mixer: Option<u32>,
 }
@@ -319,6 +321,20 @@ impl CarSounds {
                     input.pose,
                 );
             }
+        }
+        // carscript sets the CoolantBoil volume only. The pitch is the authored one.
+        if let Some(b) = &a.boil
+            && input.boil > 0.
+        {
+            let template = &templates[b.sound.voice as usize - 1];
+            self.push_loop(
+                instance,
+                &b.sound,
+                template.clip.unwrap_or(0),
+                crate::coolant_steam::boil_gain(input.boil, b.max_gain),
+                template.settings.pitch,
+                input.pose,
+            );
         }
         if !input.active {
             return;

@@ -148,6 +148,10 @@ pub struct StateBlock {
     pub sky_anchor: [f32; 3],
     /// Cigarette that owns the ember light, as `ItemId + 1`. 0 is none.
     pub ember_light: u32,
+    /// Item that owns the `lightdither` light, as `ItemId + 1`. 0 is none.
+    pub dither_light: u32,
+    /// Keeps the block free of padding.
+    pub pad: u32,
     /// `DeadV` weight: death seconds over the survival death seconds, 0 to 1. 0 while alive.
     pub dead_weight: f32,
     /// Bumps when the audio motion history restarts.
@@ -795,12 +799,16 @@ impl ParticleGroupRow {
     pub const TRACER: u32 = 13;
     /// `explosionscript.particle`; source is the explosion type.
     pub const EXPLOSION: u32 = 14;
+    /// `mainscript.FoodParticles`; source is the food particle type.
+    pub const FOOD: u32 = 15;
     /// Car systems in `a`.
     pub const CAR_EXHAUST: u32 = 0;
     /// Wheel effects: source is wheel * 8 + system (0 dust, 1.. grass).
     pub const CAR_WHEEL: u32 = 1;
     /// Skid bursts: `tiresmoke` (0) or `tiresand` (1).
     pub const CAR_SKID: u32 = 2;
+    /// `carscript.CoolantSteam`; source 0.
+    pub const CAR_STEAM: u32 = 3;
 }
 
 /// The `(car system, source)` pairs of every particle system of a car prototype.
@@ -821,7 +829,11 @@ pub fn car_particle_sources(
                 .map(move |system| (ParticleGroupRow::CAR_WHEEL, wheel * 8 + system))
         });
     let skid = (0..2).map(|i| (ParticleGroupRow::CAR_SKID, i));
-    exhaust.chain(wheels).chain(skid)
+    let steam = record
+        .coolant_steam
+        .iter()
+        .map(|_| (ParticleGroupRow::CAR_STEAM, 0));
+    exhaust.chain(wheels).chain(skid).chain(steam)
 }
 
 /// Day cycle and lamp outputs.

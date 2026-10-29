@@ -187,7 +187,9 @@ def recover_item_prototypes(source, manifest, output) -> list[dict]:
         consumable = recover_cigarette(source, root, manifest, output) if item_id==230 else None
         from .hose import recover_hose
         hose = recover_hose(source,by_node,bodies,poses,{k:n['id'] for k,n in nodes.items()},exporter,source.read(source.get('level1',64919)),output) if item_id==61 else None
-        result.append({'hose':hose,'consumable':consumable,'id':source_id(root),'source':source_id(root),'item_id':item_id,
+        from .light_dither import recover_light_dither
+        light_dither = recover_light_dither(source, records, lambda t: nodes[key(t)]['id'])
+        result.append({'hose':hose,'consumable':consumable,'light_dither':light_dither,'id':source_id(root),'source':source_id(root),'item_id':item_id,
             'asset':nodes[key(root)]['asset'],'root':nodes[key(root)]['id'],'bodies':bodies,'colliders':colliders,
             'pickups':pickups,'variants':variants,'renderers':renderers,'behavior':behavior})
     return result
@@ -306,6 +308,9 @@ def validate_item_prototypes(prototypes, manifest) -> None:
             from .particles import validate_particle
             for e in p['hose']['ends']:
                 for particle in (e['visual'],e['splash']):validate_particle(particle,{t['id'] for t in manifest['lighting']['textures']})
+        from .light_dither import validate_light_dither
+        if (p['light_dither'] is not None)!=(p['item_id']==92):raise ValueError('Light dither owner')
+        validate_light_dither(p['light_dither'])
         if (p['consumable'] is not None)!=(p['item_id']==230):raise ValueError('Cigarette consumable owner')
         if p['consumable'] is not None:validate_cigarette(p['consumable'],p,manifest)
         validate_gib(p,within)

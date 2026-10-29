@@ -100,6 +100,38 @@ impl ParticleReference {
                 }
             }
         }
+        if self.module_flags.get("NoiseModule") == Some(&true) {
+            for field in [
+                "NoiseModule.strength",
+                "NoiseModule.strengthY",
+                "NoiseModule.strengthZ",
+                "NoiseModule.positionAmount",
+                "NoiseModule.scrollSpeed",
+            ] {
+                curve(field)?;
+            }
+            flag("NoiseModule.separateAxes")?;
+            flag("NoiseModule.damping")?;
+            if scalar("NoiseModule.frequency")? <= 0. {
+                return Err(invalid("NoiseModule.frequency"));
+            }
+            let octaves = scalar("NoiseModule.octaves")?;
+            if !(1. ..=4.).contains(&octaves) || octaves.fract() != 0. {
+                return Err(invalid("NoiseModule.octaves"));
+            }
+            scalar("NoiseModule.octaveMultiplier")?;
+            scalar("NoiseModule.octaveScale")?;
+            // The runtime moves positions only. Remap, rotation and size noise are not run.
+            if flag("NoiseModule.remapEnabled")? {
+                return Err(invalid("NoiseModule.remapEnabled"));
+            }
+            for field in ["NoiseModule.rotationAmount", "NoiseModule.sizeAmount"] {
+                let c = curve(field)?;
+                if c.mode != 0 || c.scalar != 0. {
+                    return Err(invalid(field));
+                }
+            }
+        }
         if self.module_flags.get("InheritVelocityModule") == Some(&true) {
             let mode = scalar("InheritVelocityModule.m_Mode")?;
             if mode != 0. && mode != 1. {

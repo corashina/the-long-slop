@@ -9,6 +9,8 @@ pub struct PrototypeId(pub SourceId);
 pub struct ItemPrototype {
     pub hose: Option<HoseReference>,
     pub consumable: Option<CigaretteConsumptionReference>,
+    /// Source `lightdither` on the pumpkin light.
+    pub light_dither: Option<LightDitherReference>,
     pub id: PrototypeId,
     pub source: SourceId,
     pub item_id: Option<u32>,
@@ -23,6 +25,34 @@ pub struct ItemPrototype {
 }
 
 pub const HOSE_SEGMENTS: usize = 6;
+
+/// Light id of a `lightdither` light in its own table. The cigarette ember light is 1.
+pub const DITHER_LIGHT_ID: u32 = 2;
+
+/// Source `lightdither`: Perlin dithers set the intensity of one point light.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LightDitherReference {
+    pub source: SourceId,
+    pub light: LightReference,
+    pub dithers: Vec<DitherReference>,
+    /// Source `max` and `min`: the largest or smallest value. Neither: the sum.
+    pub max: bool,
+    pub min: bool,
+}
+
+/// Source `lightdither.dither`. `value` is the serialized start value.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DitherReference {
+    pub speed: f32,
+    pub speed2: f32,
+    pub min_threshold: f32,
+    pub max_threshold: f32,
+    pub min_value: f32,
+    pub max_value: f32,
+    pub value: f32,
+}
 
 /// Siphon hose (`tubescript` chain). Body ids are local prototype bodies.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -826,6 +856,35 @@ impl ItemPrototype {
         )?;
         if let Some(c) = &self.consumable {
             c.validate(self, m)?;
+        }
+        require(
+            self.light_dither.is_some() == (item_id == Some(92)),
+            "light dither owner",
+        )?;
+        if let Some(d) = &self.light_dither {
+            let l = &d.light;
+            require(
+                l.id.0 == DITHER_LIGHT_ID
+                    && l.kind == LightKind::Point
+                    && l.cookie.is_none()
+                    && l.node.is_some_and(|n| self.within(m, n))
+                    && l.range_meters > 0.
+                    && !d.dithers.is_empty()
+                    && d.dithers.iter().all(|x| {
+                        [
+                            x.speed,
+                            x.speed2,
+                            x.min_threshold,
+                            x.max_threshold,
+                            x.min_value,
+                            x.max_value,
+                            x.value,
+                        ]
+                        .iter()
+                        .all(|v| v.is_finite())
+                    }),
+                "light dither",
+            )?;
         }
         require(
             m.bodies.iter().all(|b| !self.within(m, b.node))

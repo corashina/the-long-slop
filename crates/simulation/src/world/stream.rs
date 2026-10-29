@@ -274,6 +274,11 @@ pub struct WorldStream {
     hitch_owners: Vec<(crate::world::GeneratedId, crate::reference::ItemId)>,
     /// Indices of world prototypes with a trailer or hitch targets.
     trailer_prototypes: Vec<usize>,
+    follower_bindings: Vec<content_followers::FollowerBinding>,
+    /// Session and active revision whose followers are all bound.
+    follower_scan: Option<(u64, u64)>,
+    /// Indices of world prototypes with followers.
+    follower_prototypes: Vec<usize>,
     detector_bindings: Vec<content_detectors::DetectorBinding>,
     /// Session and active revision whose metal detectors are all bound.
     detector_scan: Option<(u64, u64)>,
@@ -908,6 +913,15 @@ impl WorldStream {
                 .iter()
                 .enumerate()
                 .filter(|(_, p)| p.trailer.is_some() || !p.hitches.is_empty())
+                .map(|(i, _)| i)
+                .collect(),
+            follower_bindings: Vec::new(),
+            follower_scan: None,
+            follower_prototypes: world
+                .prototypes
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p.followers.is_some())
                 .map(|(i, _)| i)
                 .collect(),
             detector_bindings: Vec::new(),
@@ -4382,6 +4396,10 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
+        if let Err(error) = self.sync_follower_bindings(items) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         self.sync_moving_lamps(items);
         self.sync_generated_food(reference, items, physics);
         self.binding_bytes = (items.retained_binding_bytes()
@@ -5089,6 +5107,14 @@ impl WorldStream {
                     .map(|(id, _)| crate::world::contents::identity_heap(id))
                     .sum::<usize>()
                 + self.trailer_prototypes.capacity() * std::mem::size_of::<usize>()
+                + self.follower_bindings.capacity()
+                    * std::mem::size_of::<content_followers::FollowerBinding>()
+                + self
+                    .follower_bindings
+                    .iter()
+                    .map(content_followers::FollowerBinding::heap_bytes)
+                    .sum::<usize>()
+                + self.follower_prototypes.capacity() * std::mem::size_of::<usize>()
                 + self.detector_bindings.capacity()
                     * std::mem::size_of::<content_detectors::DetectorBinding>()
                 + self
@@ -5404,6 +5430,8 @@ mod content_busdoors;
 mod content_detectors;
 #[path = "content_dials.rs"]
 mod content_dials;
+#[path = "content_followers.rs"]
+pub mod content_followers;
 #[path = "content_musicboxes.rs"]
 mod content_musicboxes;
 #[path = "content_radios.rs"]

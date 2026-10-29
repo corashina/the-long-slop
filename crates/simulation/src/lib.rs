@@ -7,6 +7,7 @@ pub mod boundary;
 pub mod candidate;
 pub mod car_camera;
 pub mod conditions;
+pub mod coolant_steam;
 #[cfg(target_arch = "wasm32")]
 pub mod cpu_profile;
 pub mod crash;
@@ -16,11 +17,14 @@ pub mod driver;
 pub mod exhaust;
 pub mod fluids;
 pub mod flyers;
+pub mod food_particles;
 pub mod hearing;
+pub mod horror;
 #[cfg(target_arch = "wasm32")]
 pub mod host;
 pub mod interaction;
 pub mod inventory;
+pub mod light_dither;
 pub mod lighting;
 pub mod particles;
 pub mod plates;

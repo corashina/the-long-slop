@@ -15,6 +15,7 @@ from . import draw_distance
 from .sled import centers_of_mass, recover_sled
 from .actions import recover_world_pushes
 from .towing import recover_hitches, recover_trailer
+from .followers import recover_followers
 
 PAYLOAD_SHA256 = '243f2862c6fa3d38b4c7d8df56332a2016c09d412b11030564f7f21665ad8ad9'
 WORLD_DATABASE_ID = 66024
@@ -826,7 +827,7 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
             lambda:light_records(source,Prototype(source,hierarchy),None,None,index,report['material_indices'])[0])
         for node in hierarchy:
             for component in node['components']:
-                if component.type.name=='MonoBehaviour' and source.class_name(component) in ('szankoScript','setcenterofmass','utanfutoscript','attachTargetscript','attachablescript'):selected.record(component)
+                if component.type.name=='MonoBehaviour' and source.class_name(component) in ('szankoScript','setcenterofmass','utanfutoscript','attachTargetscript','attachablescript','followspringscript','followavgposrot','followposrotscript'):selected.record(component)
                 selected.component_record(component)
         prototype={'source':source_id(root),'role':roles[identity],'asset':index,'nodes':nodes,'controls':controls,
             'deferred_materials':report['deferred_materials'],'excluded_actions':scope_cache.get(identity,('',[]))[1],'skins':skins,'bodies':bodies,'colliders':colliders,'prefab_pose':converted_transform(source.read(root)),
@@ -836,6 +837,7 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
         from .vehicles import vehicle_record, part_records
         vehicle=vehicle_record(source,hierarchy,bodies,colliders,index,report['material_indices'],output)
         if vehicle:prototype['vehicle']=vehicle
+        prototype['followers']=recover_followers(source,hierarchy,mapping,vehicle,trailer)
         # Vehicle and sled records link source assets outside the hierarchy: particle materials,
         # shaders, plate fonts and clips. Each linked record needs its receipt.
         receipt_links(source,selected,[vehicle,sled])

@@ -8,7 +8,7 @@ from .wheels import wheel_collider_record
 from .driving import car_driving, road_wheels, hub_record, wheel_graphics, recover_lever
 from .instruments import instrument_record, gauge_limits, Meters
 from .lighting import vehicle_light_links, vehicle_states
-from .particles import recover_exhaust
+from .particles import recover_coolant_steam,recover_exhaust
 from .wheel_effects import recover_wheel_effects, effect_gains
 from .plates import prototype_plates
 from .render_lighting import probe_settings
@@ -394,6 +394,7 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         'blood':blood_record(source,proto,blood),'blood_clip':None if blood_clip is None else source_id(blood_clip),
         'condition':proto.link(car_reader,car['condition']),
         'exhaust':recover_exhaust(source,car_reader,car,hierarchy[0]['reader'],car_reader.path_id,output),
+        'coolant_steam':recover_coolant_steam(source,car_reader,car,hierarchy[0]['reader'],output),
         'wheel_effects':recover_wheel_effects(source,car_reader,car,hierarchy[0]['reader'],[source.get(*identity) for identity in sorted(road)],car_reader.path_id,output),
         'effect_gains':effect_gains(car),
         'lever':recover_lever(source,car_reader,car,hierarchy[0]['reader'],proto.nodes),

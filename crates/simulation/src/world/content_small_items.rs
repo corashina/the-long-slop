@@ -89,15 +89,6 @@ pub struct RefillInput {
     pub reload_held: bool,
     pub reload_released: bool,
 }
-pub(super) fn clip_id(reference: &ReferenceManifest, source: &SourceId) -> Option<u32> {
-    reference.audio["clips"].as_array()?.iter().find_map(|c| {
-        (c["source"]["file"].as_str() == Some(source.file.as_str())
-            && c["source"]["path_id"].as_i64() == Some(source.path_id))
-        .then(|| c["id"].as_u64())
-        .flatten()
-        .map(|id| id as u32)
-    })
-}
 impl SmallItems {
     pub fn new(reference: &ReferenceManifest) -> Self {
         let s = &reference.small_items.spray_bottle;
@@ -122,8 +113,8 @@ impl SmallItems {
             ],
             firing: None,
             clips: [
-                clip_id(reference, &s.set_clip),
-                clip_id(reference, &s.reset_clip),
+                reference.clip_id(&s.set_clip),
+                reference.clip_id(&s.reset_clip),
             ],
             time: 0.,
             sounds: Vec::with_capacity(8),

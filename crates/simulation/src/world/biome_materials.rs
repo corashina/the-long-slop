@@ -106,6 +106,7 @@ mod tests {
             gauges: Vec::new(),
             sled: None,
             trailer: None,
+            followers: None,
             hitches: Vec::new(),
             pushes: Vec::new(),
         };

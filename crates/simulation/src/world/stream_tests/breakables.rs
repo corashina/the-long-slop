@@ -280,3 +280,101 @@ fn shovel_broken_lamp_stays_broken_after_reload() {
         .try_break_melee(records, target, 1e6, FIXED_DT);
     assert!(loaded.stream.take_break().is_none());
 }
+
+/// Spawns one copy of item prototype `prototype` 2 m above the player.
+fn spawn_near_player(
+    run: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    prototype: usize,
+) -> ItemId {
+    let mut pose = run.area.player.body_pose(&run.physics);
+    pose.position[1] += 2.;
+    pose.rotation = [0., 0., 0., 1.];
+    crate::starting_area::spawned::spawn_prototype(
+        reference,
+        &mut run.area,
+        &mut run.physics,
+        prototype,
+        pose,
+    )
+    .unwrap()[0]
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn tumbleweed_breaks_on_a_hard_drop_and_leaves_the_spawned_list() {
+    let (reference, mut run) = super::garage_controls::load_garage();
+    settle(&mut run, &reference, 1.);
+    let r = &reference.weather.tumbleweeds;
+    let prototype = reference
+        .item_prototypes
+        .iter()
+        .position(|p| p.item_id == Some(r.item_id))
+        .expect("tumbleweed prototype");
+    let weed = spawn_near_player(&mut run, &reference, prototype);
+    settle(&mut run, &reference, 2.);
+    let record = run
+        .stream
+        .breakables
+        .targets()
+        .iter()
+        .find(|t| t.kind == BreakKind::Item(weed))
+        .expect("the spawned tumbleweed binds its breakablescript")
+        .record;
+    let gib = reference.breakables[record].gib.as_ref().map(|g| {
+        reference
+            .item_prototypes
+            .iter()
+            .position(|p| &p.id == g)
+            .unwrap()
+    });
+    assert!(
+        run.area.spawned.contains(weed),
+        "a soft landing keeps the weed"
+    );
+    let mut serials = Vec::new();
+    if let Some(gib) = gib {
+        gib_serials(&run, gib, &mut serials);
+    }
+    let before = serials.len();
+    drop_from(&mut run, weed, 10.);
+    for _ in 0..(3. / FIXED_DT) as usize {
+        frame(&mut run, &reference);
+        if let Some(gib) = gib {
+            gib_serials(&run, gib, &mut serials);
+        }
+    }
+    assert!(
+        !run.area.spawned.contains(weed),
+        "the broken weed leaves the spawned list"
+    );
+    if gib.is_some() {
+        assert_eq!(serials.len(), before + 1, "the break spawns its gib once");
+    }
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn spawned_copy_takes_the_hit_sound_of_its_pickup() {
+    let (reference, mut run) = super::garage_controls::load_garage();
+    settle(&mut run, &reference, 1.);
+    let (prototype, clip) = reference
+        .item_prototypes
+        .iter()
+        .enumerate()
+        .find_map(|(i, p)| {
+            let clip = p.pickups.first()?.collision_clip.as_ref()?;
+            Some((i, reference.clip_id(clip)?))
+        })
+        .expect("a prototype pickup with a hit clip");
+    let item = spawn_near_player(&mut run, &reference, prototype);
+    let state = run.area.items.get(item).unwrap();
+    assert_eq!(state.hit_sound.map(|h| h.clip), Some(clip));
+    let body = state.body.unwrap();
+    let rapier = run.physics.rapier();
+    assert!(rapier.bodies[body].colliders().iter().all(|c| {
+        rapier.colliders[*c]
+            .active_events()
+            .contains(rapier3d::prelude::ActiveEvents::COLLISION_EVENTS)
+    }));
+}

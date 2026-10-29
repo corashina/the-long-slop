@@ -28,6 +28,8 @@ fn frame_round_trips() {
             joint_scale: 0.01,
             sky_anchor: [0., 300., 0.],
             ember_light: 8,
+            dither_light: 4,
+            pad: 0,
             dead_weight: 0.5,
             motion_revision: 2,
             far_plane: 1500.,
