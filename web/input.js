@@ -1,5 +1,5 @@
 const BITS={KeyW:1,KeyS:2,KeyA:4,KeyD:8,Space:16,KeyE:32,ShiftLeft:64,ShiftRight:64,ControlLeft:128,ControlRight:128,KeyF:256,Mouse0:512,KeyI:1024,KeyC:2048,Mouse1:4096,KeyR:8192,Mouse2:16384,Tab:32768,KeyL:65536,KeyH:131072,Numpad8:131072,KeyV:262144,KeyP:524288,KeyB:1048576};
-const PLAYER_BITS={KeyQ:1,KeyZ:2,KeyY:2,CapsLock:4,KeyX:8};
+const PLAYER_BITS={KeyQ:1,KeyZ:2,KeyY:2,CapsLock:4,KeyX:8,KeyM:64};
 // Typing keys (Rust TypingInput): piano bits 0-16 (computerscript order), arrows 17-20, music keys A S X 21-23, any key 24.
 const TYPING_HELD={KeyQ:1,Digit2:2,KeyW:4,Digit3:8,KeyE:16,KeyR:32,Digit5:64,KeyT:128,Digit6:256,KeyY:512,KeyZ:512,Digit7:1024,KeyU:2048,KeyI:4096,Digit9:8192,KeyO:16384,Digit0:32768,KeyP:65536,ArrowUp:1<<17,ArrowDown:1<<18,ArrowLeft:1<<19,ArrowRight:1<<20};
 const TYPING_PRESSED={KeyA:1<<21,KeyS:1<<22,KeyX:1<<23},TYPING_ANY=1<<24,TEXT_CAPACITY=64;

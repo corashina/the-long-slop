@@ -188,12 +188,7 @@ fn w02_long_trip_keeps_far_edits() {
 
     // Save at the first edit and reload into a fresh runtime.
     let saved = run
-        .capture_save(
-            &reference,
-            &stamp,
-            crate::save::CameraSave::FirstPerson,
-            "2026-10-25T12:00:00Z",
-        )
+        .capture_save(&reference, &stamp, "2026-10-25T12:00:00Z")
         .unwrap();
     let saved: crate::save::SaveSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();

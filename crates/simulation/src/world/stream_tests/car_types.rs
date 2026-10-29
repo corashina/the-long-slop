@@ -243,12 +243,7 @@ fn start_car_drives_saves_and_loads(reference: &ReferenceManifest, field: &str) 
         run.mounted_engine(&key).unwrap().state.capture_save(),
     );
     let snapshot = run
-        .capture_save(
-            reference,
-            &stamp,
-            crate::save::CameraSave::FirstPerson,
-            "2026-10-26T12:00:00Z",
-        )
+        .capture_save(reference, &stamp, "2026-10-26T12:00:00Z")
         .unwrap();
     let snapshot: crate::save::SaveSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();

@@ -2661,7 +2661,7 @@ fn fixed_decoration_possessions_restore_on_item_path() {
 #[ignore = "requires the installed source export"]
 fn fixed_decoration_imported_inventory_reload_waits_for_real_readiness() {
     use crate::inventory::InventoryCommand;
-    use crate::save::{CameraSave, SourceHash, SourceStamp};
+    use crate::save::{SourceHash, SourceStamp};
     let reference = reference();
     let digest = std::process::Command::new("sha256sum")
         .arg(concat!(
@@ -2746,12 +2746,7 @@ fn fixed_decoration_imported_inventory_reload_waits_for_real_readiness() {
     );
     assert_eq!(run.area.interaction.equipment.item(), Some(light));
     let saved = run
-        .capture_save(
-            &reference,
-            &stamp,
-            CameraSave::FirstPerson,
-            "2026-10-18T12:00:00Z",
-        )
+        .capture_save(&reference, &stamp, "2026-10-18T12:00:00Z")
         .unwrap();
     let saved = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
     let mut loaded = GarageRuntime::from_save(
@@ -2765,24 +2760,14 @@ fn fixed_decoration_imported_inventory_reload_waits_for_real_readiness() {
     assert!(loaded.restore_pending());
     assert!(
         loaded
-            .capture_save(
-                &reference,
-                &stamp,
-                CameraSave::FirstPerson,
-                "2026-10-18T12:00:00Z"
-            )
+            .capture_save(&reference, &stamp, "2026-10-18T12:00:00Z")
             .is_err()
     );
     prepare_ready(&mut loaded, &reference);
     assert!(loaded.advance_saved_restore(&reference).unwrap());
     assert!(!loaded.restore_pending());
     let recaptured = loaded
-        .capture_save(
-            &reference,
-            &stamp,
-            CameraSave::FirstPerson,
-            "2026-10-18T12:00:00Z",
-        )
+        .capture_save(&reference, &stamp, "2026-10-18T12:00:00Z")
         .unwrap();
     assert_eq!(loaded.area.inventory.slots, run.area.inventory.slots);
     assert_eq!(loaded.area.interaction.equipment.item(), Some(light));
@@ -3159,7 +3144,6 @@ fn roadside_stamp(reference: &ReferenceManifest) -> crate::save::SourceStamp {
 fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     use crate::interaction::items::ItemLocation;
     use crate::inventory::InventoryCommand;
-    use crate::save::CameraSave;
 
     let reference = reference();
     let stamp = roadside_stamp(&reference);
@@ -3350,12 +3334,7 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
         &run.physics,
     );
     let saved_unattached = run
-        .capture_save(
-            &reference,
-            &stamp,
-            CameraSave::FirstPerson,
-            "2026-10-19T12:00:00Z",
-        )
+        .capture_save(&reference, &stamp, "2026-10-19T12:00:00Z")
         .unwrap();
     let oil = reference
         .items
@@ -3427,12 +3406,7 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
         ItemLocation::Attached(held)
     );
     let saved = run
-        .capture_save(
-            &reference,
-            &stamp,
-            CameraSave::FirstPerson,
-            "2026-10-19T12:00:00Z",
-        )
+        .capture_save(&reference, &stamp, "2026-10-19T12:00:00Z")
         .unwrap();
     let saved: crate::save::SaveSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
@@ -3538,12 +3512,7 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
             >= owner_colliders + oil_colliders
     );
     let recaptured = loaded
-        .capture_save(
-            &reference,
-            &stamp,
-            CameraSave::FirstPerson,
-            "2026-10-19T12:00:00Z",
-        )
+        .capture_save(&reference, &stamp, "2026-10-19T12:00:00Z")
         .unwrap();
     assert_eq!(saved.inventory, recaptured.inventory);
     let oil_instance = crate::save::InstanceId::initial(
@@ -3703,12 +3672,7 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
         &reset.physics,
     );
     let equipped_save = reset
-        .capture_save(
-            &reference,
-            &stamp,
-            CameraSave::FirstPerson,
-            "2026-10-19T12:00:00Z",
-        )
+        .capture_save(&reference, &stamp, "2026-10-19T12:00:00Z")
         .unwrap();
     assert_eq!(
         equipped_save.inventory.equipped,
@@ -3746,12 +3710,7 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     );
     g08_assert_equipment_pose(&independent, &reference, independent_tool);
     let independent_save = independent
-        .capture_save(
-            &reference,
-            &stamp,
-            CameraSave::FirstPerson,
-            "2026-10-19T12:00:01Z",
-        )
+        .capture_save(&reference, &stamp, "2026-10-19T12:00:01Z")
         .unwrap();
     assert_eq!(independent_save.inventory, unlisted_equipped.inventory);
     let tool_key = &keys[0];
@@ -4581,7 +4540,7 @@ fn g08_frame_fresh_gesture_after_cancellation() {
 fn source_transfers_reject_atomically_and_restore_both_hands() {
     use crate::{
         inventory::InventoryCommand,
-        save::{CameraSave, SourceHash, SourceStamp},
+        save::{SourceHash, SourceStamp},
         simulation::FrameInput,
     };
     let bytes = std::fs::read(concat!(
@@ -4702,7 +4661,7 @@ fn source_transfers_reject_atomically_and_restore_both_hands() {
     );
     assert!(game.consume(&r, food).unwrap());
     let saved = game
-        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-15T12:00:00Z")
+        .capture_save(&r, &stamp, "2026-10-15T12:00:00Z")
         .unwrap();
     let mut loaded = GarageRuntime::from_save(
         &r,
@@ -4715,7 +4674,7 @@ fn source_transfers_reject_atomically_and_restore_both_hands() {
     prepare_ready(&mut loaded, &r);
     assert!(loaded.advance_saved_restore(&r).unwrap());
     let recaptured = loaded
-        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-15T12:00:00Z")
+        .capture_save(&r, &stamp, "2026-10-15T12:00:00Z")
         .unwrap();
     for (before, after) in saved.items.iter().zip(&recaptured.items) {
         if matches!(
@@ -4800,7 +4759,7 @@ fn source_transfers_reject_atomically_and_restore_both_hands() {
         .apply_inventory_command(InventoryCommand::Select(3), &r, &mut loaded.physics)
         .unwrap();
     let stored = loaded
-        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-15T12:00:01Z")
+        .capture_save(&r, &stamp, "2026-10-15T12:00:01Z")
         .unwrap();
     let mut restored = GarageRuntime::from_save(
         &r,
@@ -4831,7 +4790,7 @@ fn source_transfers_reject_atomically_and_restore_both_hands() {
     }
     assert!(!restored.area.inventory.slots.contains(&Some(food)));
     let removed = restored
-        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-15T12:00:02Z")
+        .capture_save(&r, &stamp, "2026-10-15T12:00:02Z")
         .unwrap();
     let restored = GarageRuntime::from_save(
         &r,
@@ -4895,7 +4854,7 @@ fn g08_save_independent_equipment_and_both_owners() {
     use crate::{
         interaction::items::ItemLocation,
         inventory::InventoryCommand,
-        save::{CameraSave, InstanceId, ItemLocationSave},
+        save::{InstanceId, ItemLocationSave},
         simulation::{FrameInput, keys},
     };
     let reference = reference();
@@ -4962,12 +4921,7 @@ fn g08_save_independent_equipment_and_both_owners() {
         .unwrap();
     assert!(quantity < initial_quantity);
     let saved = run
-        .capture_save(
-            &reference,
-            &stamp,
-            CameraSave::FirstPerson,
-            "2026-10-20T12:00:00Z",
-        )
+        .capture_save(&reference, &stamp, "2026-10-20T12:00:00Z")
         .unwrap();
     let tool_instance = InstanceId::initial(
         &reference
@@ -5048,12 +5002,7 @@ fn g08_save_independent_equipment_and_both_owners() {
     );
     g08_assert_equipment_pose(&loaded, &reference, tool);
     let recaptured = loaded
-        .capture_save(
-            &reference,
-            &stamp,
-            CameraSave::FirstPerson,
-            "2026-10-20T12:00:01Z",
-        )
+        .capture_save(&reference, &stamp, "2026-10-20T12:00:01Z")
         .unwrap();
     assert_eq!(recaptured.inventory, saved.inventory);
     assert_eq!(
@@ -5152,12 +5101,7 @@ fn g08_save_independent_equipment_and_both_owners() {
     g08_frame(&mut loaded, &reference, down, 0.02);
     assert_eq!(loaded.area.interaction.held(), Some(tool));
     let pressed_save = loaded
-        .capture_save(
-            &reference,
-            &stamp,
-            CameraSave::FirstPerson,
-            "2026-10-20T12:00:02Z",
-        )
+        .capture_save(&reference, &stamp, "2026-10-20T12:00:02Z")
         .unwrap();
     let mut after_load = GarageRuntime::from_save(
         &reference,

@@ -1,8 +1,8 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 32;
-pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 32;
+pub const SAVE_SCHEMA_VERSION: u32 = 33;
+pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 33;
 pub fn schema_supported(version: u32) -> bool {
     (OLDEST_SAVE_SCHEMA_VERSION..=SAVE_SCHEMA_VERSION).contains(&version)
 }
@@ -58,7 +58,6 @@ pub struct SaveSnapshot {
     pub progress: ProgressSnapshot,
     pub lighting: LightingSnapshot,
     pub conditions: ConditionSnapshot,
-    pub view: ViewSnapshot,
     /// Runtime item prototype copies.
     pub spawned: Vec<SpawnedItemSnapshot>,
     /// Runtime food copies.
@@ -409,17 +408,6 @@ pub struct RadioSnapshot {
     pub tuning: f32,
     pub volume: f32,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ViewSnapshot {
-    pub camera: CameraSave,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum CameraSave {
-    FirstPerson,
-    Chase,
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -470,7 +458,7 @@ mod g04_ordered_state {
     fn older_schemas_are_rejected_before_payload_reconstruction() {
         for version in [
             6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
-            31, 33,
+            31, 32, 34,
         ] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
@@ -482,9 +470,9 @@ mod g04_ordered_state {
 
     #[test]
     fn current_schema_passes_the_version_gate() {
-        // Schema 32 reaches payload parsing; the empty payload then fails as corrupt data.
+        // Schema 33 reaches payload parsing; the empty payload then fails as corrupt data.
         assert!(matches!(
-            SaveSnapshot::from_json(br#"{"schema_version":32}"#),
+            SaveSnapshot::from_json(br#"{"schema_version":33}"#),
             Err(SaveError::CorruptData(_))
         ));
     }
