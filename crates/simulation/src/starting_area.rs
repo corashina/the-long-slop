@@ -837,7 +837,7 @@ impl GarageRuntime {
             stream.request_at(spawn, spawn);
         }
         let mut wheels = crate::interaction::wheels::WheelAssemblies::new(reference)?;
-        wheels.refresh_conditions(&area.interaction.conditions, &area.items);
+        wheels.refresh_conditions(&area.interaction.conditions);
         wheels.sync(&mut area.items, &mut physics)?;
         area.interaction
             .cleaning
@@ -1134,7 +1134,7 @@ impl GarageRuntime {
 
     pub fn step(&mut self, reference: &ReferenceManifest, mut input: FrameInput) {
         self.wheels
-            .refresh_conditions(&self.area.interaction.conditions, &self.area.items);
+            .refresh_conditions(&self.area.interaction.conditions);
         if let Err(error) = self.sync_world_activity(reference) {
             self.stream.fail(ReferenceError(error.to_string()));
         }

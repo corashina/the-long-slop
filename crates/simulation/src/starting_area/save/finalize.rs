@@ -71,7 +71,7 @@ impl RestoreFinalizer<'_> {
             .interaction
             .sync_parts(&mut self.area.items, self.physics)?;
         self.wheels
-            .refresh_conditions(&self.area.interaction.conditions, &self.area.items);
+            .refresh_conditions(&self.area.interaction.conditions);
         self.wheels.sync(&mut self.area.items, self.physics)?;
         self.area.sync_equipment(reference, self.physics);
         self.area.items.sync_poses(self.physics);

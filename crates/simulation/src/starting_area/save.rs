@@ -65,12 +65,6 @@ impl GarageRuntime {
                     position: item.pose.position,
                     rotation: item.pose.rotation,
                 },
-                condition: self
-                    .area
-                    .interaction
-                    .conditions
-                    .item_quality(ids.item(&item.instance)?)
-                    .unwrap_or(1.),
                 food: self
                     .area
                     .items
@@ -290,10 +284,9 @@ impl GarageRuntime {
             .area
             .items
             .restore_save(&ids, &saved.items, reference)?;
-        candidate.wheels.refresh_conditions(
-            &candidate.area.interaction.conditions,
-            &candidate.area.items,
-        );
+        candidate
+            .wheels
+            .refresh_conditions(&candidate.area.interaction.conditions);
         candidate
             .wheels
             .restore_save(&mut candidate.area.items, &mut candidate.physics)?;

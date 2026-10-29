@@ -159,13 +159,7 @@ impl GarageRuntime {
         }
         let condition = available
             .item
-            .and_then(|id| {
-                self.area
-                    .interaction
-                    .conditions
-                    .item_quality(id)
-                    .or_else(|| self.area.items.get(id).and_then(|i| i.generated_condition))
-            })
+            .and_then(|id| self.area.interaction.conditions.item_quality(id))
             .unwrap_or(-1.0);
         let held = self.area.interaction.held();
         let notice = if !self.notice.is_empty() {

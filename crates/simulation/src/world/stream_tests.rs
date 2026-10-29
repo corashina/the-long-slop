@@ -836,7 +836,7 @@ fn roadside_owner_controls_keep_state_after_owner_retirement() {
     )
     .unwrap();
     let mut changed = baseline.clone();
-    changed.condition = if baseline.condition < 0.5 { 0.75 } else { 0.25 };
+    changed.temperature = Some(baseline.temperature.unwrap_or(0.) + 1.);
     run.stream.changes.record(key.clone(), changed, &baseline);
     run.stream
         .changes
@@ -942,11 +942,7 @@ fn roadside_owner_controls_keep_state_after_owner_retirement() {
     let (imported, sibling_baseline) = run.stream.imported_baselines[0].clone();
     let sibling_key = super::super::ObjectKey::Imported(imported);
     let mut sibling_changed = sibling_baseline.clone();
-    sibling_changed.condition = if sibling_baseline.condition < 0.5 {
-        0.75
-    } else {
-        0.25
-    };
+    sibling_changed.temperature = Some(sibling_baseline.temperature.unwrap_or(0.) + 1.);
     run.stream
         .changes
         .record(sibling_key.clone(), sibling_changed, &sibling_baseline);
@@ -1338,7 +1334,6 @@ fn replay_snapshot(position: [f64; 3]) -> super::super::ObjectSnapshot {
             position,
             rotation: [0., 0., 0., 1.],
         },
-        condition: 0.5,
         food: None,
         temperature: None,
         fluids: None,
@@ -1755,7 +1750,7 @@ fn replay_restore_replaces_selection_and_saved_readiness_checks_revision() {
     )
     .unwrap();
     let mut changed = original.clone();
-    changed.condition = if original.condition < 0.5 { 0.75 } else { 0.25 };
+    changed.temperature = Some(original.temperature.unwrap_or(0.) + 1.);
     run.stream
         .changes
         .record(generated.clone(), changed, &original);
@@ -2834,7 +2829,7 @@ fn roadside_edits_survive_retirement_and_save_reload() {
     let mut run = GarageRuntime::new_default(&reference).unwrap();
     let (placement, id) = roadside_loot(&mut run, &reference, 810);
     let key = run.area.items.object_key(id);
-    run.area.items.get_mut(id).unwrap().generated_condition = Some(0.25);
+    run.area.items.get_mut(id).unwrap().temperature = Some(25.);
     run.area.items.mark_dirty(id);
     run.stream.capture_changes(
         &reference,
@@ -2915,11 +2910,7 @@ fn roadside_unresolved_attachment_keeps_retired_parent() {
     let mut run = GarageRuntime::new_default(&reference).unwrap();
     let (parent, parent_id) = roadside_loot(&mut run, &reference, 813);
     let parent_key = run.area.items.object_key(parent_id);
-    run.area
-        .items
-        .get_mut(parent_id)
-        .unwrap()
-        .generated_condition = Some(0.25);
+    run.area.items.get_mut(parent_id).unwrap().temperature = Some(25.);
     run.area.items.mark_dirty(parent_id);
     run.stream.capture_changes(
         &reference,
@@ -2977,7 +2968,7 @@ fn roadside_unresolved_attachment_keeps_retired_parent() {
         serde_json::from_slice(&serde_json::to_vec(&run.stream.changes).unwrap()).unwrap();
     assert!(restored.has_attachment_dependents(&parent_key));
     assert!(restored.has_attachment_dependents(&internal_key));
-    child_snapshot.condition = 0.25;
+    child_snapshot.temperature = Some(25.);
     run.stream
         .changes
         .record(child_key.clone(), child_snapshot, &baseline);

@@ -129,9 +129,6 @@ impl SpawnEvaluation<'_> {
                 if state.parent != content.placement.id {
                     continue;
                 }
-                if self.rules.root(self.reference, &state.source)? == &content.placement.prototype {
-                    content.condition = 1. - state.states[0] as f32 / 4.;
-                }
                 condition_appearance(
                     self.reference,
                     self.rules,
