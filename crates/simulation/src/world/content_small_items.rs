@@ -135,7 +135,7 @@ impl SmallItems {
         self.effects[index].particle.particles()
     }
 }
-fn node_index(
+pub(super) fn node_index(
     prototype: &WorldPrototypeReference,
     source: &SourceId,
 ) -> Result<usize, ReferenceError> {
@@ -145,7 +145,7 @@ fn node_index(
         .position(|n| &n.source == source)
         .ok_or_else(|| ReferenceError("Small item node outside its prototype".into()))
 }
-fn relative(from: crate::world::AbsolutePose, to: crate::world::AbsolutePose) -> Pose {
+pub(super) fn relative(from: crate::world::AbsolutePose, to: crate::world::AbsolutePose) -> Pose {
     let r = Rotation::from_array(from.rotation).inverse();
     let d = Vector::from_array(std::array::from_fn(|i| {
         (to.position[i] - from.position[i]) as f32
@@ -721,6 +721,7 @@ mod tests {
             glow,
             radio: None,
             detector: None,
+            tool: None,
             gun: None,
             linear_velocity: [0.; 3],
             angular_velocity: [0.; 3],

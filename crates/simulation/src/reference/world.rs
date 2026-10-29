@@ -536,6 +536,22 @@ pub struct WorldStartupReference {
     pub prototype: Option<SourceId>,
     /// A start car candidate. `group` is its source start car field. Only the picked one spawns.
     pub start_car: bool,
+    /// Scene random start fields of prefab conditions. Start cars start worn; their prefabs start new.
+    pub conditions: Vec<WorldStartCondition>,
+}
+
+/// The scene values of the partconditionscript random start fields of one prefab condition.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldStartCondition {
+    pub source: SourceId,
+    pub random_start: bool,
+    pub random_min: i32,
+    pub random_max: i32,
+    /// `overRideMin` when `enableOverrideMin` is set.
+    pub override_min: Option<i32>,
+    /// `overRideMax` when `enableOverrideMax` is set.
+    pub override_max: Option<i32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1498,6 +1514,16 @@ impl WorldReference {
                         .is_none_or(|p| prototypes.contains(p)),
                 &field(&frame.source, "startup pose"),
             )?;
+            for c in &frame.conditions {
+                require(
+                    frame.start_car
+                        && checked_record(&record_map, &c.source, &["partconditionscript"]).is_ok()
+                        && (0..=c.random_max).contains(&c.random_min)
+                        && c.override_min.is_none_or(|v| (0..=4).contains(&v))
+                        && c.override_max.is_none_or(|v| (0..=4).contains(&v)),
+                    &field(&c.source, "start car condition"),
+                )?;
+            }
             let mut node = checked_record(&record_map, &frame.source, &["Transform"])?;
             let mut ancestors = HashSet::new();
             while let Some(parent) = record_link(node, "m_Father") {

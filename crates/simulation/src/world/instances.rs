@@ -35,9 +35,12 @@ impl TriggerRoles {
         }
         Some(role)
     }
-    #[cfg(test)]
+    /// A runtime trigger collider that no structure owns.
     pub fn insert(&mut self, handle: ColliderHandle, role: TriggerRole) {
         self.0.insert(handle, role);
+    }
+    pub fn remove(&mut self, handle: ColliderHandle) {
+        self.0.remove(&handle);
     }
     pub fn len(&self) -> usize {
         self.0.len()

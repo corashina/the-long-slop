@@ -299,10 +299,10 @@ fn prepare(
     for tool in &reference.conditions.brushes {
         result.tools.push((
             tool.own_condition,
-            tool.tool
+            tool.nodes
                 .model
                 .map(|n| world.resource::<ReferenceVisuals>().nodes[&n]),
-            tool.tool
+            tool.nodes
                 .scrub_node
                 .map(|n| world.resource::<ReferenceVisuals>().nodes[&n]),
         ));
@@ -340,7 +340,7 @@ fn prepare(
             };
             for bank in &mut receiver.banks {
                 let mut material = original.clone();
-                materials::set_source_color(&mut material, tool.startup_color);
+                materials::set_source_color(&mut material, tool.tool.startup_color);
                 materials::retain_color(&mut material, world);
                 let material = world.resource_mut::<Assets<SourceMaterial>>().add(material);
                 materials::warm_retained_material(

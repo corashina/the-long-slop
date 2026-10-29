@@ -31,6 +31,13 @@ fn lada_part_paint_and_repair_change_its_appearance_and_save() {
     let entries = run.stream.contents.active[content].conditions.clone();
     assert!(!entries.is_empty(), "start car has part conditions");
     let conditions = &mut run.area.interaction.conditions;
+    // The scene start car starts worn: its body draws a state from 1 to 3.
+    assert!(
+        entries
+            .iter()
+            .any(|(id, ..)| (1..=3).contains(&conditions.get(*id).state)),
+        "start car starts worn"
+    );
     // Paint the first entry that spray paint can paint and that shows its color (state below 3).
     let &(painted, index, _) = entries
         .iter()

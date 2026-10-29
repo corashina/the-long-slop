@@ -262,6 +262,26 @@ CAR_SOURCES={'enginescript':('SAlap','SMotor'),'carscript':('SHornSound','SSound
     'talajnezo':('GroundSource','SpringSource','SlideSource')}
 
 
+def sound_stimulus(source, readers, owner):
+    """The stimulscript whose CheckAudioSources reads exactly `readers`, with its position in the `owner` frame."""
+    found=getattr(source,'stimuli_by_audio',{}).get(frozenset(key(r) for r in readers))
+    if found is None:return None
+    reader,transform=found
+    return {'offset':relative_pose(source,transform,owner)['translation'],'max_sound_value':source.read(reader)['maxSoundValue']}
+
+
+def item_root(source, transform):
+    """The nearest Transform at or above `transform` whose GameObject has a tosaveitemscript."""
+    t=transform
+    while t is not None:
+        game_object=source.resolve(t,source.read(t)['m_GameObject'])
+        if any(c.type.name=='MonoBehaviour' and source.class_name(c)=='tosaveitemscript'
+               for c in (source.resolve(game_object,p['component']) for p in source.read(game_object)['m_Component'])):
+            return t
+        t=source.resolve(t,source.read(t)['m_Father'])
+    raise ValueError(f'No item root above {key(transform)}')
+
+
 def engine_audio(source, reader, sound, shot):
     """enginescript sounds of one engine part, in the frame of its GameObject.
 
@@ -269,12 +289,12 @@ def engine_audio(source, reader, sound, shot):
     add car voice templates.
     """
     d=source.read(reader);owner=source.transform_for(source.resolve(reader,d['m_GameObject']))
-    voices={}
+    voices={};loops=[]
     for name,field in (('idle','SAlap'),('motor','SMotor')):
         r=source.resolve(reader,d[field])
         if r is None:raise ValueError(f'enginescript {field} is null: {source_id(reader)}')
-        voices[name]=sound(r,owner,PRIORITIES[5])
-    return {**voices,'starter':shot(reader,d['SStart'],d['SStartVolume'],None,owner),
+        voices[name]=sound(r,owner,PRIORITIES[5]);loops.append(r)
+    return {**voices,'stimulus':sound_stimulus(source,loops,owner),'starter':shot(reader,d['SStart'],d['SStartVolume'],None,owner),
         'stop':shot(reader,d['SStop'],d['SStopVolume'],None,owner),
         'idle_rpm':[d['SMinAlapRpm'],d['SMaxAlapRpm']],'motor_rpm':[d['SMinMotorRpm'],d['SMaxMotorRpm']],
         'idle_gain':d['SMaxAlapSound'],'motor_gain':d['SMaxMotorSound'],
@@ -292,7 +312,7 @@ def car_audio(source, car_reader, wheels, cycle, sound, shot):
     horn=source.resolve(car_reader,d['SHornSound'])
     switch=source.resolve(car_reader,d['SSounds'])
     boil=source.resolve(car_reader,d['CoolantBoil'])
-    return {'horn':None if horn is None else {'sound':sound(horn,owner,None),
+    return {'horn':None if horn is None else {'sound':sound(horn,owner,None),'stimulus':sound_stimulus(source,[horn],owner),
             'pitch':[d['HornPitchMin'],d['HornPitchMax']],'temperature':[cycle['tempNights'][0],cycle['tempDays'][0]],
             'attack_release_rate':10.},
         'switch':None if switch is None else shot(car_reader,d['turnedRadioSOund'],1.,switch,owner),
@@ -325,7 +345,7 @@ def copy_audio(library, identity: ObjectId, clip_id: int, output: Path, usage: s
 
 def recover_audio(source, roots: dict, manifest: dict, library, output: Path) -> dict:
     receipt, method, footstep_methods = managed_evidence(library)
-    audio = {'schema_version': 1, 'clips': [], 'emitters': [], 'voices': [], 'car_voices': [], 'mixers': [],
+    audio = {'schema_version': 1, 'radio_stimuli': [], 'clips': [], 'emitters': [], 'voices': [], 'car_voices': [], 'mixers': [],
         'bindings': [], 'mechanisms': [], 'fluids': [], 'interiors': [], 'routes': [], 'lamps': [], 'silent_actions': ['pickup', 'detach', 'handbrake'],
         'managed': {'file': receipt['input']['file'], 'sha256': receipt['input']['sha256'],
                     'decompiled_sha256': receipt['output']['sha256']},
@@ -409,7 +429,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
     for c in components:
         if c.type.name == 'AudioSource' and key(c) not in car_sources: voice(c)
     # fpscontroller.pointKefe slide voice. The player root is not an audio root.
-    point = manifest['conditions']['player_brush']['voice_source']
+    point = manifest['conditions']['player_brush']['tool']['voice_source']
     if point: voice(source.get(point['file'], point['path_id']),
         [method('objSlideOnColliderScript', 'Update'), method('objSlideOnColliderScript', 'Disable')])
     # AirPlaneSpawnScript.Update spawns the sky prefabs. Their loop sources play on awake.
@@ -443,11 +463,23 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
             'settings': {**audio['shared']['settings'], 'priority': priority}, 'mixer': audio['shared']['mixer'],
             'doppler': prefab_data['DopplerLevel'], 'pan': prefab_data['Pan2D']})
     # randomFlyer.Sound plays its clip through mainscript.PlayClipAtPoint at AudioPriorities[3].
+    # Loot tool loops: one car voice template for each prototype tool, at its root offset.
+    for tool in manifest['conditions']['prototype_tools']:
+        (kind,record),=tool['kind'].items()
+        voice_source=record['tool']['voice_source']
+        if voice_source is None or (kind=='brush' and not record['tool']['has_sound']):continue
+        reader=source.get(voice_source['file'],voice_source['path_id'])
+        root=source.get(tool['prototype']['file'],tool['prototype']['path_id'])
+        record['sound']=car_sound(reader,root,None)
     flyer['voice'] = shared_voice(PRIORITIES[3])
     # nyulscript.Die plays a random Sdie clip through mainscript.PlayClipAtPoint at AudioPriorities[3].
     rabbit = manifest['creatures']['rabbit']
     rabbit['die_clips'] = [clip(source.get(c['file'], c['path_id'])) for c in rabbit['die_clips']]
     rabbit['die_voice'] = shared_voice(PRIORITIES[3])
+    # nyulscript Roar, Attack and the idle growl also play through mainscript.PlayClipAtPoint at AudioPriorities[3].
+    evil = rabbit['evil']
+    for field in ('roar_clips', 'idle_clips', 'attack_clips'):
+        evil[field] = [clip(source.get(c['file'], c['path_id'])) for c in evil[field]]
     def binding(owner, trigger, pointers, gain, pitch, priority, evidence, route=None, voice_id=None):
         choices = [clip(source.resolve(owner, p)) for p in pointers if p['m_PathID']]
         if not choices: return None
@@ -766,6 +798,11 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
             for f in ['SS','SC','SC2']]
         for v in template[:2]:v['priority']=PRIORITIES[5]
         templates.append((identity,template))
+        # SS, SC and SC2 each have a stimulscript, at a position in the radio item frame.
+        owner=item_root(source,source.transform_for(source.resolve(r,d['m_GameObject'])))
+        for index,f in enumerate(['SS','SC','SC2']):
+            stimulus=sound_stimulus(source,[source.resolve(r,d[f])],owner)
+            if stimulus is not None:audio['radio_stimuli'].append({'radio':identity,'voice':index,**stimulus})
     if not templates:raise ValueError('Missing portable radio prefabs')
     audio['portable_radios']=radio_voice_groups(templates)
     # Preserve the compiled group graph, snapshot parameters, and native effect identity.
@@ -813,6 +850,10 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
         if field not in audio:raise ValueError(f'Missing required selected audio: {field}')
     for voice_record in audio['voices']:
         if not voice_record['methods']:raise ValueError(f"Audio voice lacks source control flow: {voice_record['source']}")
+    engines=[e['audio'] for p in manifest['world']['prototypes'] for e in p.get('engines',[]) if e.get('audio')]
+    horns=[p['vehicle']['audio']['horn'] for p in manifest['world']['prototypes'] if p.get('vehicle') and p['vehicle']['audio']['horn']]
+    print(f"Sound stimuli: {sum(e['stimulus'] is not None for e in engines)}/{len(engines)} engines, "
+          f"{sum(h['stimulus'] is not None for h in horns)}/{len(horns)} horns, {len(audio['radio_stimuli'])} radio voices",flush=True)
     validate_audio_export(audio,output,manifest)
     for identity in sorted(getattr(source, 'item_clips', set())):
         clip(source.get(*identity), 'effect')
@@ -847,6 +888,11 @@ def validate_audio_export(audio: dict, output: Path, manifest: dict) -> None:
         # Linear rolloff is defined from distance 0. The airplane source starts there.
         if not math.isfinite(v['min_distance']) or not math.isfinite(v['max_distance']) or not 0<=v['min_distance']<=v['max_distance'] or v['max_distance']<=0 or v['min_distance']==0 and v['rolloff_mode']!=1:
             raise ValueError('Invalid audio distance')
+    radios={tuple(sorted(r.items())) for g in audio['portable_radios'] for r in g['sources']}
+    for r in audio['radio_stimuli']:
+        if (tuple(sorted(r['radio'].items())) not in radios or r['voice'] not in (0,1,2) or len(r['offset'])!=3
+                or not all(map(math.isfinite,[*r['offset'],r['max_sound_value']])) or r['max_sound_value']<0):
+            raise ValueError('Invalid radio stimulus')
     # The runtime indexes car voice templates by id.
     if [v['id'] for v in audio['car_voices']]!=list(range(1,len(audio['car_voices'])+1)):
         raise ValueError('Car voice ids must run 1..n')

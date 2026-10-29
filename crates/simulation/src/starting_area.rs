@@ -6,7 +6,7 @@ use crate::interaction::{
     items::{ItemStore, node_pose},
 };
 use crate::player::{PlayerState, PlayerStepContext};
-use crate::reference::{BodyId, ItemId, NodeId, ReferenceError, ReferenceManifest};
+use crate::reference::{BodyId, ItemId, NodeId, PrototypeTool, ReferenceError, ReferenceManifest};
 use crate::simulation::{
     DriveInput, FIXED_DT, FrameInput,
     engine::{EngineInput, EngineOutput, EngineRecords, InstalledEngineInput},
@@ -1010,33 +1010,37 @@ impl GarageRuntime {
 
     fn sync_tool_audio(&mut self, reference: &ReferenceManifest) {
         if let Some(audio) = &mut self.audio {
-            for (b, s) in reference
-                .conditions
-                .brushes
-                .iter()
-                .zip(self.area.interaction.cleaning.signals())
-            {
-                if let Some(voice) = b.tool.voice {
+            let cleaning = &self.area.interaction.cleaning;
+            let c = &reference.conditions;
+            let brushes = c.brushes.iter().map(|b| (b.item, b.tool.voice));
+            for (item, voice) in brushes.chain(c.sprays.iter().map(|b| (b.item, b.tool.voice))) {
+                if let Some(voice) = voice
+                    && let Some(s) = cleaning.signal(item)
+                {
                     audio.voice(voice, s.playing, s.voice_gain, 1.);
                 }
             }
-            for (b, s) in reference.conditions.sprays.iter().zip(
-                self.area
-                    .interaction
-                    .cleaning
-                    .signals()
-                    .iter()
-                    .skip(reference.conditions.brushes.len()),
-            ) {
-                if let Some(voice) = b.voice {
-                    audio.voice(voice, s.playing, s.voice_gain, 1.);
-                }
-            }
-            // The player brush signal comes last.
-            if let Some(voice) = reference.conditions.player_brush.voice
-                && let Some(s) = self.area.interaction.cleaning.signals().last()
-            {
+            if let Some(voice) = c.player_brush.tool.voice {
+                let s = cleaning.player_signal();
                 audio.voice(voice, s.playing, s.voice_gain, 1.);
+            }
+            audio.tool_loops.clear();
+            for (item, index, _) in cleaning.prototype_tools() {
+                let sound = match &c.prototype_tools[index].kind {
+                    PrototypeTool::Brush { sound, .. } => sound.as_ref(),
+                    PrototypeTool::Spray { sound, .. } => Some(sound),
+                };
+                let (Some(sound), Some(s), Some(placed)) =
+                    (sound, cleaning.signal(item), self.area.items.get(item))
+                else {
+                    continue;
+                };
+                if s.playing {
+                    let p =
+                        to_rapier(placed.pose) * rapier3d::math::Vector::from_array(sound.position);
+                    let p = self.stream.origin.absolute(p.to_array());
+                    audio.tool_loop(item, sound.voice, s.voice_gain, p);
+                }
             }
         }
     }
@@ -1866,6 +1870,7 @@ impl GarageRuntime {
 
     /// Rabbits run in every state. Source `aispawn` sits on the Player.
     fn advance_creatures(&mut self, reference: &ReferenceManifest, dt: f32) {
+        self.bind_rabbit_sounds();
         let player = &self.area.player;
         let body = crate::vehicle::to_rapier(player.body_pose(&self.physics));
         let head = rapier3d::math::Vector::from_array(player.focus_position(&self.physics));
@@ -1892,7 +1897,7 @@ impl GarageRuntime {
                 supports: &supports,
             },
         );
-        self.settle_rabbit_deaths(reference);
+        self.settle_rabbits(reference);
     }
 
     pub fn sky(&self) -> &crate::sky_traffic::SkyTraffic {

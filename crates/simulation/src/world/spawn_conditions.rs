@@ -119,13 +119,14 @@ impl SpawnEvaluation<'_> {
             self.initialization.conditions[i].states[2] =
                 self.random.range_int(0, array(f, "GoList")?.len() as i32);
         }
-        if override_limits.is_some() || flag(f, "randomStart")? {
+        let start = self.random_start(parent, record)?;
+        if override_limits.is_some() || start.start {
             self.initialization.conditions[i].states[1] =
                 self.random.range_int(0, array(f, "MesList")?.len() as i32);
             self.initialization.conditions[i].states[2] =
                 self.random.range_int(0, array(f, "GoList")?.len() as i32);
             self.condition_color(parent, record, depth + 1)?;
-            let original = [integer(f, "randomMin")?, integer(f, "randomMax")?];
+            let original = [start.min, start.max];
             let limits = match override_limits {
                 Some([0, 0]) if original == [0, 0] => [0, 4],
                 Some([0, 0]) => original,
@@ -238,16 +239,9 @@ impl SpawnEvaluation<'_> {
         }
         let i = self.condition_index(parent, record)?;
         self.initialization.conditions[i].color = color;
-        let low = if flag(f, "enableOverrideMin")? {
-            integer(f, "overRideMin")?
-        } else {
-            limits[0]
-        };
-        let high = if flag(f, "enableOverrideMax")? {
-            integer(f, "overRideMax")?
-        } else {
-            limits[1]
-        };
+        let start = self.random_start(parent, record)?;
+        let low = start.override_min.unwrap_or(limits[0]);
+        let high = start.override_max.unwrap_or(limits[1]);
         self.initialization.conditions[i].states[0] = self.random.range_int(low, high + 1);
         self.refresh_condition(parent, record, depth + 1)?;
         for child in array(f, "childs")? {
@@ -294,6 +288,51 @@ impl SpawnEvaluation<'_> {
             }
         }
         Ok(())
+    }
+}
+/// partconditionscript random start fields.
+struct RandomStart {
+    start: bool,
+    min: i32,
+    max: i32,
+    override_min: Option<i32>,
+    override_max: Option<i32>,
+}
+impl SpawnEvaluation<'_> {
+    /// The random start fields of `record`. The picked start car takes its scene values.
+    fn random_start(
+        &self,
+        parent: &Placement,
+        record: SourceRecord<'_>,
+    ) -> Result<RandomStart, ReferenceError> {
+        if parent.id.layer == super::WorldLayer::Startup
+            && parent.id.children.is_empty()
+            && let Some(c) = self
+                .reference
+                .startup
+                .get(parent.id.ordinal as usize)
+                .and_then(|s| s.conditions.iter().find(|c| &c.source == record.source))
+        {
+            return Ok(RandomStart {
+                start: c.random_start,
+                min: c.random_min,
+                max: c.random_max,
+                override_min: c.override_min,
+                override_max: c.override_max,
+            });
+        }
+        let f = record.fields;
+        Ok(RandomStart {
+            start: flag(f, "randomStart")?,
+            min: integer(f, "randomMin")?,
+            max: integer(f, "randomMax")?,
+            override_min: flag(f, "enableOverrideMin")?
+                .then(|| integer(f, "overRideMin"))
+                .transpose()?,
+            override_max: flag(f, "enableOverrideMax")?
+                .then(|| integer(f, "overRideMax"))
+                .transpose()?,
+        })
     }
 }
 fn condition_depth(depth: usize) -> Result<(), ReferenceError> {

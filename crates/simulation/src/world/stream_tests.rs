@@ -21,6 +21,8 @@ mod guns;
 mod item_seats;
 #[path = "stream_tests/long_trip.rs"]
 mod long_trip;
+#[path = "stream_tests/loot_tools.rs"]
+mod loot_tools;
 #[path = "stream_tests/melee.rs"]
 mod melee;
 #[path = "stream_tests/parked_car.rs"]
@@ -1352,6 +1354,7 @@ fn replay_snapshot(position: [f64; 3]) -> super::super::ObjectSnapshot {
         glow: None,
         radio: None,
         detector: None,
+        tool: None,
         gun: None,
         linear_velocity: [0.; 3],
         angular_velocity: [0.; 3],
@@ -4169,7 +4172,7 @@ fn g08_frame_zero_and_multiple_fixed_steps() {
             .unwrap()
             .quantity
             .unwrap();
-        let before_age = run.area.interaction.cleaning.spray_particles(0, 0)[0].age;
+        let before_age = run.area.interaction.cleaning.particles(spray, 0)[0].age;
         let frame = g08_frame(&mut run, &reference, input, 0.04);
         let mut pending = FrameInput::default();
         frame.merge_fixed_input(&mut pending);
@@ -4184,7 +4187,7 @@ fn g08_frame_zero_and_multiple_fixed_steps() {
             .unwrap()
             .quantity
             .unwrap();
-        let after_age = run.area.interaction.cleaning.spray_particles(0, 0)[0].age;
+        let after_age = run.area.interaction.cleaning.particles(spray, 0)[0].age;
         let anchor = reference.clothing.pose.anchors["RH"].node;
         let hand = to_rapier(run.area.pose.anchor(anchor).unwrap()).inverse()
             * run.physics.rapier().bodies[run.area.items.get(spray).unwrap().body.unwrap()]
@@ -4373,7 +4376,7 @@ fn g08_frame_blocked_states_do_not_mutate() {
             .area
             .interaction
             .cleaning
-            .spray_particles(0, 0)
+            .particles(reference.conditions.sprays[0].item, 0)
             .iter()
             .map(|p| p.age)
             .collect();
@@ -4427,7 +4430,7 @@ fn g08_frame_blocked_states_do_not_mutate() {
             run.area
                 .interaction
                 .cleaning
-                .spray_particles(0, 0)
+                .particles(reference.conditions.sprays[0].item, 0)
                 .iter()
                 .map(|p| p.age)
                 .collect::<Vec<_>>(),
@@ -5266,7 +5269,7 @@ fn g08_app_input_skip_consumes_tools_and_particles_once() {
                 run.area
                     .interaction
                     .cleaning
-                    .spray_particles(0, 0)
+                    .particles(reference.conditions.sprays[0].item, 0)
                     .is_empty()
             );
             pending.merge(FrameInput {
@@ -5295,7 +5298,7 @@ fn g08_app_input_skip_consumes_tools_and_particles_once() {
             .area
             .interaction
             .cleaning
-            .spray_particles(0, 0)
+            .particles(reference.conditions.sprays[0].item, 0)
             .iter()
             .map(|p| p.age)
             .collect();
@@ -5324,7 +5327,7 @@ fn g08_app_input_skip_consumes_tools_and_particles_once() {
             run.area
                 .interaction
                 .cleaning
-                .spray_particles(0, 0)
+                .particles(reference.conditions.sprays[0].item, 0)
                 .iter()
                 .map(|p| p.age)
                 .collect::<Vec<_>>(),

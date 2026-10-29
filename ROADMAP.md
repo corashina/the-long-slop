@@ -46,10 +46,9 @@ All tasks are done.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| X03 | Creatures | XL | Evil rabbits (roar and attack), ground UFO and EMP, human monster (attacks hurt the player), breakablescript `DamageFrom` for AI. Rabbits do not yet sense engines, radios or hums. |
+| X03 | Creatures | XL | Ground UFO, EMP and green-eyed evil rabbits, human monster (attacks hurt the player), breakablescript `DamageFrom` for AI. Rabbits do not yet sense the player hum. |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field (also in binoculars), heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. |
-| X11 | Loot repair and paint tools | M | Brushes, sponges and spray paint in loot work as tools. Today only the garage ones do. |
 
 Not planned: multiplayer, VR, stereo 3D, mod events, Steam features, developer tools.
 
@@ -285,6 +284,17 @@ Prepare once:
 5. Save and load with live and dead rabbits, and with a rabbit that lost its eyes.
 6. Check F3 near 10 rabbits. Compare with the frame rate rule.
 
+### Evil rabbits (X03 part 2)
+
+1. About one rabbit in four (the big ones) is evil and has glowing red eyes.
+2. An evil rabbit that sees the player roars and stops, then runs at the player and attacks with a bite animation and sound.
+3. A bite of a big evil rabbit hurts the player. It also damages loose items and other rabbits near the bite.
+4. Close to an evil rabbit (about 4 m), it growls every 10 to 30 s.
+5. Start a car engine or hold the horn. Normal rabbits flee from it. Evil rabbits flee from a loud sound far away, but still attack up close.
+6. Turn on a portable radio near rabbits: they react to it like a quiet engine.
+7. Save and load: big rabbits are still evil.
+8. Check F3 near 10 rabbits and a running car. Compare with the frame rate rule.
+
 ### Player movement (vehicle carry, air momentum, wall jump)
 
 1. Park a bus on a slope, release the handbrake and stand inside while it rolls. The player rides inside.
@@ -330,3 +340,20 @@ Prepare once:
 8. Eat each food. Crumbs, meat, turd and chocolate bits fall from the food. Smoke a cigarette: ash falls now and then.
 9. New game between 15 October and 15 November: the start pumpkin glows and flickers at night. Hold it and wear it: the light follows.
 10. Check F3 with steam on, near Bus02, and near the pumpkin. Compare with the frame rate rule.
+
+### Loot tools (X11)
+
+1. Re-export. The log shows "Loot tools: 3 prototypes".
+2. Run `cargo test --lib loot_tools -- --ignored`.
+3. Find a loot wire brush, sponge and spray paint. Pick up each one and hold LMB to use it.
+4. Clean rust and dirt with the loot wire brush and sponge. The brush model moves on the surface, with particles and sound.
+5. Paint a car part with loot spray paint. The can shows its color, sprays particles with sound, and runs out.
+6. Use a loot brush until it wears out. Its scrub part hides and it stops working.
+7. Save and load. Paint left, color and wear stay. Drive away and back: they stay.
+8. Check F3 while you use each loot tool. Compare with the frame rate rule.
+
+### Worn start cars
+
+1. Run `cargo test --lib lada_part_paint_and_repair -- --ignored`. It checks that the start car starts worn.
+2. Start a new game. The Lada body is Used to Old, not 100%, and rust shows. Every new game draws the same state: the startup random is fixed.
+3. Pick two other start cars in the game mode menu. Each starts worn the same way.

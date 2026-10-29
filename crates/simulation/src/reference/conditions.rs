@@ -8,8 +8,10 @@ pub struct ConditionRecord {
     pub brushes: Vec<BrushReference>,
     /// Source `fpscontroller.pointKefe`: the player hand brush of pointing.
     /// `fpscontroller.Start` already set its `mask` (`pointingLayer`) and `distance` (`pointRange`).
-    pub player_brush: BrushTool,
+    pub player_brush: PlayerBrushReference,
     pub sprays: Vec<SprayReference>,
+    /// Brush and spray tools of world prototypes (loot items).
+    pub prototype_tools: Vec<PrototypeToolReference>,
     pub washes: Vec<WashReference>,
     pub collider_bindings: Vec<ConditionColliderBinding>,
     pub repair_tables: Vec<[[bool; 7]; 5]>,
@@ -94,6 +96,60 @@ pub struct BrushReference {
     /// Source `drotkefescript.ownCondition`.
     pub own_condition: ConditionId,
     pub tool: BrushTool,
+    pub nodes: BrushNodes<NodeId>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayerBrushReference {
+    pub tool: BrushTool,
+    pub nodes: BrushNodes<NodeId>,
+}
+
+/// The nodes of a brush: reference nodes, or prototype node sources.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrushNodes<N> {
+    pub scrub_node: Option<N>,
+    pub model: Option<N>,
+    /// None: the slide has no equip or default position (the player point slide).
+    pub model_equip: Option<N>,
+    pub model_default: Option<N>,
+}
+
+/// The tool of a world prototype.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrototypeToolReference {
+    pub prototype: SourceId,
+    pub kind: PrototypeTool,
+}
+
+/// The loop of a prototype tool: a `car_voices` template at a root-relative position.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolSound {
+    pub voice: u32,
+    pub position: [f32; 3],
+}
+
+/// Node fields are prototype node sources. `tool.voice` is None: `sound` plays the loop.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum PrototypeTool {
+    Brush {
+        /// Source `drotkefescript.ownCondition`: a partconditionscript record.
+        own_condition: SourceId,
+        tool: BrushTool,
+        nodes: BrushNodes<SourceId>,
+        sound: Option<ToolSound>,
+    },
+    Spray {
+        nozzle: SourceId,
+        renderer_node: SourceId,
+        tool: SprayTool,
+        sound: ToolSound,
+    },
 }
 
 /// Source `drotkefescript` and its `objSlideOnColliderScript` slide.
@@ -110,11 +166,6 @@ pub struct BrushTool {
     pub wash_mask: u32,
     pub text: u32,
     pub show_text: bool,
-    pub scrub_node: Option<NodeId>,
-    pub model: Option<NodeId>,
-    /// None: the slide has no equip or default position (the player point slide).
-    pub model_equip: Option<NodeId>,
-    pub model_default: Option<NodeId>,
     pub distance: f32,
     pub mask: u32,
     pub position_lerp: f32,
@@ -136,11 +187,20 @@ pub struct BrushTool {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SprayReference {
-    pub source: SourceId,
     pub item: ItemId,
     pub body: BodyId,
     pub pickup: SourceId,
     pub save: SourceId,
+    pub nozzle: NodeId,
+    pub renderer_node: NodeId,
+    pub tool: SprayTool,
+}
+
+/// Source `sprayscript`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SprayTool {
+    pub source: SourceId,
     pub ammo: SourceId,
     pub color_source: SourceId,
     pub float_quantity: bool,
@@ -156,9 +216,7 @@ pub struct SprayReference {
     pub color_types: Vec<String>,
     pub color_palettes: BTreeMap<String, Vec<[f32; 4]>>,
     pub colors: Vec<[f32; 4]>,
-    pub nozzle: NodeId,
     pub renderer: SourceId,
-    pub renderer_node: NodeId,
     pub distance: f32,
     pub mask: u32,
     pub color_lerp: f32,
@@ -399,7 +457,8 @@ impl ConditionRecord {
                 "voice",
             )
         };
-        let tool = |t: &BrushTool| -> Result<(), ReferenceError> {
+        // A fixed tool plays an audio voice. A prototype tool plays a `sound` instead.
+        let tool = |t: &BrushTool, fixed: bool| -> Result<(), ReferenceError> {
             check(&t.source, t.particles.len() <= 2, "particles channels")?;
             check(
                 &t.source,
@@ -407,14 +466,6 @@ impl ConditionRecord {
                 "slide",
             )?;
             check(&t.source, t.cleaning_type < 7, "cleaning_type")?;
-            check(
-                &t.source,
-                [t.model_equip, t.model_default, t.model, t.scrub_node]
-                    .iter()
-                    .flatten()
-                    .all(|n| nodes.contains(n)),
-                "model",
-            )?;
             check(
                 &t.source,
                 finite(&[
@@ -437,66 +488,22 @@ impl ConditionRecord {
                     && t.wash_radius >= 0.,
                 "parameters",
             )?;
-            voice(&t.source, t.voice, &t.voice_source)?;
-            check(
-                &t.source,
-                !t.has_sound || t.voice.is_some(),
-                "voice/has_sound",
-            )?;
+            if fixed {
+                voice(&t.source, t.voice, &t.voice_source)?;
+                check(
+                    &t.source,
+                    !t.has_sound || t.voice.is_some(),
+                    "voice/has_sound",
+                )?;
+            } else {
+                check(&t.source, t.voice.is_none(), "prototype voice")?;
+            }
             for p in &t.particles {
                 validate_particle(&t.source, p, r)?;
             }
             Ok(())
         };
-        for b in &self.brushes {
-            let t = &b.tool;
-            check(
-                &t.source,
-                sources.insert(&t.source) && tool_items.insert(b.item),
-                "id/source",
-            )?;
-            owner(&t.source, b.item, b.body, &b.pickup)?;
-            check(
-                &t.source,
-                !b.save.file.is_empty() && b.save.path_id != 0,
-                "save",
-            )?;
-            check(
-                &t.source,
-                surfaces.get(&b.own_condition).is_some_and(|s| {
-                    r.items
-                        .iter()
-                        .find(|i| i.id == b.item)
-                        .is_some_and(|i| descendant(s.node, i.node))
-                }),
-                "own_condition",
-            )?;
-            check(
-                &t.source,
-                [1, 2].contains(&t.cleaning_type),
-                "cleaning_type",
-            )?;
-            tool(t)?;
-        }
-        let t = &self.player_brush;
-        check(
-            &t.source,
-            sources.insert(&t.source),
-            "player brush id/source",
-        )?;
-        tool(t)?;
-        for t in &self.sprays {
-            check(
-                &t.source,
-                sources.insert(&t.source) && tool_items.insert(t.item),
-                "id/source",
-            )?;
-            owner(&t.source, t.item, t.body, &t.pickup)?;
-            check(
-                &t.source,
-                !t.save.file.is_empty() && t.save.path_id != 0,
-                "save",
-            )?;
+        let spray = |t: &SprayTool, fixed: bool| -> Result<(), ReferenceError> {
             check(
                 &t.source,
                 !t.ammo.file.is_empty() && t.ammo.path_id != 0,
@@ -511,11 +518,6 @@ impl ConditionRecord {
                 &t.source,
                 !t.renderer.file.is_empty() && t.renderer.path_id != 0,
                 "renderer",
-            )?;
-            check(
-                &t.source,
-                nodes.contains(&t.nozzle) && nodes.contains(&t.renderer_node),
-                "nozzle/renderer_node",
             )?;
             check(
                 &t.source,
@@ -550,7 +552,8 @@ impl ConditionRecord {
                             .get(name)
                             .is_some_and(|colors| !colors.is_empty())
                     })
-                    && if t.authored_color_set {
+                    && if t.authored_color_set || !fixed {
+                        // The runtime selects the startup color of a prototype spray.
                         t.startup_palette.is_none() && t.startup_color_index.is_none()
                     } else {
                         let palette = t
@@ -568,11 +571,159 @@ impl ConditionRecord {
                     },
                 "color/palette/index",
             )?;
-            voice(&t.source, t.voice, &t.voice_source)?;
-            check(&t.source, t.voice.is_some(), "voice")?;
+            if fixed {
+                voice(&t.source, t.voice, &t.voice_source)?;
+                check(&t.source, t.voice.is_some(), "voice")?;
+            } else {
+                check(
+                    &t.source,
+                    t.voice.is_none() && t.voice_source.is_some(),
+                    "prototype voice",
+                )?;
+            }
             check(&t.source, t.particles.len() == 1, "spray particle owner")?;
             for p in &t.particles {
                 validate_particle(&t.source, p, r)?;
+            }
+            Ok(())
+        };
+        let reference_nodes = |source: &SourceId, n: &BrushNodes<NodeId>| {
+            check(
+                source,
+                [n.model_equip, n.model_default, n.model, n.scrub_node]
+                    .iter()
+                    .flatten()
+                    .all(|n| nodes.contains(n)),
+                "model",
+            )
+        };
+        let mut prototypes = HashSet::new();
+        for b in &self.brushes {
+            let t = &b.tool;
+            check(
+                &t.source,
+                sources.insert(&t.source) && tool_items.insert(b.item),
+                "id/source",
+            )?;
+            owner(&t.source, b.item, b.body, &b.pickup)?;
+            check(
+                &t.source,
+                !b.save.file.is_empty() && b.save.path_id != 0,
+                "save",
+            )?;
+            check(
+                &t.source,
+                surfaces.get(&b.own_condition).is_some_and(|s| {
+                    r.items
+                        .iter()
+                        .find(|i| i.id == b.item)
+                        .is_some_and(|i| descendant(s.node, i.node))
+                }),
+                "own_condition",
+            )?;
+            check(
+                &t.source,
+                [1, 2].contains(&t.cleaning_type),
+                "cleaning_type",
+            )?;
+            tool(t, true)?;
+            reference_nodes(&t.source, &b.nodes)?;
+        }
+        let t = &self.player_brush.tool;
+        check(
+            &t.source,
+            sources.insert(&t.source),
+            "player brush id/source",
+        )?;
+        tool(t, true)?;
+        reference_nodes(&t.source, &self.player_brush.nodes)?;
+        for s in &self.sprays {
+            let t = &s.tool;
+            check(
+                &t.source,
+                sources.insert(&t.source) && tool_items.insert(s.item),
+                "id/source",
+            )?;
+            owner(&t.source, s.item, s.body, &s.pickup)?;
+            check(
+                &t.source,
+                !s.save.file.is_empty() && s.save.path_id != 0,
+                "save",
+            )?;
+            check(
+                &t.source,
+                nodes.contains(&s.nozzle) && nodes.contains(&s.renderer_node),
+                "nozzle/renderer_node",
+            )?;
+            spray(t, true)?;
+        }
+        let car_voices = r.audio["car_voices"].as_array().map_or(0, |v| v.len()) as u32;
+        let sound = |t: &SourceId, s: &ToolSound| {
+            check(
+                t,
+                (1..=car_voices).contains(&s.voice) && finite(&s.position),
+                "sound",
+            )
+        };
+        for p in &self.prototype_tools {
+            let prototype = r.world.prototypes.iter().find(|w| w.source == p.prototype);
+            let inside =
+                |n: &SourceId| prototype.is_some_and(|w| w.nodes.iter().any(|x| &x.source == n));
+            let source = match &p.kind {
+                PrototypeTool::Brush { tool, .. } => &tool.source,
+                PrototypeTool::Spray { tool, .. } => &tool.source,
+            };
+            check(
+                source,
+                prototype.is_some() && prototypes.insert(&p.prototype) && sources.insert(source),
+                "prototype/source",
+            )?;
+            match &p.kind {
+                PrototypeTool::Brush {
+                    own_condition,
+                    tool: t,
+                    nodes: n,
+                    sound: s,
+                } => {
+                    check(
+                        &t.source,
+                        [1, 2].contains(&t.cleaning_type)
+                            && !own_condition.file.is_empty()
+                            && own_condition.path_id != 0,
+                        "cleaning_type/own_condition",
+                    )?;
+                    tool(t, false)?;
+                    check(
+                        &t.source,
+                        [&n.model_equip, &n.model_default, &n.model, &n.scrub_node]
+                            .into_iter()
+                            .flatten()
+                            .all(inside),
+                        "prototype nodes",
+                    )?;
+                    check(
+                        &t.source,
+                        s.is_some() == (t.has_sound && t.voice_source.is_some()),
+                        "sound/has_sound",
+                    )?;
+                    if let Some(s) = s {
+                        sound(&t.source, s)?;
+                    }
+                }
+                PrototypeTool::Spray {
+                    nozzle,
+                    renderer_node,
+                    tool: t,
+                    sound: s,
+                } => {
+                    check(
+                        &t.source,
+                        inside(nozzle) && inside(renderer_node),
+                        "nozzle/renderer_node",
+                    )?;
+                    spray(t, false)?;
+                    sound(&t.source, s)?;
+                }
             }
         }
         for w in &self.washes {

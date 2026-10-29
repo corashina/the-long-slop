@@ -4,6 +4,8 @@ use crate::boundary::{
     BudgetRow, Change, CigaretteRow, ConditionRow, CreatureBoneRow, CreatureRow, PlaneRow, PoseRow,
     SimFrame, StateBlock, ValveRow,
 };
+use crate::creatures::animator::Action;
+use crate::creatures::evil::EyeKind;
 use crate::interaction::cigarettes::EmberPhase;
 use crate::interaction::items::ItemLocation;
 use crate::reference::{ItemId, ReferenceManifest};
@@ -215,6 +217,8 @@ impl GarageRuntime {
                 (v.visible, PoseRow::VISIBLE),
                 (v.dead, CreatureRow::DEAD),
                 (!v.eyes, CreatureRow::NO_EYES),
+                (v.evil == Some(EyeKind::Natural), CreatureRow::EVIL_EYES),
+                (v.evil == Some(EyeKind::Green), CreatureRow::GREEN_EYES),
             ] {
                 if on {
                     flags |= flag;
@@ -229,6 +233,12 @@ impl GarageRuntime {
                 phase: v.phase,
                 value: v.value,
                 twitch: v.twitch,
+                action: v.action.map_or(CreatureRow::NO_ACTION, |a| match a.action {
+                    Action::Roar => CreatureRow::ROAR,
+                    Action::Attack => CreatureRow::ATTACK,
+                }),
+                action_time: v.action.map_or(0., |a| a.time),
+                action_weight: v.action.map_or(0., |a| a.weight),
                 bones: [start, frame.creature_bones.len() as u32 - start],
             });
         }
@@ -291,8 +301,11 @@ impl GarageRuntime {
         let cleaning = &self.area.interaction.cleaning;
         frame.brush_poses.clear();
         frame.brush_poses.extend(
-            (0..reference.conditions.brushes.len())
-                .map(|i| PoseRow::new(cleaning.model_pose(i, &self.area.items), 0)),
+            reference
+                .conditions
+                .brushes
+                .iter()
+                .map(|b| PoseRow::new(cleaning.model_pose(b.item, &self.area.items), 0)),
         );
         frame.spray_colors.clear();
         frame.spray_colors.extend(

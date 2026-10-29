@@ -54,6 +54,14 @@ pub(super) fn bind(
             ));
         }
     }
+    let attached = attached_at_start(content, prototype, rules, reference)?;
+    // An attached body rides on its target body.
+    let rides_on = |c: &WorldColliderReference, body_index: usize| {
+        c.body == Some(body_index as u32)
+            || attached
+                .iter()
+                .any(|&(plate, target)| target == body_index && c.body == Some(plate as u32))
+    };
     for (part_node, node) in prototype.nodes.iter().enumerate() {
         if !super::spawn_appearance::node_active(prototype, part_node, &content.content.appearance)
         {
@@ -139,7 +147,7 @@ pub(super) fn bind(
                     .iter()
                     .find(|c| c.source == *source)
                     .unwrap();
-                if c.body != Some(body_index as u32) {
+                if !rides_on(c, body_index) {
                     continue;
                 }
                 layers |= 1 << prototype.nodes[c.node as usize].layer;
@@ -189,8 +197,12 @@ pub(super) fn bind(
             .iter()
             .filter_map(|(_, handle)| {
                 let c = &physics.rapier().colliders[*handle];
-                (c.parent() == Some(body))
-                    .then_some((ColliderId((c.user_data >> 64) as u32), *handle))
+                let parent = c.parent()?;
+                (parent == body
+                    || attached.iter().any(|&(plate, target)| {
+                        instance.bodies[target] == body && instance.bodies[plate] == parent
+                    }))
+                .then_some((ColliderId((c.user_data >> 64) as u32), *handle))
             })
             .collect();
         let rigid = &physics.rapier().bodies[body];
@@ -246,7 +258,73 @@ pub(super) fn bind(
         )?;
         interaction.register_generated_part_kind(item, layers);
     }
+    for &(plate, target) in &attached {
+        let plate = instance.bodies[plate];
+        let target = instance.bodies[target];
+        let pose = *physics.rapier().bodies[target].position();
+        for (_, handle) in &instance.colliders {
+            if physics.rapier().colliders[*handle].parent() != Some(plate) {
+                continue;
+            }
+            let local = pose.inverse() * *physics.rapier().colliders[*handle].position();
+            physics.set_collider_parent(*handle, Some(target));
+            physics.edit_collider(*handle, |c| {
+                c.set_position_wrt_parent(local);
+                c.set_density(0.);
+            });
+        }
+        physics.edit_body(plate, |b| b.set_enabled(false));
+    }
     Ok(())
+}
+
+/// Source `attachablescript.Attach(attachAtStartTarget)` locks the body to the target body.
+/// Returns (attached body, target body) prototype body indices.
+fn attached_at_start(
+    content: &ContentInstance,
+    prototype: &WorldPrototypeReference,
+    rules: &SourceRules,
+    reference: &ReferenceManifest,
+) -> Result<Vec<(usize, usize)>, ReferenceError> {
+    let body_of = |node: usize| {
+        prototype
+            .bodies
+            .iter()
+            .position(|b| b.node as usize == node)
+    };
+    let mut attached = Vec::new();
+    for (i, node) in prototype.nodes.iter().enumerate() {
+        if !super::spawn_appearance::node_active(prototype, i, &content.content.appearance) {
+            continue;
+        }
+        let Some(attach) = rules.component(&reference.world, &node.source, "attachablescript")?
+        else {
+            continue;
+        };
+        let Some(target) = optional(attach.fields, "attachAtStartTarget")? else {
+            continue;
+        };
+        let Some(body) = body_of(i) else {
+            continue;
+        };
+        let root = rules.root(&reference.world, target)?;
+        let mut node = prototype
+            .nodes
+            .iter()
+            .position(|n| &n.source == root)
+            .ok_or_else(|| ReferenceError("Generated attach target missing".into()))?;
+        let target = loop {
+            if let Some(b) = body_of(node) {
+                break b;
+            }
+            node = prototype.nodes[node]
+                .parent
+                .ok_or_else(|| ReferenceError("Generated attach target has no body".into()))?
+                as usize;
+        };
+        attached.push((body, target));
+    }
+    Ok(attached)
 }
 
 pub(super) fn nearest_owner(

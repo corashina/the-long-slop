@@ -278,6 +278,9 @@ class GltfExporter(GltfBuilder):
         mapping = {}
         asset = getattr(self.source,'lighting_assets',{}).get(key(roots[0]))
         for material in getattr(self.source,'lighting_extra_materials',{}).get(asset,[]):self.material(material)
+        # State materials that no renderer uses at start, by asset root. Their glTF indices go back to the caller.
+        for material in getattr(self.source,'extra_root_materials',{}).get(key(roots[0]),[]):
+            self.source.extra_material_indices[key(roots[0]),key(material)]=self.material(material)
         for root in roots:
             records.extend(self.source.hierarchy(root, activate_root=True))
         world_prototype=self.world_prototype=all(key(root) in getattr(self.source,'world_prototype_roots',set()) for root in roots)

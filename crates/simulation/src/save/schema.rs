@@ -1,8 +1,8 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 39;
-pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 39;
+pub const SAVE_SCHEMA_VERSION: u32 = 40;
+pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 40;
 pub fn schema_supported(version: u32) -> bool {
     (OLDEST_SAVE_SCHEMA_VERSION..=SAVE_SCHEMA_VERSION).contains(&version)
 }
@@ -459,6 +459,14 @@ pub struct WashSnapshot {
     pub destroyed: bool,
     pub repair_progress: f32,
 }
+/// The live state of a loot tool: paint left, paint color, worn out.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolStateSnapshot {
+    pub quantity: Option<f32>,
+    pub color: Option<[f32; 4]>,
+    pub disabled: bool,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolSnapshot {
@@ -476,7 +484,7 @@ mod g04_ordered_state {
     fn older_schemas_are_rejected_before_payload_reconstruction() {
         for version in [
             6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
-            31, 32, 33, 34, 35, 36, 37, 38, 40,
+            31, 32, 33, 34, 35, 36, 37, 38, 39, 41,
         ] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
@@ -488,9 +496,9 @@ mod g04_ordered_state {
 
     #[test]
     fn current_schema_passes_the_version_gate() {
-        // Schema 39 reaches payload parsing; the empty payload then fails as corrupt data.
+        // Schema 40 reaches payload parsing; the empty payload then fails as corrupt data.
         assert!(matches!(
-            SaveSnapshot::from_json(br#"{"schema_version":39}"#),
+            SaveSnapshot::from_json(br#"{"schema_version":40}"#),
             Err(SaveError::CorruptData(_))
         ));
     }

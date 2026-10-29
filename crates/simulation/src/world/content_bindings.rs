@@ -82,6 +82,13 @@ impl WorldStream {
                     .and_then(|c| c.snapshot.as_ref())
                     .and_then(|s| s.radio)
             });
+            // An unbound loot tool keeps its saved state.
+            snapshot.tool = self.tool_value(id, interaction).unwrap_or_else(|| {
+                self.changes
+                    .get(&key)
+                    .and_then(|c| c.snapshot.as_ref())
+                    .and_then(|s| s.tool)
+            });
             snapshot.detector = self.detector_value(id).or_else(|| {
                 self.changes
                     .get(&key)
@@ -454,6 +461,39 @@ impl WorldStream {
         vehicles: &mut std::collections::BTreeMap<ObjectKey, crate::starting_area::VehicleRuntime>,
         powertrain: &mut crate::simulation::powertrain::PowertrainParts,
     ) -> Result<(), ReferenceError> {
+        // A structure that becomes a content binds again as that content.
+        // Its static control goes before that bind.
+        let mut index = 0;
+        while index < self.static_controls.len() {
+            let id = &self.static_controls[index].content.placement.id;
+            if !self
+                .contents
+                .active
+                .iter()
+                .any(|c| &c.content.placement.id == id && c.item.is_none())
+            {
+                index += 1;
+                continue;
+            }
+            let mut content = self.static_controls.swap_remove(index);
+            self.static_control_revision += 1;
+            if let Some(item) = content.item {
+                unbind_storage(
+                    item,
+                    &self.contents.active,
+                    items,
+                    interaction,
+                    physics,
+                    wheels,
+                )?;
+            }
+            let instance = self
+                .structures
+                .iter()
+                .find(|s| s.placement.id == content.content.placement.id)
+                .unwrap();
+            rollback(&mut content, instance, items, interaction, physics, wheels);
+        }
         for content in &mut self.contents.active {
             crate::world::content_mechanisms::sync(content, items, interaction, physics);
             for binding in &content.bindings {
