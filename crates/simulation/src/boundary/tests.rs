@@ -175,6 +175,7 @@ fn frame_round_trips() {
             poses: [0, 1],
             hidden: [0, 1],
             materials: [0, 1],
+            colors: [0, 1],
         }],
         structure_poses: vec![NodePoseRow {
             node: 2,
@@ -185,6 +186,10 @@ fn frame_round_trips() {
         }],
         hidden_nodes: vec![5],
         node_materials: vec![MaterialRow { node: 1, source: 0 }],
+        node_colors: vec![NodeColorRow {
+            node: 1,
+            color: [0.5, 0.25, 0.125, 1.],
+        }],
         changes: vec![
             Change::Spawn {
                 handle: Handle(1),

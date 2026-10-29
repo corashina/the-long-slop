@@ -178,6 +178,8 @@ pub struct CleaningTools {
     /// Item brushes, sprays, then the player brush.
     signals: Vec<ToolSignals>,
     bindings: HashMap<ColliderId, ConditionColliderBinding>,
+    /// World part colliders and their nearest parent condition (`GetComponentInParent`).
+    world_conditions: HashMap<ColliderHandle, ConditionId>,
     item_conditions: HashMap<ItemId, ConditionId>,
     texts: HashMap<ItemId, u32>,
     washes: Vec<WashEffect>,
@@ -347,6 +349,7 @@ impl CleaningTools {
                 .iter()
                 .map(|b| (b.collider, b.clone()))
                 .collect(),
+            world_conditions: HashMap::new(),
             item_conditions: reference
                 .conditions
                 .surfaces
@@ -379,6 +382,12 @@ impl CleaningTools {
             self.wash_colliders
                 .push((handle, wash, self.collider_enabled[&id]));
         }
+    }
+    pub fn bind_world_condition(&mut self, handle: ColliderHandle, id: ConditionId) {
+        self.world_conditions.insert(handle, id);
+    }
+    pub fn unbind_world_condition(&mut self, handle: ColliderHandle) {
+        self.world_conditions.remove(&handle);
     }
     pub fn sync_wash_colliders(&self, conditions: &ConditionStore, physics: &mut PhysicsWorld) {
         let mut changed = false;
@@ -551,6 +560,7 @@ impl CleaningTools {
         let r = &reference.small_items.spray_bottle;
         let collider = ColliderId((physics.rapier().colliders[handle].user_data >> 64) as u32);
         let selected = self.target(
+            handle,
             collider,
             r.cleaning_type,
             reference,
@@ -651,6 +661,7 @@ impl CleaningTools {
     }
     fn target(
         &self,
+        handle: ColliderHandle,
         collider: ColliderId,
         tool: u8,
         reference: &ReferenceManifest,
@@ -665,6 +676,9 @@ impl CleaningTools {
             .find(|w| w.colliders.iter().any(|&(id, _)| id == collider))
         {
             return Some(Target::Generated(w.owner));
+        }
+        if let Some(id) = self.world_conditions.get(&handle) {
+            return Some(Target::Surface(*id));
         }
         let b = self.bindings.get(&collider)?;
         if let Some(id) = b.wash.filter(|id| conditions.wash(*id).visible()) {
@@ -696,11 +710,15 @@ impl CleaningTools {
     }
     fn paint_target(
         &self,
+        handle: ColliderHandle,
         collider: ColliderId,
         items: &ItemStore,
         parts: &PartAttachments,
         reference: &ReferenceManifest,
     ) -> Option<ConditionId> {
+        if let Some(id) = self.world_conditions.get(&handle) {
+            return Some(*id);
+        }
         let b = self.bindings.get(&collider)?;
         b.ancestor_condition
             .or_else(|| {
@@ -866,6 +884,7 @@ impl CleaningTools {
         };
         let mut selected = hit.and_then(|(handle, _)| {
             self.target(
+                handle,
                 ColliderId((physics.rapier().colliders[handle].user_data >> 64) as u32),
                 b.cleaning_type,
                 reference,
@@ -1178,7 +1197,7 @@ impl CleaningTools {
                 {
                     let id =
                         ColliderId((physics.rapier().colliders[handle].user_data >> 64) as u32);
-                    if let Some(target) = self.paint_target(id, items, parts, reference) {
+                    if let Some(target) = self.paint_target(handle, id, items, parts, reference) {
                         let previous = conditions.get(target).color;
                         let falloff =
                             ((hit.time_of_impact - b.distance) / (1. - b.distance)).clamp(0., 1.);
