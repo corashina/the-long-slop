@@ -113,6 +113,9 @@ fn frame_round_trips() {
             phase: 0.25,
             value: 0.5,
             twitch: 0.1,
+            action: CreatureRow::ATTACK,
+            action_time: 0.3,
+            action_weight: 0.5,
             bones: [0, 1],
         }],
         creature_bones: vec![CreatureBoneRow {

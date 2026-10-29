@@ -1,6 +1,8 @@
 //! Source creature AI: `aispawn`, `aiscript`, `movecreaturescript`, `sensoryscript`,
 //! `stimulscript` and `nyulscript`. Live rabbits run before the physics step.
+pub mod animator;
 pub mod brain;
+pub mod evil;
 pub mod motion;
 pub mod rabbit;
 pub mod ragdoll;
@@ -12,17 +14,19 @@ pub mod stimuli;
 use crate::damage::{BreakHealth, collision_force, try_break, try_break_shoot};
 use crate::reference::{
     ColliderId, CreatureDamage, ItemId, NodeId, RabbitReference, ReferenceError, ReferenceManifest,
-    StimulusKind,
+    StimulusKind, TriggerRole,
 };
 use crate::save::{AbsolutePose, RabbitSnapshot};
 use crate::vehicle::PhysicsWorld;
 use crate::weather::StormRandom;
 use crate::world::WorldOrigin;
+use animator::{Action, ActionPose, ActionTiming};
 use brain::BrainInput;
+use evil::{Events, EyeKind};
 use rabbit::{Rabbit, Size};
 use ragdoll::Bone;
 use rapier3d::math::{Pose, Rotation, Vector};
-use rapier3d::prelude::{ColliderHandle, Ray, RigidBodyHandle};
+use rapier3d::prelude::{ColliderHandle, QueryFilter, Ray, RigidBodyHandle};
 use rig::{Rig, RigPose};
 use senses::{ScanInput, Sensed, cast};
 use spawner::{Player, Spawner};
@@ -32,6 +36,8 @@ use stimuli::{PlayerStimuli, Stimuli};
 const SUPPORT_INTERVAL: f64 = 1.;
 /// `breakablescript.OnCollisionEnter` of an AI ignores colliders on these layers.
 const IGNORED_HIT_LAYERS: [u32; 2] = [15, 17];
+/// `SetBasedOnSize` calls `GetEvil(natural: true)` above this size.
+const EVIL_SIZE: f32 = 0.75;
 
 /// What the rabbits read of the world this step.
 pub struct StepInput<'a> {
@@ -58,6 +64,17 @@ pub struct RabbitView {
     pub visible: bool,
     pub dead: bool,
     pub eyes: bool,
+    pub evil: Option<EyeKind>,
+    pub action: Option<ActionPose>,
+}
+
+/// One `PlayClipAtPoint` of `nyulscript`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sound {
+    pub rabbit: u32,
+    pub clip: u32,
+    pub position: Vector,
+    pub pitch: f32,
 }
 
 pub struct Creatures {
@@ -70,6 +87,13 @@ pub struct Creatures {
     bone_nodes: Vec<usize>,
     /// Rabbit id and the die sound flag of each `Die` this step.
     deaths: Vec<(u32, bool)>,
+    sounds: Vec<Sound>,
+    /// Attack trigger colliders to add to (true) or remove from (false) the trigger roles.
+    triggers: Vec<(ColliderHandle, bool)>,
+    /// Colliders that an attack trigger touches this step.
+    touched: Vec<ColliderHandle>,
+    /// `Roar` and `Attack` state timing.
+    timings: [ActionTiming; 2],
     eye: usize,
     sources: PlayerStimuli,
     stimuli: Stimuli,
@@ -129,18 +153,32 @@ impl Creatures {
             .ok_or_else(|| ReferenceError("Rabbit eye outside the rig".into()))?;
         let sources = PlayerStimuli::new(c)
             .ok_or_else(|| ReferenceError("Missing player stimulus sources".into()))?;
+        let durations = rig.action_durations();
+        let timings = [Action::Roar, Action::Attack].map(|a| {
+            let state = a.state(&r.animator.actions);
+            ActionTiming {
+                rate: state.speed / durations[a.index()],
+                enter: state.enter,
+                leave: state.leave,
+            }
+        });
+        let max = r.spawner.max_count as usize;
         Ok(Self {
             pose: rig.pose(),
             rig,
             bones,
             children,
             bone_nodes,
-            deaths: Vec::with_capacity(r.spawner.max_count as usize),
+            deaths: Vec::with_capacity(max),
+            sounds: Vec::with_capacity(max),
+            triggers: Vec::with_capacity(max),
+            touched: Vec::new(),
+            timings,
             eye,
             sources,
             stimuli: Stimuli::new(),
             spawner: Spawner::new(now),
-            rabbits: Vec::with_capacity(r.spawner.max_count as usize),
+            rabbits: Vec::with_capacity(max),
             next_id: 1,
             random: StormRandom(seed ^ 0x7261_6262_6974_0001),
         })
@@ -155,10 +193,30 @@ impl Creatures {
         self.deaths.pop()
     }
 
+    /// The next evil rabbit clip of this step.
+    pub fn take_sound(&mut self) -> Option<Sound> {
+        self.sounds.pop()
+    }
+
+    /// The next attack trigger collider and its `playerdeathtriggerscript` role, or none when
+    /// the role ends.
+    pub fn take_trigger(
+        &mut self,
+        r: &RabbitReference,
+    ) -> Option<(ColliderHandle, Option<TriggerRole>)> {
+        let t = &r.evil.trigger;
+        self.triggers.pop().map(|(handle, on)| {
+            let role = TriggerRole::Hazard {
+                damage_player: t.damage_player,
+                damage_breakable: t.damage_breakable,
+            };
+            (handle, on.then_some(role))
+        })
+    }
+
     /// `nyulscript.Die`: a random `Sdie` clip.
     pub fn die_clip(&mut self, r: &RabbitReference) -> u32 {
-        let index = (self.random.unit() * r.die_clips.len() as f32) as usize;
-        r.die_clips[index.min(r.die_clips.len() - 1)]
+        pick(&r.die_clips, &mut self.random)
     }
 
     /// `weaponscript.Shot` on a live rabbit collider. A `breakchilds` collider multiplies the
@@ -225,11 +283,16 @@ impl Creatures {
             &r.animator,
             rabbit.phase,
             rabbit.blend_value(),
+            rabbit.animator.pose,
             rabbit.twitch,
             rabbit.size.scale,
             &mut self.pose,
         );
         let poses = ragdoll::poses(r, &self.bone_nodes, root, &self.pose);
+        rabbit.evil.die();
+        if let Some(trigger) = rabbit.trigger.take() {
+            self.triggers.push((trigger.handle, false));
+        }
         physics.remove_body(rabbit.body);
         rabbit.body = RigidBodyHandle::invalid();
         rabbit.colliders.clear();
@@ -278,6 +341,7 @@ impl Creatures {
             r,
             RigidBodyHandle::invalid(),
             Vec::new(),
+            None,
             size,
             poses[0].translation,
             now,
@@ -388,16 +452,61 @@ impl Creatures {
             rabbit.last_velocity = velocity;
             step_rabbit(
                 r,
-                &self.rig,
+                &Shared {
+                    rig: &self.rig,
+                    eye: self.eye,
+                    timings: &self.timings,
+                    player: input.player.position,
+                },
                 &mut self.pose,
-                self.eye,
                 rabbit,
                 self.stimuli.list(),
                 physics,
                 input.dt,
                 now,
                 &mut self.random,
+                &mut self.sounds,
             );
+        }
+        self.attack_rabbits(r, physics, input.dt);
+    }
+
+    /// `playerdeathtriggerscript.OnTriggerStay` on other rabbits: `TryBreak(damageBreakable * dt)`
+    /// for each of their colliders in the trigger.
+    fn attack_rabbits(&mut self, r: &RabbitReference, physics: &PhysicsWorld, dt: f32) {
+        let rules = &r.damage.rules;
+        let damage = r.evil.trigger.damage_breakable * dt;
+        for i in 0..self.rabbits.len() {
+            let attacker = &self.rabbits[i];
+            let Some(trigger) = attacker
+                .trigger
+                .as_ref()
+                .filter(|_| attacker.alive && attacker.active && attacker.evil.trigger)
+            else {
+                continue;
+            };
+            let collider = &physics.rapier().colliders[trigger.handle];
+            let filter = QueryFilter::default()
+                .exclude_sensors()
+                .exclude_rigid_body(attacker.body)
+                .groups(collider.collision_groups());
+            self.touched.clear();
+            self.touched.extend(
+                physics
+                    .queries(filter)
+                    .intersect_shape(*collider.position(), collider.shape())
+                    .map(|(handle, _)| handle),
+            );
+            for handle in &self.touched {
+                let Some(rabbit) = self.rabbits.iter_mut().find(|rabbit| {
+                    rabbit.alive && rabbit.colliders.iter().any(|c| c.handle == *handle)
+                }) else {
+                    continue;
+                };
+                if try_break(rules, &mut rabbit.health.health, damage) {
+                    kill(rabbit, true, &mut self.deaths);
+                }
+            }
         }
     }
 
@@ -410,19 +519,26 @@ impl Creatures {
         shoot_health: f32,
         now: f64,
     ) -> Result<&mut Rabbit, ReferenceError> {
-        let (body, colliders) =
+        let (body, colliders, trigger) =
             rabbit::insert_body(r, &self.rig, &self.bones, &size, pose, physics)?;
+        self.triggers.push((trigger.handle, true));
         let mut rabbit = Rabbit::new(
             self.next_id,
             r,
             body,
             colliders,
+            Some(trigger),
             size,
             pose.translation,
             now,
             &mut self.random,
         );
         rabbit.health.shoot_health = shoot_health;
+        if size.size > EVIL_SIZE {
+            rabbit
+                .evil
+                .get_evil(&r.evil, &mut rabbit.brain, true, now, &mut self.random);
+        }
         self.next_id += 1;
         self.rabbits.push(rabbit);
         Ok(self.rabbits.last_mut().unwrap())
@@ -440,6 +556,8 @@ impl Creatures {
             visible: rabbit.active || !rabbit.alive,
             dead: !rabbit.bones.is_empty(),
             eyes: rabbit.senses.has_eyes,
+            evil: rabbit.evil.kind,
+            action: rabbit.animator.pose,
         })
     }
 
@@ -561,6 +679,7 @@ fn accelerated(limit: f32, velocity: Vector, last: Vector) -> bool {
 fn kill(rabbit: &mut Rabbit, sound: bool, deaths: &mut Vec<(u32, bool)>) {
     if rabbit.alive {
         rabbit.alive = false;
+        rabbit.evil.die();
         deaths.push((rabbit.id, sound));
     }
 }
@@ -571,20 +690,37 @@ fn root_pose(physics: &PhysicsWorld, rabbit: &Rabbit) -> Pose {
     *physics.rapier().bodies[body].position()
 }
 
-/// `aiscript.Update`, `movecreaturescript.Update` and `nyulscript.SetAnims` of one rabbit.
+/// What every rabbit step reads.
+struct Shared<'a> {
+    rig: &'a Rig,
+    eye: usize,
+    timings: &'a [ActionTiming; 2],
+    /// `mainscript.M.player` position.
+    player: Vector,
+}
+
+/// A random clip of `clips`.
+fn pick(clips: &[u32], random: &mut StormRandom) -> u32 {
+    let index = (random.unit() * clips.len() as f32) as usize;
+    clips[index.min(clips.len() - 1)]
+}
+
+/// `aiscript.Update`, `movecreaturescript.Update` and `nyulscript.Update` and `SetAnims` of one
+/// rabbit.
 #[allow(clippy::too_many_arguments)]
 fn step_rabbit(
     r: &RabbitReference,
-    rig: &Rig,
+    shared: &Shared,
     pose: &mut RigPose,
-    eye: usize,
     rabbit: &mut Rabbit,
     stimuli: &[stimuli::Stimulus],
     physics: &mut PhysicsWorld,
     dt: f32,
     now: f64,
     random: &mut StormRandom,
+    sounds: &mut Vec<Sound>,
 ) {
+    let rig = shared.rig;
     let body = &physics.rapier().bodies[rabbit.body];
     let root = *body.position();
     let velocity = body.linvel();
@@ -592,12 +728,21 @@ fn step_rabbit(
         &r.animator,
         rabbit.phase,
         rabbit.blend_value(),
+        rabbit.animator.pose,
         rabbit.twitch,
         rabbit.size.scale,
         pose,
     );
+    let evil = &r.evil;
+    let mut events = rabbit.evil.update(
+        evil,
+        &mut rabbit.brain,
+        now,
+        (shared.player - root.translation).length_squared(),
+        random,
+    );
     if now >= rabbit.senses.next_scan {
-        let e = pose.model[eye];
+        let e = pose.model[shared.eye];
         let input = ScanInput {
             physics,
             own: rabbit.body,
@@ -609,10 +754,11 @@ fn step_rabbit(
         rabbit.senses.next_scan = now + f64::from(r.senses.scan_interval);
     }
     let forward = root.rotation * -Vector::Z;
+    let own = rabbit.body;
     let ray = |direction: Vector, length: f32, mask: u32| {
         cast(
             physics,
-            rabbit.body,
+            own,
             None,
             Ray::new(root.translation, direction),
             length,
@@ -638,6 +784,19 @@ fn step_rabbit(
         },
         random,
     );
+    if let Some((angle, distance)) = steer.see_target {
+        let seen = rabbit.evil.see_target(
+            evil,
+            &mut rabbit.brain,
+            angle,
+            distance,
+            rabbit.size.size,
+            now,
+        );
+        events.roar |= seen.roar;
+        events.attack |= seen.attack;
+    }
+    play(evil, rabbit, root.translation, events, random, sounds);
     let m = &r.motion;
     let mut velocity = velocity;
     if steer.jump && ray(-Vector::Y, m.grounded_ray_distance, m.grounded_mask) {
@@ -647,6 +806,7 @@ fn step_rabbit(
         velocity,
         steer.move_dir.unwrap_or(Vector::ZERO),
         rabbit.size.speed,
+        rabbit.evil.speed_modifier(evil),
         m.acceleration,
         dt,
     );
@@ -659,9 +819,13 @@ fn step_rabbit(
     rabbit.run_value +=
         (steer.move_speed - rabbit.run_value) * (dt * r.size.run_lerp).clamp(0., 1.);
     let duration = rig.duration(&r.animator, rabbit.blend_value(), pose);
+    let previous = rabbit.phase;
     if duration > 0. {
         rabbit.phase = (rabbit.phase + dt / duration).rem_euclid(1.);
     }
+    rabbit
+        .animator
+        .step(shared.timings, previous, &mut rabbit.phase, dt);
     rabbit.twitch = (rabbit.twitch + dt / rig.overlay_duration()).rem_euclid(1.);
     physics.edit_body(rabbit.body, |b| {
         b.set_linvel(velocity, true);
@@ -672,6 +836,47 @@ fn step_rabbit(
         let local = Pose::from_parts(f.position, f.rotation) * c.offset;
         physics.edit_collider(c.handle, |collider| collider.set_position_wrt_parent(local));
     }
+    if let Some(t) = &rabbit.trigger {
+        let on = rabbit.evil.trigger;
+        if on || physics.rapier().colliders[t.handle].is_enabled() {
+            let f = pose.model[t.node];
+            let local = Pose::from_parts(f.position, f.rotation) * t.offset;
+            physics.edit_collider(t.handle, |collider| {
+                collider.set_enabled(on);
+                collider.set_position_wrt_parent(local);
+            });
+        }
+    }
+}
+
+/// `Roar`, `Attack` and the idle growl: the animator triggers and the clips.
+fn play(
+    r: &crate::reference::EvilReference,
+    rabbit: &mut Rabbit,
+    position: Vector,
+    events: Events,
+    random: &mut StormRandom,
+    sounds: &mut Vec<Sound>,
+) {
+    let mut sound = |clips: &[u32], pitch| {
+        sounds.push(Sound {
+            rabbit: rabbit.id,
+            clip: pick(clips, random),
+            position,
+            pitch,
+        })
+    };
+    if events.roar {
+        sound(&r.roar_clips, r.roar_pitch);
+    }
+    if events.attack {
+        sound(&r.attack_clips, 1.);
+    }
+    if events.idle {
+        sound(&r.idle_clips, 1.);
+    }
+    rabbit.animator.roar |= events.roar;
+    rabbit.animator.attack |= events.attack;
 }
 
 #[cfg(test)]

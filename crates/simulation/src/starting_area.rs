@@ -1896,7 +1896,7 @@ impl GarageRuntime {
                 supports: &supports,
             },
         );
-        self.settle_rabbit_deaths(reference);
+        self.settle_rabbits(reference);
     }
 
     pub fn sky(&self) -> &crate::sky_traffic::SkyTraffic {

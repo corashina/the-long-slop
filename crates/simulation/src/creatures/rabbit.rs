@@ -1,10 +1,12 @@
 //! Source `nyulscript`: size values and `SetAnims`. The live body is `ragdollactivatescript.RB`.
+use super::animator::AnimatorState;
 use super::brain::Brain;
+use super::evil::Evil;
 use super::ragdoll::Bone;
 use super::rig::Rig;
 use super::senses::{Sensed, Senses};
 use crate::damage::BreakHealth;
-use crate::reference::{RabbitReference, ReferenceError};
+use crate::reference::{self, RabbitReference, ReferenceError};
 use crate::vehicle::{PhysicsWorld, collider_builder, step_surface_bits, tag_bits};
 use crate::weather::StormRandom;
 use rapier3d::math::{Pose, Vector};
@@ -84,6 +86,10 @@ pub struct Rabbit {
     pub active: bool,
     pub next_support_check: f64,
     pub colliders: Vec<LiveCollider>,
+    /// `PlayerDeathTrigger`. It follows the rig and is on while `evil.trigger` is set.
+    pub trigger: Option<LiveCollider>,
+    pub evil: Evil,
+    pub animator: AnimatorState,
     /// Ragdoll bones of a dead rabbit, in body order.
     pub bones: Vec<Bone>,
 }
@@ -97,6 +103,7 @@ impl Rabbit {
 
 /// Inserts the live body at `pose` with the anim colliders at their rig rest frames.
 /// Bone colliders sit on kinematic bones in the source: they take no contact forces here.
+/// The attack trigger starts off. Returns the body, the anim colliders and the trigger.
 pub fn insert_body(
     r: &RabbitReference,
     rig: &Rig,
@@ -104,7 +111,7 @@ pub fn insert_body(
     size: &Size,
     pose: Pose,
     physics: &mut PhysicsWorld,
-) -> Result<(RigidBodyHandle, Vec<LiveCollider>), ReferenceError> {
+) -> Result<(RigidBodyHandle, Vec<LiveCollider>, LiveCollider), ReferenceError> {
     let b = &r.body;
     let builder = RigidBodyBuilder::dynamic()
         .pose(pose)
@@ -115,9 +122,8 @@ pub fn insert_body(
         .angular_damping(b.angular_damping);
     let body = physics.insert_body(builder);
     let mut frames = rig.pose();
-    rig.sample(&r.animator, 0., 0., 0., size.scale, &mut frames);
-    let mut colliders = Vec::with_capacity(b.colliders.len());
-    for (c, bone) in b.colliders.iter().zip(bones) {
+    rig.sample(&r.animator, 0., 0., None, 0., size.scale, &mut frames);
+    let mut insert = |c: &reference::LiveCollider, bone: bool, enabled: bool| {
         let node = rig
             .index(c.node)
             .ok_or_else(|| ReferenceError("Rabbit collider outside the rig".into()))?;
@@ -128,6 +134,7 @@ pub fn insert_body(
         let local = Pose::from_parts(f.position, f.rotation) * offset;
         collider = collider
             .position(local)
+            .enabled(enabled)
             .friction(c.friction)
             .restitution(c.restitution)
             .sensor(c.sensor)
@@ -138,30 +145,39 @@ pub fn insert_body(
                 InteractionTestMode::And,
             ))
             .user_data(step_surface_bits(c.step_surface) | tag_bits(c.tag));
-        if *bone {
+        if bone {
             collider = collider.solver_groups(InteractionGroups::none());
         } else {
             // `breakablescript.OnCollisionEnter` reads the contacts of the root body.
             collider = collider.active_events(ActiveEvents::COLLISION_EVENTS);
         }
         let handle = physics.insert_collider_with_parent(collider.build(), body);
-        colliders.push(LiveCollider {
+        Ok::<_, ReferenceError>(LiveCollider {
             handle,
             node,
             offset,
-            bone: *bone,
-        });
-    }
+            bone,
+        })
+    };
+    let colliders = b
+        .colliders
+        .iter()
+        .zip(bones)
+        .map(|(c, bone)| insert(c, *bone, true))
+        .collect::<Result<_, _>>()?;
+    let trigger = insert(&r.evil.trigger.collider, true, false)?;
     physics.refresh_queries();
-    Ok((body, colliders))
+    Ok((body, colliders, trigger))
 }
 
 impl Rabbit {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         id: u32,
         r: &RabbitReference,
         body: RigidBodyHandle,
         colliders: Vec<LiveCollider>,
+        trigger: Option<LiveCollider>,
         size: Size,
         position: Vector,
         now: f64,
@@ -182,11 +198,14 @@ impl Rabbit {
             phase: 0.,
             twitch: 0.,
             senses: Senses::new(&r.senses, random, now),
-            brain: Brain::new(position),
+            brain: Brain::new(&r.brain, position),
             alive: true,
             active: true,
             next_support_check: now,
             colliders,
+            trigger,
+            evil: Evil::default(),
+            animator: AnimatorState::default(),
             bones: Vec::new(),
         }
     }
