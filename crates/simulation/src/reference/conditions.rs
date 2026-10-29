@@ -552,7 +552,8 @@ impl ConditionRecord {
                             .get(name)
                             .is_some_and(|colors| !colors.is_empty())
                     })
-                    && if t.authored_color_set {
+                    && if t.authored_color_set || !fixed {
+                        // The runtime selects the startup color of a prototype spray.
                         t.startup_palette.is_none() && t.startup_color_index.is_none()
                     } else {
                         let palette = t

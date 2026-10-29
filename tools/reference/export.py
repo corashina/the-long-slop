@@ -363,6 +363,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     manifest['item_prototypes'] = recover_item_prototypes(source, manifest, output)
     from .small_items import recover_small_items, validate_small_items
     manifest['small_items'] = recover_small_items(source, manifest, output)
+    from .conditions import recover_prototype_tools
+    manifest['conditions']['prototype_tools'] = recover_prototype_tools(source, manifest, output)
     from .computer import recover_computer, validate_computer
     manifest['computer'] = recover_computer(source, manifest)
     from .melee import recover_melee, validate_melee

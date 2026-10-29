@@ -292,11 +292,66 @@ def export_condition_variants(exporter, records, mapping):
         source.condition_variants[identity]=renderers
 
 
+def _linked(source,reader,pointer):return source.resolve(reader,pointer) if pointer['m_PathID'] else None
+
+
+def _required(source,reader,pointer,field):
+    target=_linked(source,reader,pointer)
+    if target is None:raise ValueError(f'{key(reader)} {field} unresolved')
+    return target
+
+
+def _sid(reader):return source_id(reader) if reader else None
+
+
+def brush_tool(source,reader,d,slide_overrides,node_of,output):
+    """drotkefescript and its objSlideOnColliderScript slide, then its nodes. `slide_overrides` replaces slide fields set at Start.
+    `node_of(reader,pointer)` gives a node of a pointer."""
+    from .particles import particle
+    slide=_required(source,reader,d['slide'],'slide');sd={**source.read(slide),**slide_overrides}
+    nodes={'scrub_node':node_of(reader,d['drot']) if d['drot']['m_PathID'] else None,
+        'model':node_of(slide,sd['model']) if sd['model']['m_PathID'] else None,
+        'model_equip':node_of(slide,sd['modelEquipPos']) if sd['modelEquipPos']['m_PathID'] else None,
+        'model_default':node_of(slide,sd['modelDefPos']) if sd['modelDefPos']['m_PathID'] else None}
+    root=source.transform_for(source.resolve(reader,d['m_GameObject']))
+    return {'source':source_id(reader),'slide':source_id(slide),
+        'cleaning_type':d['cleaningType'],'can_ruin':bool(d['canRuin']),'repair_modifier':d['repairModifier'],
+        'min_force':d['minForce'],'wash_radius':d['washRadius'],'wash_mask':d['washMask']['m_Bits'],
+        'text':d['text'],'show_text':not bool(d['dontshowtext']),
+        'distance':sd['distance'],'mask':sd['LM']['m_Bits'],'position_lerp':sd['posLerp'],'rotation_lerp':sd['rotLerp'],
+        'contact_offset':sd['modelDistfromCollider'],'minimum_displacement':sd['minSpeed'],'maximum_displacement':sd['maxSpeed'],
+        'disabled':bool(sd['disabled']),'both_work':bool(sd['bothWork']),'sound_when_disabled':bool(sd['soundWhenDisabled']),'has_sound':bool(sd['hasSound']),
+        'max_volume':sd['maxVolume'],'volume_lerp':sd['volumeLerp'],'voice_source':_sid(_linked(source,slide,sd['SSource'])),'voice':None,
+        'particles':[particle(source,_required(source,slide,sd[field],field),f'cleaning-{reader.path_id}-{field}',sd[rate],output,root)
+                for flag,field,rate in [('hasParticle1','particle','maxRate'),('hasParticle2','particle2','maxRate2')] if sd[flag]]},nodes
+
+
+def spray_tool(source,reader,d,startup_color,selection,output):
+    """sprayscript fields. `selection` holds startup_palette and startup_color_index."""
+    from .particles import particle
+    ammo=_required(source,reader,d['ammo'],'ammo');ad=source.read(ammo);color=_required(source,reader,d['color'],'color');cd=source.read(color)
+    for name in d['colorTypes']:
+        if name not in source.condition_groups or not source.condition_groups[name]['colors']:
+            raise ValueError(f'{key(reader)} colorTypes missing or empty palette {name}')
+    root=source.transform_for(source.resolve(reader,d['m_GameObject']))
+    return {'source':source_id(reader),**selection,'ammo':source_id(ammo),'color_source':source_id(color),'float_quantity':bool(ad['floatOrInt']),
+        'hide_look_at_count':bool(ad['hideLookAtCount']),'hide_carried_count':bool(ad['hideLookAtCountInInventory']),'no_per_show':bool(ad['noPerShow']),
+        'startup_quantity':ad['fammo'] if ad['floatOrInt'] else float(ad['ammo']),'maximum_quantity':ad['max'],
+        'startup_color':startup_color,'authored_color_set':bool(cd['set']),
+        'color_types':d['colorTypes'],
+        'color_palettes':{name:[[c[k] for k in 'rgba'] for c in source.condition_groups[name]['colors']] for name in d['colorTypes']},'colors':[[c[k] for k in 'rgba'] for c in d['colors']],
+        'renderer':source_id(_required(source,reader,d['R'],'R')),'distance':d['distance'],'mask':d['lm']['m_Bits'],
+        'color_lerp':d['colorLerp'],'paint_loss':d['paintLoss'],'valve_speed':d['valveSpeed'],
+        'startup_valve':d['valve'],'rate':d['rate'],'max_volume':d['maxVolume'],'text':d['text'],
+        'start_speed':d['startSpeed'],'voice_source':_sid(_required(source,reader,d['Saudio'],'Saudio')),'voice':None,
+        'particles':[particle(source,_required(source,reader,d['particle'],'particle'),f'paint-{reader.path_id}',d['rate'],output,root)]}
+
+
 def recover_conditions(source, nodes, components, pointer_node, item_nodes, colliders, output) -> dict:
     from .particles import particle
     import json
     repair,clean,managed=permission_tables(source)
-    result={'surfaces':[],'brushes':[],'player_brush':None,'sprays':[],'washes':[],'collider_bindings':[],
+    result={'surfaces':[],'brushes':[],'player_brush':None,'sprays':[],'prototype_tools':[],'washes':[],'collider_bindings':[],
             'repair_tables':repair,'clean_tables':clean,'repair_rate':source.read(source.get('level1',64919))['repairValueIncrease'],
             'repair_decay_rate':source.read(source.get('level1',64919))['repairValueDecrease']}
     surface_ids={identity:i+1 for i,identity in enumerate(source.condition_readers)}
@@ -354,48 +409,20 @@ def recover_conditions(source, nodes, components, pointer_node, item_nodes, coll
             'same_state_as_parent':bool(d['sameStateAsParent']),'child_new_color':bool(d['isChildnewColor']),
             'random_start_state3':bool(d['randomStartState3InFStart']),'loaded':bool(d['loaded']),
             'renderers':renderers})
-    def brush_tool(reader,d,slide_overrides):
-        """drotkefescript and its objSlideOnColliderScript slide. `slide_overrides` replaces slide fields set at Start."""
-        slide=required(reader,d['slide'],'slide');sd={**source.read(slide),**slide_overrides}
-        return {'source':source_id(reader),'slide':source_id(slide),
-            'cleaning_type':d['cleaningType'],'can_ruin':bool(d['canRuin']),'repair_modifier':d['repairModifier'],
-            'min_force':d['minForce'],'wash_radius':d['washRadius'],'wash_mask':d['washMask']['m_Bits'],
-            'text':d['text'],'show_text':not bool(d['dontshowtext']),
-            'scrub_node':pointer_node(reader,d['drot']) if d['drot']['m_PathID'] else None,
-            'model':pointer_node(slide,sd['model']) if sd['model']['m_PathID'] else None,
-            'model_equip':pointer_node(slide,sd['modelEquipPos']) if sd['modelEquipPos']['m_PathID'] else None,'model_default':pointer_node(slide,sd['modelDefPos']) if sd['modelDefPos']['m_PathID'] else None,
-            'distance':sd['distance'],'mask':sd['LM']['m_Bits'],'position_lerp':sd['posLerp'],'rotation_lerp':sd['rotLerp'],
-            'contact_offset':sd['modelDistfromCollider'],'minimum_displacement':sd['minSpeed'],'maximum_displacement':sd['maxSpeed'],
-            'disabled':bool(sd['disabled']),'both_work':bool(sd['bothWork']),'sound_when_disabled':bool(sd['soundWhenDisabled']),'has_sound':bool(sd['hasSound']),
-            'max_volume':sd['maxVolume'],'volume_lerp':sd['volumeLerp'],'voice_source':sid(linked(slide,sd['SSource'])),'voice':None,
-            'particles':[particle(source,required(slide,sd[field],field),f'cleaning-{reader.path_id}-{field}',sd[rate],output,source.transform_for(source.resolve(reader,d['m_GameObject'])))
-                    for flag,field,rate in [('hasParticle1','particle','maxRate'),('hasParticle2','particle2','maxRate2')] if sd[flag]]}
+    def node_of(reader,pointer):return pointer_node(reader,pointer)
     for node,group in components.items():
         for reader in group.get('drotkefescript',[]):
             if key(reader) not in {('level1',r[0]) for r in CLEANING_ROOTS}:continue
             d=source.read(reader);record=tool_owner(reader,d);del record['source']
             record['own_condition']=cid(required(reader,d['ownCondition'],'ownCondition'),'ownCondition')
-            record['tool']=brush_tool(reader,d,{})
+            record['tool'],record['nodes']=brush_tool(source,reader,d,{},node_of,output)
             result['brushes'].append(record)
         for reader in group.get('sprayscript',[]):
             if key(reader) not in {('level1',r[0]) for r in CLEANING_ROOTS}:continue
-            d=source.read(reader);ammo=required(reader,d['ammo'],'ammo');ad=source.read(ammo);color=required(reader,d['color'],'color');cd=source.read(color)
-            for name in d['colorTypes']:
-                if name not in source.condition_groups or not source.condition_groups[name]['colors']:
-                    raise ValueError(f'{key(reader)} colorTypes missing or empty palette {name}')
-            record=tool_owner(reader,d);record.update(source.cleaning_color_selections[key(reader)]);selected=source.cleaning_colors[key(source.resolve(reader,d['R']))]
-            record.update({'ammo':source_id(ammo),'color_source':source_id(color),'float_quantity':bool(ad['floatOrInt']),
-                'hide_look_at_count':bool(ad['hideLookAtCount']),'hide_carried_count':bool(ad['hideLookAtCountInInventory']),'no_per_show':bool(ad['noPerShow']),
-                'startup_quantity':ad['fammo'] if ad['floatOrInt'] else float(ad['ammo']),'maximum_quantity':ad['max'],
-                'startup_color':[selected[c] for c in 'rgba'],'authored_color_set':bool(cd['set']),
-                'color_types':d['colorTypes'],
-                'color_palettes':{name:[[c[k] for k in 'rgba'] for c in source.condition_groups[name]['colors']] for name in d['colorTypes']},'colors':[[c[k] for k in 'rgba'] for c in d['colors']],
-                'nozzle':pointer_node(reader,d['hole']),'renderer':source_id(required(reader,d['R'],'R')),
-                'renderer_node':pointer_node(reader,d['R']),'distance':d['distance'],'mask':d['lm']['m_Bits'],
-                'color_lerp':d['colorLerp'],'paint_loss':d['paintLoss'],'valve_speed':d['valveSpeed'],
-                'startup_valve':d['valve'],'rate':d['rate'],'max_volume':d['maxVolume'],'text':d['text'],
-                'start_speed':d['startSpeed'],'voice_source':sid(required(reader,d['Saudio'],'Saudio')),'voice':None,
-                'particles':[particle(source,required(reader,d['particle'],'particle'),f'paint-{reader.path_id}',d['rate'],output,source.transform_for(source.resolve(reader,d['m_GameObject'])))]})
+            d=source.read(reader);record=tool_owner(reader,d);del record['source']
+            selected=source.cleaning_colors[key(source.resolve(reader,d['R']))]
+            record['nozzle']=pointer_node(reader,d['hole']);record['renderer_node']=pointer_node(reader,d['R'])
+            record['tool']=spray_tool(source,reader,d,[selected[c] for c in 'rgba'],source.cleaning_color_selections[key(reader)],output)
             result['sprays'].append(record)
         for reader in group.get('washtriggerscript',[]):
             d=source.read(reader);effects=[];prefab=linked(reader,d['particleOnDestroy'])
@@ -417,7 +444,8 @@ def recover_conditions(source, nodes, components, pointer_node, item_nodes, coll
     player=source.get('level1',80125);pd=source.read(player)
     point=required(player,pd['pointKefe'],'pointKefe');point_data=source.read(point)
     if point_data['ownCondition']['m_PathID']:raise ValueError(f'{key(point)} player brush ownCondition is not exported')
-    result['player_brush']=brush_tool(point,point_data,{'LM':pd['pointingLayer'],'distance':pd['pointRange']})
+    tool,nodes=brush_tool(source,point,point_data,{'LM':pd['pointingLayer'],'distance':pd['pointRange']},node_of,output)
+    result['player_brush']={'tool':tool,'nodes':nodes}
     washes={key(source.get(w['source']['file'],w['source']['path_id'])):w['id'] for w in result['washes']}
     slots={key(source.get(s['source']['file'],s['source']['path_id'])):s['id'] for s in source.condition_part_slots}
     anchors={a['id']:a for a in source.condition_anchors}
@@ -456,9 +484,51 @@ def recover_conditions(source, nodes, components, pointer_node, item_nodes, coll
     return result
 
 
+# Loot tool prefabs: catalog index and name, then their drotkefescript or sprayscript.
+PROTOTYPE_TOOLS=((117,'spraypaint01',146992,'sprayscript'),(118,'drotkefe01',133845,'drotkefescript'),(119,'sponge01',133844,'drotkefescript'))
+
+
+def recover_prototype_tools(source, manifest, output) -> list:
+    """drotkefescript and sprayscript of world prototypes. Nodes are prototype node sources.
+    recover_audio sets `sound`. The runtime selects the startup color of a spray without a set color."""
+    catalog=manifest['world']['catalog']['items']
+    prototypes={(p['source']['file'],p['source']['path_id']):p for p in manifest['world']['prototypes']}
+    records=[]
+    for index,name,script,cname in PROTOTYPE_TOOLS:
+        item=catalog[index]
+        if item['name']!=name or item['prototype'] is None:raise ValueError(f'Catalog item {index} {name} is not a world prototype')
+        prototype=prototypes[(item['prototype']['file'],item['prototype']['path_id'])]
+        nodes={(n['source']['file'],n['source']['path_id']) for n in prototype['nodes']}
+        reader=source.get('sharedassets1.assets',script)
+        if reader.type.name!='MonoBehaviour' or source.class_name(reader)!=cname:raise ValueError(f'{key(reader)} is not {cname}')
+        d=source.read(reader)
+        root=source.transform_for(source.resolve(reader,d['m_GameObject']))
+        first=prototype['nodes'][0]['source']
+        if key(root)!=(first['file'],first['path_id']):raise ValueError(f'{key(reader)} is not on the root of {name}')
+        def node_of(owner,pointer):
+            target=_required(source,owner,pointer,'node')
+            if target.type.name not in ('Transform','GameObject'):target=source.resolve(target,source.read(target)['m_GameObject'])
+            if target.type.name=='GameObject':target=source.transform_for(target)
+            if key(target) not in nodes:raise ValueError(f'{key(owner)} node lies outside catalog item {name}')
+            return source_id(target)
+        if cname=='drotkefescript':
+            tool,brush_nodes=brush_tool(source,reader,d,{},node_of,output)
+            own=_required(source,reader,d['ownCondition'],'ownCondition')
+            if source.class_name(own)!='partconditionscript':raise ValueError(f'{key(reader)} ownCondition is not partconditionscript')
+            node_of(own,source.read(own)['m_GameObject'])
+            kind={'brush':{'own_condition':source_id(own),'tool':tool,'nodes':brush_nodes,'sound':None}}
+        else:
+            color=source.read(_required(source,reader,d['color'],'color'))['color']
+            tool=spray_tool(source,reader,d,[color[c] for c in 'rgba'],{'startup_palette':None,'startup_color_index':None},output)
+            kind={'spray':{'nozzle':node_of(reader,d['hole']),'renderer_node':node_of(reader,d['R']),'tool':tool,'sound':None}}
+        records.append({'prototype':item['prototype'],'kind':kind})
+    print(f"Loot tools: {len(records)} prototypes ({', '.join(t[1] for t in PROTOTYPE_TOOLS)})",flush=True)
+    return records
+
+
 def bind_condition_audio(record,audio):
     voices={(v['source']['file'],v['source']['path_id']):v['id'] for v in audio['voices']}
-    for tool in [*(b['tool'] for b in record['brushes']),record['player_brush'],*record['sprays']]:
+    for tool in [*(b['tool'] for b in record['brushes']),record['player_brush']['tool'],*(s['tool'] for s in record['sprays'])]:
         source=tool['voice_source']
         if source:
             identity=(source['file'],source['path_id'])
