@@ -104,6 +104,25 @@ pub(super) fn bind(
         items.set_body(item, Some(body));
         interaction.register_generated_mechanism(item, body, &[])?;
     }
+    // Wheel subtrees follow the suspension. The wheel slots place their colliders.
+    let wheels = prototype
+        .nodes
+        .iter()
+        .map(|n| {
+            Ok(rules
+                .component(&reference.world, &n.source, "wheelscript")?
+                .is_some())
+        })
+        .collect::<Result<Vec<_>, ReferenceError>>()?;
+    let under_wheel = |mut node: usize| loop {
+        if wheels[node] {
+            break true;
+        }
+        match prototype.nodes[node].parent {
+            Some(parent) => node = parent as usize,
+            None => break false,
+        }
+    };
     for (source, handle) in &instance.colliders {
         let collider = prototype
             .colliders
@@ -111,6 +130,10 @@ pub(super) fn bind(
             .find(|c| &c.source == source)
             .unwrap();
         let node = collider.node as usize;
+        // Part shapes follow their part. The part attachments place them.
+        if under_wheel(node) || interaction.parts.owns_collider(*handle) {
+            continue;
+        }
         let pose = interaction
             .mechanisms
             .node_pose(content.nodes[node])
@@ -272,7 +295,10 @@ pub(super) fn sync(
         let parent = physics.rapier().colliders[c.handle].parent();
         if let Some(parent) = parent {
             let local = physics.rapier().bodies[parent].position().inverse() * world;
-            if physics.rapier().colliders[c.handle].position_wrt_parent() != Some(&local) {
+            if crate::vehicle::pose_changed(
+                physics.rapier().colliders[c.handle].position_wrt_parent(),
+                &local,
+            ) {
                 physics.edit_collider(c.handle, |collider| collider.set_position_wrt_parent(local));
             }
         } else if physics.rapier().colliders[c.handle].position() != &world {

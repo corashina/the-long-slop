@@ -41,6 +41,19 @@ pub(super) fn bind(
             0,
         )?;
     }
+    // Slots of this prototype: (main types, part types).
+    let mut own_slots = Vec::new();
+    for (i, node) in prototype.nodes.iter().enumerate() {
+        if !super::spawn_appearance::node_active(prototype, i, &content.content.appearance) {
+            continue;
+        }
+        if let Some(slot) = rules.component(&reference.world, &node.source, "partslotscript")? {
+            own_slots.push((
+                texts(slot.fields, "maintipus")?,
+                texts(slot.fields, "tipus")?,
+            ));
+        }
+    }
     for (part_node, node) in prototype.nodes.iter().enumerate() {
         if !super::spawn_appearance::node_active(prototype, part_node, &content.content.appearance)
         {
@@ -59,26 +72,17 @@ pub(super) fn bind(
         {
             continue;
         }
-        let strings = |name| {
-            array(part.fields, name)?
-                .iter()
-                .map(|v| {
-                    if let WorldValue::Text(s) = v {
-                        Ok(s.clone())
-                    } else {
-                        Err(ReferenceError("Invalid source part type".into()))
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()
+        let main_types = texts(part.fields, "maintipus")?;
+        let part_types = texts(part.fields, "tipus")?;
+        let fits = |slot_main: &[String], slot_types: &[String]| {
+            crate::interaction::parts::fits(slot_main, slot_types, &main_types, &part_types)
         };
-        let main_types = strings("maintipus")?;
-        let part_types = strings("tipus")?;
-        if !reference.part_slots.iter().any(|slot| {
-            (slot.main_types.is_empty()
-                || main_types.is_empty()
-                || slot.main_types.iter().any(|s| main_types.contains(s)))
-                && slot.part_types.iter().any(|s| part_types.contains(s))
-        }) {
+        if !own_slots.iter().any(|(m, t)| fits(m, t))
+            && !reference
+                .part_slots
+                .iter()
+                .any(|slot| fits(&slot.main_types, &slot.part_types))
+        {
             continue;
         }
 

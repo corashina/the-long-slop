@@ -386,6 +386,12 @@ impl PartAttachments {
         self.cache_assembly_mass(items);
         Ok(())
     }
+    /// The collider is a shape of a bound part.
+    pub fn owns_collider(&self, handle: ColliderHandle) -> bool {
+        self.parts
+            .iter()
+            .any(|p| p.shapes.iter().any(|s| s.handle == Some(handle)))
+    }
     pub fn set_generated_usable(&mut self, item: ItemId, usable: ItemId) {
         if let Some(i) = self.indices.get(&item) {
             self.parts[*i].reference.usable = Some(usable);
@@ -1073,7 +1079,7 @@ impl PartAttachments {
                     physics.set_collider_parent(h, Some(body));
                 }
                 physics.edit_collider(h, |c| {
-                    if c.position_wrt_parent() != Some(&local) {
+                    if crate::vehicle::pose_changed(c.position_wrt_parent(), &local) {
                         c.set_position_wrt_parent(local);
                     }
                     let enabled = self.parts[i]
@@ -1180,7 +1186,8 @@ impl PartAttachments {
         Ok(())
     }
 }
-fn fits(a: &[String], b: &[String], c: &[String], d: &[String]) -> bool {
+/// A slot with main types `a` and part types `b` takes a part with main types `c` and part types `d`.
+pub(crate) fn fits(a: &[String], b: &[String], c: &[String], d: &[String]) -> bool {
     (a.is_empty() || c.is_empty() || a.iter().any(|x| c.contains(x)))
         && b.iter().any(|x| d.contains(x))
 }
