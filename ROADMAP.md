@@ -333,3 +333,9 @@ Prepare once:
 6. Use a loot brush until it wears out. Its scrub part hides and it stops working.
 7. Save and load. Paint left, color and wear stay. Drive away and back: they stay.
 8. Check F3 while you use each loot tool. Compare with the frame rate rule.
+
+### Worn start cars
+
+1. Run `cargo test --lib lada_part_paint_and_repair -- --ignored`. It checks that the start car starts worn.
+2. Start a new game. The Lada body is Used to Old, not 100%, and rust shows. Every new game draws the same state: the startup random is fixed.
+3. Pick two other start cars in the game mode menu. Each starts worn the same way.
