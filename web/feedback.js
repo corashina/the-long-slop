@@ -37,7 +37,7 @@ export function pickupWeightAlphas(weight){
  return [inverse(0.9,0.5,weight),inverse(0.5,0,weight)];
 }
 export class FeedbackState {
- constructor(){this.visible=false;this.enabled=true;this.active=false;this.fluidText='';this.fluidName=undefined;this.capacity=undefined;this.amountKey=undefined;this.percentKeys=[-1,-1,-1,-1,-1,-1];this.hasName=undefined;this.noText=undefined;this.empty=undefined;this.lmbUse=false;this.actions=-1;this.context=-1;this.carrying=false;this.notice='';this.targetName='';this.condition=-1;this.throwCharge=0;this.throwActive=false;this.prompts=0;this.computer=0;this.crosshair=0;this.weight=1;}
+ constructor(){this.visible=false;this.enabled=true;this.active=false;this.fluidText='';this.fluidName=undefined;this.capacity=undefined;this.amountKey=undefined;this.percentKeys=[-1,-1,-1,-1,-1,-1];this.hasName=undefined;this.noText=undefined;this.empty=undefined;this.lmbUse=false;this.actions=-1;this.context=-1;this.carrying=false;this.notice='';this.throwCharge=0;this.throwActive=false;this.prompts=0;this.computer=0;this.crosshair=0;this.weight=1;}
  setVisible(active){this.active=active;this.visible=active&&this.enabled;}
  toggle(){this.enabled=!this.enabled;this.visible=this.active&&this.enabled;}
  update(r){
@@ -47,16 +47,15 @@ export class FeedbackState {
   const radioChanged=r.radioAm!==this.radioAm||r.radioFrequency!==this.radioFrequency||r.radioVolume!==this.radioVolume;
   if(changed||radioChanged){this.fluidText=r.context===11||r.context===12?formatRadio(r):formatTank(r);this.amountKey=amountKey;this.empty=empty;this.capacity=r.capacity;this.fluidName=r.fluidName;this.hasName=r.hasName;this.noText=r.noText;this.fluidOrder=r.fluidOrder;}
   this.radioAm=r.radioAm;this.radioFrequency=r.radioFrequency;this.radioVolume=r.radioVolume;
-  const targetName=r.context===11?'Volume +/-':r.context===12?'Tune':r.name;
-  const detailChanged=targetName!==this.targetName||r.condition!==this.condition||r.throwCharge!==this.throwCharge||r.throwActive!==this.throwActive;
-  this.targetName=targetName;this.condition=r.condition;this.throwCharge=r.throwCharge;this.throwActive=r.throwActive;
+  const detailChanged=r.throwCharge!==this.throwCharge||r.throwActive!==this.throwActive;
+  this.throwCharge=r.throwCharge;this.throwActive=r.throwActive;
   const actionsChanged=r.actions!==this.actions||r.context!==this.context||r.carrying!==this.carrying||r.notice!==this.notice||r.lmbUse!==this.lmbUse||r.prompts!==this.prompts||r.computer!==this.computer||r.crosshair!==this.crosshair||r.weight!==this.weight;
   this.lmbUse=r.lmbUse;this.prompts=r.prompts;this.computer=r.computer;this.crosshair=r.crosshair;this.weight=r.weight;this.actions=r.actions;this.context=r.context;this.carrying=r.carrying;this.notice=r.notice;
   return changed||radioChanged||actionsChanged||detailChanged;
  }
 }
 export function createFeedback(ui,manifest) {
- const state=new FeedbackState(),root=document.querySelector('#hud'),icon=document.querySelector('#crosshair'),fluid=document.querySelector('#fluid-text'),carry=document.querySelector('#carry-help'),notice=document.querySelector('#action-notice'),target=document.querySelector('#target-name'),condition=document.querySelector('#target-condition'),charge=document.querySelector('#throw-charge'),level=document.querySelector('#throw-level');
+ const state=new FeedbackState(),root=document.querySelector('#hud'),icon=document.querySelector('#crosshair'),fluid=document.querySelector('#fluid-text'),carry=document.querySelector('#carry-help'),notice=document.querySelector('#action-notice'),charge=document.querySelector('#throw-charge'),level=document.querySelector('#throw-level');
  const gear=document.querySelector('#driving-gear');let lastGear,wasSeated;
  const rows=[
   [ACTION.USE,'use','[E]: Open/Close'],
@@ -111,7 +110,7 @@ export function createFeedback(ui,manifest) {
  layers[2].after(...pickupChildren);
  layers[3].style.opacity=ui.layouts.reticle.image_color[3];
  function showWeapon(){weapon.hidden=!(weaponIcon&&state.crosshair&CROSSHAIR.WEAPON);}
- let lastLayers=-1,lastWeight=-1,lastFluid='',lastNotice='',lastName='',lastCondition='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='',lastPrimary='',lastCrank='';
+ let lastLayers=-1,lastWeight=-1,lastFluid='',lastNotice='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='',lastPrimary='',lastCrank='';
  const translationHelp='[RMB]+[Mouse]: Move\n[Scroll]: Distance\n[Q]+[Scroll]: Posture';
  const rotationHelp='[RMB]+[Mouse]: Move\n[MMB]+[Mouse]: Rotate\n[RMB]+[MMB]+[Mouse]: Roll\n[Scroll]: Distance\n[Q]+[Scroll]: Posture';
  const counts=new Uint8Array(4);
@@ -130,8 +129,7 @@ export function createFeedback(ui,manifest) {
   const fluidBox=applyLayout(fluid,ui.layouts.fluid);fluid.style.top=(fluidBox.y+fluidBox.height/2)+'px';fluid.style.height='auto';fluid.style.width='max-content';fluid.style.left='50%';
   const carryBox=applyLayout(carry,ui.layouts.carry);carry.style.left='auto';carry.style.right='8px';carry.style.width='max-content';carry.style.height='auto';carry.style.top='auto';carry.style.bottom=(innerHeight-carryBox.y-carryBox.height)+'px';
   notice.style.fontSize=ui.layouts.use.font_size*scale+'px';
-  for(const n of [target,condition,charge]){n.style.fontSize=ui.layouts.use.font_size*scale+'px';n.style.left='50%';}
-  target.style.top=(innerHeight/2-70*scale)+'px';condition.style.top=(innerHeight/2-40*scale)+'px';charge.style.top=(innerHeight/2+120*scale)+'px';
+  charge.style.fontSize=ui.layouts.use.font_size*scale+'px';charge.style.left='50%';charge.style.top=(innerHeight/2+120*scale)+'px';
  }
  function paint(){
   root.hidden=!state.visible;
@@ -150,9 +148,6 @@ export function createFeedback(ui,manifest) {
   const crankText=state.lmbUse?'[E] / [LMB]+[Mouse]: Crank':'[E]+[Mouse]: Crank';
   if(crankText!==lastCrank){named.crank.textContent=crankText;lastCrank=crankText;}
   placeRows();
-  if(state.targetName!==lastName){target.textContent=state.targetName;lastName=state.targetName;}target.hidden=!state.targetName;
-  const detail=state.condition>=0?'Condition '+Math.round(state.condition*100)+'%':'';
-  if(detail!==lastCondition){condition.textContent=detail;lastCondition=detail;}condition.hidden=!detail;
   charge.hidden=!state.throwActive;const strength=Math.max(0,Math.min(1,state.throwCharge||0));
   if(strength!==lastCharge){level.value=strength;lastCharge=strength;}
   carry.hidden=!state.carrying;const help=state.actions&ACTION.ROTATE?rotationHelp:translationHelp;

@@ -1056,7 +1056,6 @@ fn update_hud(mut drive: ResMut<Drive>, mut sim: ResMut<SimFrameResource>) {
         f.has_name,
         f.no_text,
         &f.fluid_name,
-        f.condition,
         &f.held_name,
         f.throw_charge,
         f.throw_active,

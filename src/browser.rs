@@ -318,7 +318,6 @@ extern "C" {
         has_name: bool,
         no_text: bool,
         fluid_name: &str,
-        condition: f32,
         held: &str,
         throw_charge: f32,
         throw_active: bool,

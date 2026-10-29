@@ -108,7 +108,7 @@ window.gameInventory=(selected,a,b,c,d,progress)=>{
  window.gameState.inventory=inventory;feedback?.inventory(inventory);
 };
 window.gameWeaponCrosshair=(icon,color)=>feedback?.weapon(icon,color);
-const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',condition:-1,held:'',throwCharge:0,throwActive:false,radioVolume:undefined,radioFrequency:undefined,radioAm:false,quantities:[0,0,0,0,0,0],fluidOrder:0,hose:0,computer:0,crosshair:0,weight:1};
+const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',held:'',throwCharge:0,throwActive:false,radioVolume:undefined,radioFrequency:undefined,radioAm:false,quantities:[0,0,0,0,0,0],fluidOrder:0,hose:0,computer:0,crosshair:0,weight:1};
 const settleSave=window.gameSaveResult;
 window.gameSaveResult=(id,kind,payload,error)=>{
  if(kind==='Commit'&&!error){input.clear();actions=0;}
@@ -156,9 +156,9 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, surfaces, colliders, a
   survival?.setVisible(started&&!paused&&!sleeping&&menu?.model.state==='playing');
 };
 window.gameRadioFeedback=(volume,frequency,am)=>{record.radioVolume=volume;record.radioFrequency=frequency;record.radioAm=am;if(record.context===11||record.context===12)feedback?.update(record);};
-window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,noText,fluidName,condition,held,charge,throwing,rpm,ignition,running,starter,seated,handbrake,gas,oil,alcohol,water,blood,diesel,fluidOrder,control,lmbUse,prompts,computer,crosshair,weight)=>{
+window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,noText,fluidName,held,charge,throwing,rpm,ignition,running,starter,seated,handbrake,gas,oil,alcohol,water,blood,diesel,fluidOrder,control,lmbUse,prompts,computer,crosshair,weight)=>{
  record.actions=mask;record.prompts=prompts;record.computer=computer;record.crosshair=crosshair;record.weight=weight;input?.state.setTyping((computer&32)!==0);record.context=context;record.lmbUse=lmbUse;record.name=name;record.notice=notice;record.carrying=carrying;record.amount=amount;record.capacity=capacity;record.hasName=hasName;record.noText=noText;record.fluidName=fluidName;
- record.condition=condition;record.held=held;record.throwCharge=charge;record.throwActive=throwing;
+ record.held=held;record.throwCharge=charge;record.throwActive=throwing;
  const q=record.quantities;q[0]=gas;q[1]=oil;q[2]=alcohol;q[3]=water;q[4]=blood;q[5]=diesel;record.fluidOrder=fluidOrder;
  const state=window.gameState;
  state.feedbackContext=context;state.availableActions=mask;state.lightControl=control;state.lmbUse=lmbUse;

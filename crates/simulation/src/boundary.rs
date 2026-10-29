@@ -547,7 +547,6 @@ pub struct Feedback {
     pub has_name: bool,
     pub no_text: bool,
     pub fluid_name: String,
-    pub condition: f32,
     pub held_name: String,
     pub throw_charge: f32,
     pub throw_active: bool,
