@@ -32,6 +32,7 @@ mod guns;
 mod home_cable;
 pub mod hose;
 mod hud;
+mod rabbits;
 mod ragdoll;
 mod reach;
 pub mod spawned;
@@ -1846,6 +1847,7 @@ impl GarageRuntime {
                 supports: &supports,
             },
         );
+        self.settle_rabbit_deaths(reference);
     }
 
     pub fn sky(&self) -> &crate::sky_traffic::SkyTraffic {

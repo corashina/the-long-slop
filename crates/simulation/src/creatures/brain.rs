@@ -35,6 +35,8 @@ pub struct BrainInput<'a> {
     pub forward: Vector,
     pub right: Vector,
     pub sensed: &'a [Sensed],
+    /// `overRideStimul`, processed after the sensed stimuli.
+    pub threat: Option<Sensed>,
     pub ray_sum: f32,
     pub speed: f32,
     pub has_eyes: bool,
@@ -99,7 +101,7 @@ impl Brain {
         let mut flight = 0.;
         let (mut positive, mut negative) = (0., 0.);
         let (mut positive_at, mut negative_at) = (Vector::ZERO, Vector::ZERO);
-        for s in i.sensed {
+        for s in i.sensed.iter().chain(&i.threat) {
             let Some(p) = r.preferences.iter().find(|p| p.kind == s.kind) else {
                 continue;
             };
@@ -252,6 +254,7 @@ mod tests {
             forward: -Vector::Z,
             right: Vector::X,
             sensed,
+            threat: None,
             ray_sum: 0.,
             speed: 5.,
             has_eyes: true,

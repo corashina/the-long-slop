@@ -1,9 +1,10 @@
-//! The rabbit Animator: the default 1D blend tree, sampled into node frames under the prefab root.
+//! The rabbit Animator: the base layer 1D blend tree and the override layer, sampled into node
+//! frames under the prefab root.
 //! The simulation and the renderer share this sampler.
 use crate::animation::clip::{LocalPart, sample_clip};
 use crate::player::body::ik::Frame;
 use crate::reference::{BlendReference, NodeId, NodeRecord, ReferenceError};
-use rapier3d::math::{Rotation, Vector};
+use rapier3d::math::{Pose, Rotation, Vector};
 use std::collections::HashMap;
 
 pub struct Rig {
@@ -15,6 +16,8 @@ pub struct Rig {
     rest: Vec<Frame>,
     /// Clip lengths in seconds.
     lengths: Vec<f32>,
+    /// Override layer clip length in seconds.
+    overlay: f32,
 }
 
 /// Sampled frames. `local` is parent-local; `model` is under the prefab root.
@@ -74,6 +77,7 @@ impl Rig {
         if blend
             .clips
             .iter()
+            .chain([&blend.overlay.clip])
             .flat_map(|c| &c.tracks)
             .any(|t| !index.contains_key(&NodeId(t.node)))
         {
@@ -89,6 +93,7 @@ impl Rig {
                 .iter()
                 .map(|c| c.stop_time - c.start_time)
                 .collect(),
+            overlay: blend.overlay.clip.stop_time - blend.overlay.clip.start_time,
         })
     }
 
@@ -124,13 +129,19 @@ impl Rig {
             .sum()
     }
 
-    /// Samples the blend at `phase` (normalized cycle time) and `value`.
-    /// The root frame has the rabbit `scale` and no offset.
+    /// Override layer seconds of one cycle.
+    pub fn overlay_duration(&self) -> f32 {
+        self.overlay
+    }
+
+    /// Samples the blend at `phase` (normalized cycle time) and `value`, then the override
+    /// layer at `overlay` (normalized cycle time). The root frame has the rabbit `scale`.
     pub fn sample(
         &self,
         blend: &BlendReference,
         phase: f32,
         value: f32,
+        overlay: f32,
         scale: f32,
         pose: &mut RigPose,
     ) {
@@ -177,6 +188,20 @@ impl Rig {
         for f in &mut pose.local {
             f.rotation = f.rotation.normalize();
         }
+        let layer = &blend.overlay;
+        let w = layer.weight;
+        let time = layer.clip.start_time + overlay.rem_euclid(1.) * self.overlay;
+        sample_clip(&layer.clip, time, |node, part| {
+            let frame = &mut pose.local[self.index[&NodeId(node)]];
+            match part {
+                LocalPart::Position(p) => frame.position = frame.position.lerp(p, w),
+                LocalPart::Rotation(r) => {
+                    let r = if frame.rotation.dot(r) < 0. { -r } else { r };
+                    frame.rotation = (frame.rotation * (1. - w) + r * w).normalize();
+                }
+                LocalPart::Scale(s) => frame.scale = frame.scale.lerp(s, w),
+            }
+        });
         pose.model[0] = Frame {
             scale: Vector::splat(scale),
             ..Frame::IDENTITY
@@ -186,6 +211,31 @@ impl Rig {
             pose.model[i] = pose.model[parent].mul(&pose.local[i]);
         }
         pose.local[0] = pose.model[0];
+    }
+}
+
+impl Rig {
+    /// Frames of a dead rabbit. `bones` holds rig node indices and body poses relative to the
+    /// unscaled root frame. Other nodes keep their rest frames under their parents.
+    pub fn ragdoll_pose(&self, bones: &[(usize, Pose)], scale: f32, pose: &mut RigPose) {
+        pose.model[0] = Frame {
+            scale: Vector::splat(scale),
+            ..Frame::IDENTITY
+        };
+        pose.local[0] = pose.model[0];
+        for i in 1..self.nodes.len() {
+            let parent = self.parent[i].expect("rig nodes below the root");
+            let inherited = pose.model[parent].mul(&self.rest[i]);
+            pose.model[i] = match bones.iter().find(|(node, _)| *node == i) {
+                Some((_, p)) => Frame {
+                    position: p.translation,
+                    rotation: p.rotation,
+                    scale: inherited.scale,
+                },
+                None => inherited,
+            };
+            pose.local[i] = pose.model[parent].inverse_mul(&pose.model[i]);
+        }
     }
 }
 

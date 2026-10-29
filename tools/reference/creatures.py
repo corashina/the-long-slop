@@ -201,6 +201,7 @@ def animator_record(source, animator, node):
 
 def recover_creatures(source, manifest, output):
     from .ragdoll import recover_rig, recover_joints
+    from .actions import recover_pickup
     nodes = {key(source.get(n['source']['file'], n['source']['path_id'])): n for n in manifest['nodes']}
     parents = {n['id']: n['parent'] for n in manifest['nodes']}
     def node(reader):
@@ -235,6 +236,14 @@ def recover_creatures(source, manifest, output):
     if len(bodies) != len(bones) or len(colliders) != len(ragdoll_colliders):
         raise ValueError('Rabbit ragdoll records differ')
     joints = recover_joints(source, {n: r for n, r in by_node.items() if n in {b['node'] for b in bodies}}, bodies, poses)
+    pickups = {}
+    for p in rd['pickupables']:
+        reader = source.resolve(ragdoll, p)
+        owner = node(source.transform_for(source.resolve(reader, source.read(reader)['m_GameObject'])))
+        # SetRagdol(true) sets cantPickup to false.
+        pickups[owner] = {**recover_pickup(source, reader), 'cant_pickup': False}
+    if set(pickups) != {b['node'] for b in bodies}:
+        raise ValueError('Rabbit ragdoll pickups differ')
     matrix = source.read(next(r for r in source.objects.values() if r.type.name == 'PhysicsManager'))['m_LayerCollisionMatrix']
     by_reader = {key(r['reader']): r for r in records}
     live_colliders = []
@@ -255,7 +264,8 @@ def recover_creatures(source, manifest, output):
         'body': {'source': source_id(live), 'mass_kg': live_data['m_Mass'], 'constraints': live_data['m_Constraints'],
                  'linear_damping': live_data['m_Drag'], 'angular_damping': live_data['m_AngularDrag'],
                  'colliders': live_colliders},
-        'ragdoll': {'source': source_id(ragdoll), 'bodies': bodies, 'colliders': colliders, 'joints': joints},
+        'ragdoll': {'source': source_id(ragdoll), 'bodies': bodies, 'colliders': colliders, 'joints': joints,
+                    'pickups': [pickups[b['node']] for b in bodies]},
         'animator': animator_record(source, source.resolve(nyul, source.read(nyul)['anim']), node),
         # recover_audio replaces these AudioClip identities with clip ids and sets the shared one-shot voice.
         'die_clips': [source_id(c) for c in clips], 'die_voice': None,
@@ -325,6 +335,8 @@ def validate_creatures(c, manifest):
     ids = {b['id'] for b in rag['bodies']}
     if any(x['body'] not in ids for x in rag['colliders']) or any(j['body'] not in ids or j['connected_body'] not in ids for j in rag['joints']):
         raise ValueError('Invalid rabbit ragdoll links')
+    if len(rag['pickups']) != len(rag['bodies']) or any(p['cant_pickup'] for p in rag['pickups']):
+        raise ValueError('Invalid rabbit ragdoll pickups')
     anim = r['animator']
     if len(anim['thresholds']) != len(anim['clips']) or len(anim['clips']) < 2 or any(b <= a for a, b in zip(anim['thresholds'], anim['thresholds'][1:])):
         raise ValueError('Invalid rabbit blend tree')

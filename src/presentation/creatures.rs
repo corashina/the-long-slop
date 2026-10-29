@@ -1,5 +1,5 @@
-//! Scene instances of the live rabbits. Each node takes the blend tree frame of its row.
-//! The GPU skins the meshes.
+//! Scene instances of the rabbits. Live nodes take the Animator frames of their row. Dead
+//! rabbits take their bone rows. The GPU skins the meshes.
 use super::materials::SourceMaterial;
 use super::reference::{ReferenceVisuals, bind_node};
 use super::sim_frame::SimFrameResource;
@@ -9,7 +9,7 @@ use bevy::ecs as bevy_ecs;
 use bevy::gltf::GltfExtras;
 use bevy::prelude::*;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
-use simulation::boundary::PoseRow;
+use simulation::boundary::{CreatureRow, PoseRow};
 use simulation::creatures::rig::{Rig, RigPose};
 use simulation::vehicle::VehiclePose;
 use std::collections::HashMap;
@@ -26,6 +26,8 @@ struct Instance {
     nodes: Vec<(usize, Entity)>,
     primitives: Vec<Entity>,
     pose: RigPose,
+    /// Bone rows of a dead rabbit: rig node and pose.
+    bones: Vec<(usize, rapier3d::math::Pose)>,
 }
 
 #[derive(Resource, Default)]
@@ -74,7 +76,7 @@ pub(crate) fn sync(
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
     source_materials: Query<(), With<MeshMaterial3d<SourceMaterial>>>,
     mut transforms: Query<&mut Transform>,
-    mut visibility: Query<&mut Visibility, With<CreatureScene>>,
+    mut visibility: Query<&mut Visibility>,
 ) {
     if !visuals.bound {
         return;
@@ -141,6 +143,7 @@ pub(crate) fn sync(
                     nodes: Vec::with_capacity(rig.len()),
                     primitives: Vec::new(),
                     pose: rig.pose(),
+                    bones: Vec::with_capacity(r.ragdoll.bodies.len()),
                 },
             );
             continue;
@@ -213,7 +216,51 @@ pub(crate) fn sync(
         if let Ok(mut transform) = transforms.get_mut(instance.root) {
             transform.set_if_neq(super::transform(pose).with_scale(Vec3::splat(row.scale)));
         }
-        rig.sample(&r.animator, row.phase, row.value, 1., &mut instance.pose);
+        if row.flags & CreatureRow::DEAD != 0 {
+            let [start, count] = row.bones.map(|v| v as usize);
+            instance.bones.clear();
+            instance
+                .bones
+                .extend(
+                    frame.frame.creature_bones[start..start + count]
+                        .iter()
+                        .map(|b| {
+                            (
+                                b.node as usize,
+                                rapier3d::math::Pose::from_parts(
+                                    rapier3d::math::Vector::from_array(b.position),
+                                    rapier3d::math::Rotation::from_array(b.rotation),
+                                ),
+                            )
+                        }),
+                );
+            rig.ragdoll_pose(&instance.bones, row.scale, &mut instance.pose);
+        } else {
+            rig.sample(
+                &r.animator,
+                row.phase,
+                row.value,
+                row.twitch,
+                1.,
+                &mut instance.pose,
+            );
+        }
+        // `LooseEyes` deactivates the eye objects.
+        let eyes = if row.flags & CreatureRow::NO_EYES != 0 {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+        for node in &r.senses.eye_objects {
+            let Some(index) = rig.index(*node) else {
+                continue;
+            };
+            if let Some((_, entity)) = instance.nodes.iter().find(|(i, _)| *i == index)
+                && let Ok(mut v) = visibility.get_mut(*entity)
+            {
+                v.set_if_neq(eyes);
+            }
+        }
         for (index, entity) in &instance.nodes {
             let Ok(mut transform) = transforms.get_mut(*entity) else {
                 continue;

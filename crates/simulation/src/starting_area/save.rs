@@ -390,6 +390,7 @@ impl GarageRuntime {
             &saved.rabbits,
             candidate.simulation_seconds,
         )?;
+        candidate.restore_dead_rabbits(reference, &saved.rabbits)?;
         let spawned = super::spawned::restore_save(
             reference,
             &mut candidate.area,

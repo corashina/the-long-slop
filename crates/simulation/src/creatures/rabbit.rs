@@ -1,13 +1,15 @@
 //! Source `nyulscript`: size values and `SetAnims`. The live body is `ragdollactivatescript.RB`.
 use super::brain::Brain;
+use super::ragdoll::Bone;
 use super::rig::Rig;
-use super::senses::Senses;
+use super::senses::{Sensed, Senses};
+use crate::damage::BreakHealth;
 use crate::reference::{RabbitReference, ReferenceError};
 use crate::vehicle::{PhysicsWorld, collider_builder, step_surface_bits, tag_bits};
 use crate::weather::StormRandom;
 use rapier3d::math::{Pose, Vector};
 use rapier3d::prelude::{
-    ColliderHandle, Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder,
+    ActiveEvents, ColliderHandle, Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder,
     RigidBodyHandle,
 };
 
@@ -60,13 +62,21 @@ pub struct LiveCollider {
 pub struct Rabbit {
     /// Runtime id for frame rows.
     pub id: u32,
+    /// The live body. Invalid once the bones replace it.
     pub body: RigidBodyHandle,
     pub size: Size,
-    pub shoot_health: f32,
+    /// `breakablescript.health` and `shootHealth`.
+    pub health: BreakHealth,
+    /// `aiscript.lastVelocity`.
+    pub last_velocity: Vector,
+    /// `aiscript.overRideStimul`: the threat of the last shot.
+    pub threat: Option<Sensed>,
     /// `nyulscript.runValue`.
     pub run_value: f32,
     /// Normalized time of the blend cycle.
     pub phase: f32,
+    /// Normalized time of the override layer cycle.
+    pub twitch: f32,
     pub senses: Senses,
     pub brain: Brain,
     pub alive: bool,
@@ -74,6 +84,8 @@ pub struct Rabbit {
     pub active: bool,
     pub next_support_check: f64,
     pub colliders: Vec<LiveCollider>,
+    /// Ragdoll bones of a dead rabbit, in body order.
+    pub bones: Vec<Bone>,
 }
 
 impl Rabbit {
@@ -103,7 +115,7 @@ pub fn insert_body(
         .angular_damping(b.angular_damping);
     let body = physics.insert_body(builder);
     let mut frames = rig.pose();
-    rig.sample(&r.animator, 0., 0., size.scale, &mut frames);
+    rig.sample(&r.animator, 0., 0., 0., size.scale, &mut frames);
     let mut colliders = Vec::with_capacity(b.colliders.len());
     for (c, bone) in b.colliders.iter().zip(bones) {
         let node = rig
@@ -128,6 +140,9 @@ pub fn insert_body(
             .user_data(step_surface_bits(c.step_surface) | tag_bits(c.tag));
         if *bone {
             collider = collider.solver_groups(InteractionGroups::none());
+        } else {
+            // `breakablescript.OnCollisionEnter` reads the contacts of the root body.
+            collider = collider.active_events(ActiveEvents::COLLISION_EVENTS);
         }
         let handle = physics.insert_collider_with_parent(collider.build(), body);
         colliders.push(LiveCollider {
@@ -155,16 +170,24 @@ impl Rabbit {
         Self {
             id,
             body,
-            shoot_health: size.shoot_health,
+            health: BreakHealth {
+                health: size.health,
+                shoot_health: size.shoot_health,
+                explosion_health: 0.,
+            },
+            last_velocity: Vector::ZERO,
+            threat: None,
             size,
             run_value: 0.,
             phase: 0.,
+            twitch: 0.,
             senses: Senses::new(&r.senses, random, now),
             brain: Brain::new(position),
             alive: true,
             active: true,
             next_support_check: now,
             colliders,
+            bones: Vec::new(),
         }
     }
 }

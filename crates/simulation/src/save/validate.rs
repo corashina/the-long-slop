@@ -118,9 +118,19 @@ impl SaveSnapshot {
         for rabbit in &self.rabbits {
             absolute(&rabbit.pose)?;
             data(
-                unit(rabbit.size) && rabbit.shoot_health.is_finite(),
+                unit(rabbit.size)
+                    && rabbit.shoot_health.is_finite()
+                    && rabbit.bones.len()
+                        == if rabbit.alive {
+                            0
+                        } else {
+                            reference.creatures.rabbit.ragdoll.bodies.len()
+                        },
                 "Rabbit state",
             )?;
+            for bone in &rabbit.bones {
+                absolute(bone)?;
+            }
         }
         crate::conditions::validate_surfaces(reference, &self.conditions)?;
         crate::interaction::cleaning::validate_tools(reference, &self.conditions.tools)?;

@@ -110,6 +110,13 @@ fn frame_round_trips() {
             scale: 0.8,
             phase: 0.25,
             value: 0.5,
+            twitch: 0.1,
+            bones: [0, 1],
+        }],
+        creature_bones: vec![CreatureBoneRow {
+            node: 4,
+            position: [0., 0.1, 0.],
+            rotation: [0., 0., 0., 1.],
         }],
         conditions: vec![ConditionRow {
             id: 4,
