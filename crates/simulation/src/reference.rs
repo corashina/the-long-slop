@@ -678,6 +678,8 @@ pub struct PlayerReference {
     pub duck_jump_multiplier: f32,
     pub inverse_duck_multiplier: f32,
     pub max_fall_speed: f32,
+    /// Unity `Physics.defaultMaxDepenetrationVelocity`.
+    pub max_depenetration_velocity: f32,
     pub source: SourceId,
     pub capsule_source: SourceId,
     pub camera_source: SourceId,

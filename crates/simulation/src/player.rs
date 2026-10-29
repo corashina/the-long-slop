@@ -1,5 +1,6 @@
 pub mod body;
 pub mod collision;
+mod depenetration;
 mod head_bob;
 mod ladder;
 pub mod normals;
@@ -14,7 +15,7 @@ use rapier3d::parry::shape::Shape;
 pub use view::PlayerView;
 use view::ViewState;
 
-use rapier3d::control::{CharacterCollision, KinematicCharacterController};
+use rapier3d::control::{CharacterCollision, CharacterLength, KinematicCharacterController};
 use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::{
     ColliderBuilder, ColliderHandle, Group, InteractionGroups, InteractionTestMode, QueryFilter,
@@ -524,8 +525,15 @@ impl PlayerState {
             |velocity| velocity * dt,
         );
         self.collisions.clear();
-        let shape = &self.sweep;
         let filter = self.movement_filter();
+        self.pose.translation += depenetration::depenetrate(
+            &physics.queries(filter),
+            &self.sweep,
+            &self.pose,
+            self.controller_offset(),
+            self.reference.max_depenetration_velocity * dt,
+        );
+        let shape = &self.sweep;
         let rapier = physics.rapier();
         let movement = self.controller.move_shape(
             dt,
@@ -634,6 +642,12 @@ impl PlayerState {
             self.reference.posture.capsule_membership,
             self.reference.posture.capsule_filter,
         )
+    }
+    fn controller_offset(&self) -> f32 {
+        match self.controller.offset {
+            CharacterLength::Absolute(value) => value,
+            CharacterLength::Relative(value) => value * self.sweep.compute_local_aabb().extents().y,
+        }
     }
     fn movement_filter(&self) -> QueryFilter<'static> {
         QueryFilter::default()
