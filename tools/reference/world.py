@@ -61,6 +61,8 @@ CAR_ITEMS = ('car01','car01full','car02','car02k','car02kfull','car04','car04ful
 START_CARS = {'StartCar01':'car01full','StartCar02':None,'StartCar02k':'car02kfull','StartCar03':'car03full','StartCar03k':'car03kfull',
     'StartCar04':'car04full','StartCar05':'car05full','StartCar06':'car06full','StartCar08':'car08full','StartCar08c':'car08cfull',
     'StartCar09':'car09full','StartCar09S':'car09fullS','StartCar09P':'car09Pfull','StartCar10':'car10full','StartCar10k':'car10kfull'}
+# partconditionscript fields that a scene start car sets on its prefab copy.
+START_CONDITION_FIELDS = ('randomStart','randomMin','randomMax','enableOverrideMin','overRideMin','enableOverrideMax','overRideMax')
 # Known scene car roots (level1 GameObject) of start car fields: the Lada and Car09full_slide.
 START_ROOTS = {'StartCar02':17687,'StartCar09S':12382}
 def vehicle_exclusion(root, classes, cars):
@@ -127,7 +129,28 @@ def start_placements(source, settings_owner, settings, catalog, cars):
             prototype=_source_root(source,source.get(row['source']['file'],row['source']['path_id']))
         if key(prototype) not in cars:raise ValueError('{}:{} {}: start car prefab is not an allowed car'.format(*key(prototype),field))
         rows.append({'group':field,'source':source_id(car['reader']),'pose':world_pose(source,car['reader']),
-            'prototype':source_id(prototype),'start_car':True})
+            'prototype':source_id(prototype),'start_car':True,'conditions':start_conditions(source,car['reader'],prototype)})
+    return rows
+
+def start_conditions(source, car, prototype):
+    """Scene values of the partconditionscript random start fields that differ from the prefab.
+    The scene start cars start worn (randomStart, ranges 1-3); their prefabs start new."""
+    scene=source.hierarchy(car);prefab=source.hierarchy(prototype)
+    if len(scene)!=len(prefab):raise ValueError('{}:{} start car hierarchy differs from its prefab'.format(*key(car)))
+    def conditions(node):
+        return [c for c in node['components'] if c.type.name=='MonoBehaviour' and source.class_name(c)=='partconditionscript']
+    rows=[]
+    for s,p in zip(scene,prefab):
+        if s['path'].partition('/')[2]!=p['path'].partition('/')[2]:
+            raise ValueError('{}:{} start car node differs from its prefab'.format(*key(s['reader'])))
+        sc,pc=conditions(s),conditions(p)
+        if len(sc)!=len(pc):raise ValueError('{}:{} start car conditions differ from its prefab'.format(*key(s['reader'])))
+        for a,b in zip(sc,pc):
+            d,e=source.read(a),source.read(b)
+            if all(d[f]==e[f] for f in START_CONDITION_FIELDS):continue
+            rows.append({'source':source_id(b),'random_start':bool(d['randomStart']),'random_min':d['randomMin'],'random_max':d['randomMax'],
+                'override_min':d['overRideMin'] if d['enableOverrideMin'] else None,
+                'override_max':d['overRideMax'] if d['enableOverrideMax'] else None})
     return rows
 
 IDENTITY = {'translation':[0.,0.,0.], 'rotation':[0.,0.,0.,1.], 'scale':[1.,1.,1.]}
@@ -355,7 +378,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     for field in ('StartObjs','StartObjsFix','StartObjsDonTMoveOnLoad'):
         for pointer in settings[field]:
             root=source.resolve(settings_owner,pointer)
-            startup.append({'group':field,'source':source_id(root),'pose':world_pose(source,root),'prototype':None,'start_car':False})
+            startup.append({'group':field,'source':source_id(root),'pose':world_pose(source,root),'prototype':None,'start_car':False,'conditions':[]})
             selected.transform_chain(root)
     # Start car candidates. Startup frames ignore these groups; the vehicle binder spawns the picked one.
     starts=start_placements(source,settings_owner,settings,catalog,cars)
