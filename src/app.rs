@@ -32,6 +32,8 @@ pub(crate) struct Drive {
     startup: simulation::boundary::SimStartup,
     /// Sequence of the last sent command.
     seq: u64,
+    /// Sequence of the last command with menu actions. Older frames have a stale pause flag.
+    action_seq: u64,
     world_ms: f64,
     /// Camera position of the last rendered frame. The simulation assigns radio voices by it.
     pub listener: Option<[f32; 3]>,
@@ -171,6 +173,7 @@ pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
             link: sim_link::SimLink::default(),
             startup,
             seq: 0,
+            action_seq: 0,
             world_ms: 0.,
             listener: None,
             ready: false,
@@ -586,6 +589,9 @@ fn read_input(
     };
     drive.seq += 1;
     let seq = drive.seq;
+    if actions != 0 {
+        drive.action_seq = seq;
+    }
     drive.look.send(seq, input.mouse);
     let command = SimCommand {
         seq,
@@ -1025,7 +1031,8 @@ fn update_hud(mut drive: ResMut<Drive>, mut sim: ResMut<SimFrameResource>) {
         hud.trip_m,
         f64::from(state.prepared_roads),
         hud.fuel,
-        state.flags & StateBlock::PAUSED != 0,
+        // A frame before the last Continue or pause must not pause the menu again.
+        state.flags & StateBlock::PAUSED != 0 && sim.frame.seq_consumed >= drive.action_seq,
         state.flags & StateBlock::STARTED != 0,
         hud.flags & HudBlock::AUTOSAVE_SAFE != 0,
         seated,
