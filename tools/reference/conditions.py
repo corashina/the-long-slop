@@ -444,8 +444,8 @@ def recover_conditions(source, nodes, components, pointer_node, item_nodes, coll
     player=source.get('level1',80125);pd=source.read(player)
     point=required(player,pd['pointKefe'],'pointKefe');point_data=source.read(point)
     if point_data['ownCondition']['m_PathID']:raise ValueError(f'{key(point)} player brush ownCondition is not exported')
-    tool,nodes=brush_tool(source,point,point_data,{'LM':pd['pointingLayer'],'distance':pd['pointRange']},node_of,output)
-    result['player_brush']={'tool':tool,'nodes':nodes}
+    tool,brush_nodes=brush_tool(source,point,point_data,{'LM':pd['pointingLayer'],'distance':pd['pointRange']},node_of,output)
+    result['player_brush']={'tool':tool,'nodes':brush_nodes}
     washes={key(source.get(w['source']['file'],w['source']['path_id'])):w['id'] for w in result['washes']}
     slots={key(source.get(s['source']['file'],s['source']['path_id'])):s['id'] for s in source.condition_part_slots}
     anchors={a['id']:a for a in source.condition_anchors}
