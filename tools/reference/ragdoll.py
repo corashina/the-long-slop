@@ -123,40 +123,25 @@ def recover_pose_map(source, own, live, node):
                   for a, b in zip(d['ragdolT'], l['ragdolT'], strict=True)]}
 
 
-def recover_ragdoll(source, manifest, output):
-    from .clothing import recover_characters, character_renderers
+def recover_rig(source, root, by_node, parents, rigid, collider, sensor):
+    """Bodies and colliders under `root`. `rigid(reader, data)` and `collider(reader)` select the records.
+    `sensor` overrides the collider trigger flag; None keeps it. Gives bodies, colliders and body world poses."""
     from .gltf import GltfExporter
-    from .player_pose import resolved_transform
-    nodes = {key(source.get(n['source']['file'], n['source']['path_id'])): n for n in manifest['nodes']}
-    def node(reader):
-        reader = resolved_transform(source, reader)
-        if key(reader) not in nodes:
-            raise ValueError('Ragdoll link outside retained hierarchy')
-        return nodes[key(reader)]['id']
-    parents = {n['id']: n['parent'] for n in manifest['nodes']}
-    root = prefab_root(source)
-    asset = next(a for a in manifest['assets'] if a['usage'] == 'ragdoll_prototype')
-    if key(root) != getattr(source, 'ragdoll_root', None) or nodes[key(root)]['asset'] != asset['id']:
-        raise ValueError('Ragdoll asset root')
     matrix = source.read(next(r for r in source.objects.values() if r.type.name == 'PhysicsManager'))['m_LayerCollisionMatrix']
-    records = source.hierarchy(root, activate_root=True)
-    by_node = {nodes[key(r['reader'])]['id']: r for r in records}
     root_pose = world_pose(source, root)
     inverse = [-v for v in root_pose['rotation'][:3]] + [root_pose['rotation'][3]]
     bodies = []; body_nodes = {}; poses = {}
     for n, record in by_node.items():
-        rigid = [c for c in record['components'] if c.type.name == 'Rigidbody']
-        if not rigid:
+        rigid_bodies = [c for c in record['components'] if c.type.name == 'Rigidbody' and rigid(c, source.read(c))]
+        if not rigid_bodies:
             continue
-        if len(rigid) != 1:
+        if len(rigid_bodies) != 1:
             raise ValueError('Duplicate ragdoll Rigidbody')
-        d = source.read(rigid[0])
-        if not d['m_UseGravity'] or d['m_Constraints']:
-            raise ValueError(f'Unaudited ragdoll Rigidbody: {key(rigid[0])}')
+        d = source.read(rigid_bodies[0])
         pose = world_pose(source, record['reader']); pose['scale'] = [1., 1., 1.]
         poses[n] = pose
-        # SpawnRagdol makes every Rigidbody dynamic.
-        bodies.append({'id': len(bodies) + 1, 'source': source_id(rigid[0]), 'node': n, 'dynamic': True,
+        # SpawnRagdol and SetRagdol make every Rigidbody dynamic.
+        bodies.append({'id': len(bodies) + 1, 'source': source_id(rigid_bodies[0]), 'node': n, 'dynamic': True,
             'mass_kg': d['m_Mass'], 'linear_damping': d['m_Drag'], 'angular_damping': d['m_AngularDrag'],
             'pose': {'translation': bake_points([(0., 0., 0.)], source.chain(record['reader']), root_pose)[0],
                      'rotation': list(quaternion_product(inverse, pose['rotation'])), 'scale': [1., 1., 1.]},
@@ -177,6 +162,8 @@ def recover_ragdoll(source, manifest, output):
                 if c.type.name.endswith('Collider'):
                     raise ValueError(f'Unsupported ragdoll collider: {key(c)}')
                 continue
+            if not collider(c):
+                continue
             d = source.read(c); owner = body_for(n)
             if owner is None:
                 raise ValueError(f'Ragdoll collider lacks body: {key(c)}')
@@ -185,12 +172,37 @@ def recover_ragdoll(source, manifest, output):
             layer = source.read(record['game_object'])['m_Layer']
             material = source.resolve(c, d['m_Material'])
             properties = source.read(material) if material else {'dynamicFriction': .6, 'bounciness': 0.}
-            # SpawnRagdol enables every ragdoll collider.
+            # SpawnRagdol and SetRagdol enable every ragdoll collider.
             colliders.append({'id': len(colliders) + 1, 'source': source_id(c), 'node': n, 'body': owner,
-                'sensor': bool(d['m_IsTrigger']), 'enabled': True, 'membership': 1 << layer, 'filter': matrix[layer],
+                'sensor': bool(d['m_IsTrigger']) if sensor is None else sensor, 'enabled': True,
+                'membership': 1 << layer, 'filter': matrix[layer],
                 'friction': properties['dynamicFriction'], 'restitution': properties['bounciness'],
                 'geometry': geometry(source, exporter, c, record['reader'], poses[bodies[owner - 1]['node']], True),
                 'step_surface': step_surface(source, record['game_object']), 'tag': collider_tag(source, record['game_object'])})
+    return bodies, colliders, poses
+
+
+def recover_ragdoll(source, manifest, output):
+    from .clothing import recover_characters, character_renderers
+    from .player_pose import resolved_transform
+    nodes = {key(source.get(n['source']['file'], n['source']['path_id'])): n for n in manifest['nodes']}
+    def node(reader):
+        reader = resolved_transform(source, reader)
+        if key(reader) not in nodes:
+            raise ValueError('Ragdoll link outside retained hierarchy')
+        return nodes[key(reader)]['id']
+    parents = {n['id']: n['parent'] for n in manifest['nodes']}
+    root = prefab_root(source)
+    asset = next(a for a in manifest['assets'] if a['usage'] == 'ragdoll_prototype')
+    if key(root) != getattr(source, 'ragdoll_root', None) or nodes[key(root)]['asset'] != asset['id']:
+        raise ValueError('Ragdoll asset root')
+    records = source.hierarchy(root, activate_root=True)
+    by_node = {nodes[key(r['reader'])]['id']: r for r in records}
+    def checked(reader, d):
+        if not d['m_UseGravity'] or d['m_Constraints']:
+            raise ValueError(f'Unaudited ragdoll Rigidbody: {key(reader)}')
+        return True
+    bodies, colliders, poses = recover_rig(source, root, by_node, parents, checked, lambda c: True, None)
     outfit = component(source, root, 'playermodeloutfitscript')
     renderers = {key(c) for r in records for c in r['components'] if c.type.name.endswith('Renderer')}
     if renderers != {key(r) for r in character_renderers(source, outfit)}:
