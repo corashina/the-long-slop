@@ -71,10 +71,10 @@ Prepare once:
 
 1. Run the ignored export tests: `cargo test --test garage_parts -- --ignored` and `cargo test --lib r05_cargo_locks_in_trunk -- --ignored`.
 2. Repair (R01): swap the hood and the trunk lid, repair rust and dirt.
-3. Electronics (R02): check the Lada radiator fan spins while the engine runs.
+3. Electronics (R02): check the Lada radiator fan spins while the engine runs, and stops with the engine. Swap in a loot radiator: its fan spins too.
 4. Exhaust smoke (R04): rate follows rpm, color changes after a fuel mix change, 5x5 sheet animates. Check the particle quads are not upside down.
 5. Siphon hose (R03): first check the garage hose spawns clear of the walls. Attach it to the Lada tank and a can. Siphon by height (both ends are main, so the source runs the siphon twice per frame), drain with LMB, coil with R, store it, tear it off by driving.
-6. Cargo storage (R05): lock items in the Lada trunk, glove box, and engine bay, and in a fridge, a pallet, and a coffin. Open the lid to release them. The source box is manual only: items put in it later stay loose.
+6. Cargo storage (R05): lock items in the Lada trunk, glove box, and engine bay, and in a fridge, a pallet, and a coffin. Open the lid to release them. The source box is manual only: items in it when its area loads lock, items put in it later stay loose. Items in a fridge, pallet or coffin when its area loads lock at once, not after 3 s.
 7. Save and load with the hose attached and with cargo locked.
 8. Check F3 with smoke, near a hose, and while driving with cargo. Compare with the frame rate rule.
 

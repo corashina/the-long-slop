@@ -19,6 +19,9 @@ const SCAN_CAPACITY: usize = 64;
 const COLLIDER_CAPACITY: usize = 256;
 /// Preallocated world volume slots and world flag entries.
 const WORLD_CAPACITY: usize = 64;
+/// Source `mountStuff.StartFreeze`: two yields, then three `QuickFreeze` passes.
+const START_FRAMES: u8 = 5;
+const START_PASSES: u8 = 3;
 
 /// One locked item. Its own body is disabled while its colliders ride on the carrier.
 struct Locked {
@@ -50,6 +53,8 @@ struct Volume {
     shape: SharedShape,
     /// Gate slots are filled and gate usables are closed. Set before each scan.
     gates_closed: bool,
+    /// Frames left of the source `StartFreeze`. Zero: started.
+    startup: u8,
     previous: Vec<ItemId>,
     current: Vec<ItemId>,
 }
@@ -66,6 +71,7 @@ impl Volume {
             frame: Frame::Free,
             shape: SharedShape::ball(0.0),
             gates_closed: false,
+            startup: 0,
             previous: Vec::with_capacity(SCAN_CAPACITY),
             current: Vec::with_capacity(SCAN_CAPACITY),
         }
@@ -288,6 +294,7 @@ impl StorageLocks {
                 SharedShape::cuboid(x, y, z)
             };
             volume.gates_closed = false;
+            volume.startup = START_FRAMES;
             volume.previous.clear();
             volume.current.clear();
         }
@@ -765,11 +772,13 @@ impl StorageLocks {
         physics.refresh_queries();
         if self.startup_frame == 2 {
             for volume in &mut self.volumes {
+                volume.startup = 0;
                 Self::scan_volume(volume, items, physics, self.mount_mask);
                 std::mem::swap(&mut volume.previous, &mut volume.current);
             }
         }
-        let changed = self.advance(items, physics, parts, mechanisms, occupied, 0.0)?;
+        self.set_gates(parts, mechanisms);
+        let changed = self.scan(items, physics, occupied, true)?;
         self.startup_frame += 1;
         Ok(changed)
     }
@@ -787,59 +796,112 @@ impl StorageLocks {
             return Err(error("Invalid storage step"));
         }
         self.elapsed += dt;
+        let mut changed = self.start_volumes(items, physics, parts, mechanisms, occupied)?;
         if dt > 0.0 && self.elapsed - self.last_scan <= self.scan_interval {
-            return Ok(false);
+            return Ok(changed);
         }
         self.last_scan = self.elapsed;
+        self.set_gates(parts, mechanisms);
+        changed |= self.scan(items, physics, occupied, false)?;
+        Ok(changed)
+    }
+    fn set_gates(&mut self, parts: &PartAttachments, mechanisms: &MechanismState) {
         for volume in &mut self.volumes {
             volume.gates_closed = Self::gates_closed(volume, parts, mechanisms, &self.part_usables);
         }
-        self.scan(items, physics, occupied)
+    }
+    /// Source `StartFreeze` of volumes that bound after loading. `QuickFreeze` ignores `onlyManual`.
+    fn start_volumes(
+        &mut self,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+        parts: &PartAttachments,
+        mechanisms: &MechanismState,
+        occupied: Option<RigidBodyHandle>,
+    ) -> Result<bool, ReferenceError> {
+        let mut changed = false;
+        for index in 0..self.volumes.len() {
+            let volume = &mut self.volumes[index];
+            if volume.startup == 0 || matches!(volume.frame, Frame::Free) {
+                continue;
+            }
+            volume.startup -= 1;
+            if volume.startup >= START_PASSES {
+                continue;
+            }
+            volume.gates_closed = Self::gates_closed(volume, parts, mechanisms, &self.part_usables);
+            // The first pass scans twice: QuickFreeze(_prescan: true).
+            if volume.startup == START_PASSES - 1 {
+                Self::scan_volume(volume, items, physics, self.mount_mask);
+                std::mem::swap(&mut volume.previous, &mut volume.current);
+            }
+            changed |= self.upd_volume(index, items, physics, occupied)?;
+        }
+        if changed {
+            physics.refresh_queries();
+        }
+        Ok(changed)
     }
     /// One `Upd` pass over every volume. Gate state is already set.
+    /// `quick` is the source `QuickFreeze`, which also runs `onlyManual` volumes.
     fn scan(
         &mut self,
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
         occupied: Option<RigidBodyHandle>,
+        quick: bool,
     ) -> Result<bool, ReferenceError> {
         let mut changed = false;
         for index in 0..self.volumes.len() {
-            if matches!(self.volumes[index].frame, Frame::Free) || self.volumes[index].only_manual {
+            if matches!(self.volumes[index].frame, Frame::Free)
+                || (self.volumes[index].only_manual && !quick)
+            {
                 continue;
             }
-            let volume = index as u16;
-            let permitted = Self::permitted(&self.volumes[index], items, physics);
-            if !permitted {
-                while let Some(item) = self
-                    .locked
-                    .iter()
-                    .find(|l| l.volume == volume)
-                    .map(|l| l.item)
-                {
-                    self.unlock(item, items, physics)?;
-                    changed = true;
-                }
-            }
-            Self::scan_volume(&mut self.volumes[index], items, physics, self.mount_mask);
-            if permitted {
-                let owner = self.volumes[index].owner;
-                for slot in 0..self.volumes[index].current.len() {
-                    let item = self.volumes[index].current[slot];
-                    if self.volumes[index].previous.contains(&item)
-                        && self.can_lock(item, owner, occupied, items, physics)
-                        && self.lock(item, volume, items, physics)?
-                    {
-                        changed = true;
-                    }
-                }
-            }
-            let volume = &mut self.volumes[index];
-            std::mem::swap(&mut volume.previous, &mut volume.current);
+            changed |= self.upd_volume(index, items, physics, occupied)?;
         }
         if changed {
             physics.refresh_queries();
         }
+        Ok(changed)
+    }
+    /// Source `CanStore`, then `FreezeUpd` or `Unstore` for one volume.
+    fn upd_volume(
+        &mut self,
+        index: usize,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+        occupied: Option<RigidBodyHandle>,
+    ) -> Result<bool, ReferenceError> {
+        let mut changed = false;
+        let volume = index as u16;
+        let permitted = Self::permitted(&self.volumes[index], items, physics);
+        if !permitted {
+            while let Some(item) = self
+                .locked
+                .iter()
+                .find(|l| l.volume == volume)
+                .map(|l| l.item)
+            {
+                self.unlock(item, items, physics)?;
+                changed = true;
+            }
+        }
+        Self::scan_volume(&mut self.volumes[index], items, physics, self.mount_mask);
+        if permitted {
+            let owner = self.volumes[index].owner;
+            for slot in 0..self.volumes[index].current.len() {
+                let item = self.volumes[index].current[slot];
+                if self.volumes[index].previous.contains(&item)
+                    && self.can_lock(item, owner, occupied, items, physics)
+                    && self.lock(item, volume, items, physics)?
+                {
+                    changed = true;
+                }
+            }
+        }
+        let volume = &mut self.volumes[index];
+        std::mem::swap(&mut volume.previous, &mut volume.current);
         Ok(changed)
     }
 }

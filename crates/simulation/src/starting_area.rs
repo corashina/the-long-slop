@@ -2373,8 +2373,10 @@ impl GarageRuntime {
         );
         let was_running = engine.is_some_and(|engine| engine.state.output().running);
         let globals = &reference.world.vehicle_globals;
-        if engine_active && let (Some(part), radiator) = self.powertrain.pair_mut(powertrain) {
-            let (fan_on, radiator, coolant_tank) = match radiator {
+        if engine_active
+            && let (Some(part), mut radiator_part) = self.powertrain.pair_mut(powertrain)
+        {
+            let (fan_on, radiator, coolant_tank) = match radiator_part.as_deref_mut() {
                 Some(r) => (Some(&mut r.fan_on), Some(&r.record), r.coolant_tank),
                 None => (None, None, None),
             };
@@ -2408,6 +2410,10 @@ impl GarageRuntime {
                 |draw| start_sample(DEFAULT_SEED, draw),
                 FIXED_DT,
             );
+            // Source `coolantTankscript.Cool`: Fan.Rotate(0, 0, selectedFanSpeed * dt).
+            if let Some(r) = radiator_part {
+                r.fan_angle = (r.fan_angle + part.state.output().fan_speed * FIXED_DT) % 360.;
+            }
             self.area
                 .items
                 .get_mut(part.item)
