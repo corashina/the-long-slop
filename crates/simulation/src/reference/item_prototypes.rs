@@ -121,6 +121,7 @@ pub struct HoseOpening {
     pub valve: f32,
     pub can_tune: bool,
     pub tune_rate: f32,
+    pub tune_icon: Option<SourceId>,
     pub presentation: FluidPresentation,
     pub visuals: CapVisualReference,
 }
@@ -176,6 +177,7 @@ impl HoseReference {
             require(
                 checked(&o.source, o.source.path_id)
                     && valid_tuning(o.valve, o.can_tune, o.tune_rate)
+                    && valid_tune_icon(o.can_tune, &o.tune_icon, &m.ui)
                     && valid_flow(
                         o.flow_liters_per_second,
                         o.tilt_degrees,

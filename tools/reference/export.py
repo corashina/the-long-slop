@@ -286,6 +286,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     output.mkdir(parents=True, exist_ok=True)
     native_engine = native_engine_evidence(snapshot.root)
     source.lighting_probe_prototype=prefab
+    # Guns, caps and world usables add GCMMB and weapon crosshair sprites. ui exports them.
+    source.crosshair_icons=set()
     source.lighting_root_assets={key(root):i for i,readers in enumerate(roots.values(),1) for root in readers}
     _,pole=road_source(source)
     clouds=source.get('level1',27217)

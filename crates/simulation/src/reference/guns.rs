@@ -425,7 +425,7 @@ impl GunReference {
             self.crosshair
                 .icon
                 .as_ref()
-                .is_none_or(|icon| m.ui.sprites.iter().any(|s| s.source == *icon)),
+                .is_none_or(|icon| m.ui.sprite(icon).is_some()),
             "crosshair icon",
         )?;
         check(

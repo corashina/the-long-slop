@@ -20,15 +20,15 @@ export function formatTank(r) {
  return result;
 }
 /** Rust `Crosshair` layer bits. E, adjust and F hold a sprite choice. */
-export const CROSSHAIR={E_SHIFT:0,ADJUST_SHIFT:2,F_SHIFT:4,MMB:128,LMB:256,DISMOUNT:512,CAN_PICKUP:1024,PICKUP:2048,TOO_HEAVY:4096,DEFAULT:8192,WEAPON:16384};
+export const CROSSHAIR={E_SHIFT:0,ADJUST_SHIFT:2,F_SHIFT:4,MMB:128,LMB:256,DISMOUNT:512,CAN_PICKUP:1024,PICKUP:2048,TOO_HEAVY:4096,DEFAULT:8192,WEAPON:16384,MMB_SPRITE_SHIFT:16};
 const E_ICONS=['','enter','exit','switch'],ADJUST_ICONS=['','door','slide','slide-vertical'],F_ICONS=['','push','mount','hose','attach'];
-/** Source `mainscript.CrossHairStuff` layers in sibling (draw) order: the sprite role, or null when hidden, and the source size. */
+/** Source `mainscript.CrossHairStuff` layers in sibling (draw) order: the icon role or `ui.sprites` index, or null when hidden, and the source size. */
 export function crosshairLayers(bits){
  const e=E_ICONS[bits>>CROSSHAIR.E_SHIFT&3],adjust=ADJUST_ICONS[bits>>CROSSHAIR.ADJUST_SHIFT&3],f=F_ICONS[bits>>CROSSHAIR.F_SHIFT&7];
- const on=(bit,role)=>bits&bit?role:null;
+ const on=(bit,role)=>bits&bit?role:null,mmb=bits>>>CROSSHAIR.MMB_SPRITE_SHIFT;
  return [[on(CROSSHAIR.DISMOUNT,'dismount'),75,40],[on(CROSSHAIR.CAN_PICKUP,'pickup'),75,40],[on(CROSSHAIR.PICKUP,'carrying'),75,40],
   [on(CROSSHAIR.DEFAULT,'default'),35,35],[on(CROSSHAIR.TOO_HEAVY,'too-heavy'),75,40],[f||null,40,40],[adjust||null,40,40],
-  [on(CROSSHAIR.WEAPON,'weapon'),50,50],[e||null,40,40],[on(CROSSHAIR.MMB,'cap'),40,40],[on(CROSSHAIR.LMB,'fill'),40,40]];
+  [on(CROSSHAIR.WEAPON,'weapon'),50,50],[e||null,40,40],[on(CROSSHAIR.MMB,mmb?mmb-1:'cap'),40,40],[on(CROSSHAIR.LMB,'fill'),40,40]];
 }
 /** Source `GCPickups` alphas under the carrying layer: medium and heavy, by `weightM`. */
 export function pickupWeightAlphas(weight){
@@ -157,7 +157,7 @@ export function createFeedback(ui,manifest) {
   if(strength!==lastCharge){level.value=strength;lastCharge=strength;}
   carry.hidden=!state.carrying;const help=state.actions&ACTION.ROTATE?rotationHelp:translationHelp;
   if(help!==lastCarry){carry.textContent=help;lastCarry=help;}
-  if(state.crosshair!==lastLayers){lastLayers=state.crosshair;crosshairLayers(state.crosshair).forEach(([role],i)=>{const layer=layers[i];if(layer===weapon)return;layer.hidden=!role;if(role&&layer.dataset.role!==role){layer.src=ui.urls[ui.icons[role]];layer.dataset.role=role;}});for(const child of pickupChildren)child.hidden=layers[2].hidden;showWeapon();}
+  if(state.crosshair!==lastLayers){lastLayers=state.crosshair;crosshairLayers(state.crosshair).forEach(([role],i)=>{const layer=layers[i];if(layer===weapon)return;layer.hidden=role===null;if(role!==null&&layer.dataset.role!==String(role)){layer.src=ui.urls[typeof role==='number'?role:ui.icons[role]];layer.dataset.role=role;}});for(const child of pickupChildren)child.hidden=layers[2].hidden;showWeapon();}
   if(state.weight!==lastWeight){lastWeight=state.weight;pickupWeightAlphas(state.weight).forEach((alpha,i)=>{pickupChildren[i].style.opacity=alpha;});}
   if(state.fluidText!==lastFluid){fluid.textContent=state.fluidText;lastFluid=state.fluidText;}fluid.hidden=!state.fluidText;
   const message=state.context===6?'Unlimited Gas':state.notice;

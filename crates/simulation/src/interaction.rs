@@ -166,10 +166,12 @@ struct OpeningRules {
     can_toggle: bool,
     can_tune: bool,
     tune_rate: f32,
+    /// `UiReference::sprites` index of the cap `img`.
+    tune_icon: Option<u32>,
     presentation: FluidPresentation,
 }
-impl From<&OpeningRecord> for OpeningRules {
-    fn from(opening: &OpeningRecord) -> Self {
+impl OpeningRules {
+    fn new(opening: &OpeningRecord, ui: &crate::reference::UiReference) -> Self {
         Self {
             id: opening.id,
             tank: opening.tank,
@@ -184,6 +186,7 @@ impl From<&OpeningRecord> for OpeningRules {
             can_toggle: opening.can_toggle,
             can_tune: opening.can_tune,
             tune_rate: opening.tune_rate,
+            tune_icon: opening.tune_icon.as_ref().and_then(|icon| ui.sprite(icon)),
             presentation: opening.presentation.clone(),
         }
     }
@@ -234,6 +237,7 @@ pub struct InteractionState {
     usable_light_controls: HashSet<LightControlId>,
     /// Generated source dial knobs (meterscript tune usables).
     dial_knobs: HashMap<ColliderId, Knob>,
+    tune_icons: HashMap<ColliderId, u32>,
     fill_opening: Option<OpeningId>,
     kinds: HashMap<ItemId, ItemKind>,
     wheel_slots: HashMap<WheelSlotId, WheelSlotRule>,
@@ -354,6 +358,7 @@ impl InteractionState {
             + map(&self.light_nodes)
             + set(&self.usable_light_controls)
             + map(&self.dial_knobs)
+            + map(&self.tune_icons)
             + map(&self.item_seats)
             + map(&self.kinds)
             + map(&self.wheel_slots)
@@ -416,7 +421,7 @@ impl InteractionState {
                 * transform_pose(&body.pose)
                 * transform_pose(&anchor.transform);
             openings.push(OpeningState {
-                reference: OpeningRules::from(opening),
+                reference: OpeningRules::new(opening, &reference.ui),
                 local_pose,
                 tilt_axis: Vector::from_array(opening.tilt_axis),
                 valve: opening.valve,
@@ -562,6 +567,7 @@ impl InteractionState {
                 + 1,
             fill_opening: None,
             dial_knobs: HashMap::new(),
+            tune_icons: HashMap::new(),
             usable_light_controls: reference
                 .lighting
                 .controllers
@@ -825,8 +831,13 @@ impl InteractionState {
     pub fn bind_dial_knob(&mut self, collider: ColliderId, kind: Knob) {
         self.dial_knobs.insert(collider, kind);
     }
+    /// `img` of a `tuneAble` knob as a `UiReference::sprites` index.
+    pub fn bind_tune_icon(&mut self, collider: ColliderId, sprite: u32) {
+        self.tune_icons.insert(collider, sprite);
+    }
     pub fn remove_dial_knob(&mut self, collider: ColliderId) {
         self.dial_knobs.remove(&collider);
+        self.tune_icons.remove(&collider);
     }
     pub fn dial_knob(
         &self,
@@ -1200,6 +1211,7 @@ impl InteractionState {
                 can_toggle: false,
                 can_tune: false,
                 tune_rate: 0.0,
+                tune_icon: None,
                 presentation: o.presentation.clone(),
             },
             local_pose: transform_pose(&end.pose),
@@ -1308,6 +1320,12 @@ impl InteractionState {
             can_toggle,
             can_tune,
             tune_rate: number(cap_record, "tuneSpeed")? * reference.fluid_rules.fluid_tune_speed,
+            tune_icon: match cap_record.fields.get("img") {
+                Some(crate::reference::WorldValue::Link(icon)) if can_tune => {
+                    reference.ui.sprite(icon)
+                }
+                _ => None,
+            },
             presentation: generated_presentation(
                 number(cap_record, "hasName")? != 0.0,
                 number(cap_record, "nameText")?,

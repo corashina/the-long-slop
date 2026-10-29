@@ -173,7 +173,6 @@ def recover_guns(source, manifest, output) -> dict:
         # ShootStart/ShootEnd move the shared system and call Emit(1); emission does not run.
         tracer[name]=particle(source,system,f'gun_tracer_{name}',0.,output)
     decals=[_decal(source,source.resolve(main,p),output) for p in d['ShootDecals']]
-    source.crosshair_icons=set()
     # Every world prototype node with a weaponscript is a gun.
     weapons=[]
     for p in manifest['world']['prototypes']:

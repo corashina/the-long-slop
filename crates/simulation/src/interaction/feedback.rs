@@ -100,6 +100,8 @@ pub struct ActionAvailability {
     pub(super) hose_cap: Option<OpeningId>,
     /// The adjust icon of the looked usable.
     pub adjust: super::crosshair::AdjustIcon,
+    /// GCMMB sprite of the looked knob or cap, as a `UiReference::sprites` index.
+    pub tune_icon: Option<u32>,
 }
 pub struct FluidFeedback<'a> {
     pub amount: f32,
@@ -203,8 +205,9 @@ impl InteractionState {
             };
         }
         if let Some(t) = use_target {
-            if let Some((_, kind)) = self.dial_knob(&t, physics) {
+            if let Some((id, kind)) = self.dial_knob(&t, physics) {
                 use super::Knob;
+                a.tune_icon = self.tune_icons.get(&id).copied();
                 a.context = match kind {
                     Knob::Volume => FeedbackContext::RadioVolume,
                     Knob::Tuning => FeedbackContext::RadioTuning,
@@ -246,6 +249,7 @@ impl InteractionState {
                 }
                 if o.reference.can_tune {
                     a.actions.0 |= ActionMask::TUNE;
+                    a.tune_icon = o.reference.tune_icon;
                 }
             }
             if self

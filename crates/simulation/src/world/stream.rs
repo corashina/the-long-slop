@@ -4351,7 +4351,7 @@ impl WorldStream {
             self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
             return Err(error);
         }
-        if let Err(error) = self.sync_dial_bindings(items, interaction, physics) {
+        if let Err(error) = self.sync_dial_bindings(&reference.ui, items, interaction, physics) {
             self.binding_reserved = 0;
             return Err(error);
         }
@@ -4379,7 +4379,7 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
-        if let Err(error) = self.sync_radio_bindings(items, interaction, physics) {
+        if let Err(error) = self.sync_radio_bindings(&reference.ui, items, interaction, physics) {
             self.binding_reserved = 0;
             return Err(error);
         }

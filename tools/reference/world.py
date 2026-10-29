@@ -570,12 +570,21 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     for identity,record in selected.records.items():
         if identity not in records:records[identity]=record
     world['records']=list(records.values())
+    bind_tune_icons(source,world)
     bind_light_cookies(source,world,output)
     from .world_spawn import project_runtime_receipts
     from .world_fields import project_runtime_fields
     project_runtime_receipts(world,world_probe.PROBE_ROOT)
     project_runtime_fields(world,world_probe.PROBE_ROOT)
     return world
+
+def bind_tune_icons(source, world):
+    """mainscript.CrossHairStuff: GCMMB shows the img of a looked tuneAble usable or canTune cap."""
+    for r in world['records']:
+        flag={'usablescript':'tuneAble','tankcapscript':'canTune'}.get(r['class_name'])
+        img=r['fields'].get('img') if flag else None
+        if img and img['kind']=='link' and r['fields'][flag]['value']:
+            source.crosshair_icons.add(tuple(img['value'].values()))
 
 def bind_light_cookies(source, world, output):
     """Bind each world spot Light cookie to its lighting texture. The renderer packs these textures."""

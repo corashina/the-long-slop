@@ -34,6 +34,8 @@ impl Crosshair {
     pub const TOO_HEAVY: u32 = 1 << 12;
     pub const DEFAULT: u32 = 1 << 13;
     pub const WEAPON: u32 = 1 << 14;
+    /// The GCMMB sprite as a `UiReference::sprites` index + 1. 0 shows `ICap`.
+    pub const MMB_SPRITE_SHIFT: u32 = 16;
 }
 
 /// `weight_m2` is the source `weightM2`: 1 when nothing is carried.
@@ -112,6 +114,9 @@ pub fn crosshair(a: &ActionAvailability, carrying: bool, weapon: bool, weight_m2
             bits |= bit;
         }
     }
+    if mmb && let Some(sprite) = a.tune_icon {
+        bits |= (sprite + 1) << Crosshair::MMB_SPRITE_SHIFT;
+    }
     bits
 }
 
@@ -143,10 +148,16 @@ mod tests {
         );
         assert_eq!(crosshair(&switch, false, false, 1.), 3);
         // A tuneable cap with a fill shows the wheel and LMB layers.
-        let cap = availability(ActionMask::TUNE | ActionMask::FILL, FeedbackContext::Cap);
+        let mut cap = availability(ActionMask::TUNE | ActionMask::FILL, FeedbackContext::Cap);
         assert_eq!(
             crosshair(&cap, true, false, 1.),
             Crosshair::MMB | Crosshair::LMB
+        );
+        // A cap img replaces the ICap sprite.
+        cap.tune_icon = Some(4);
+        assert_eq!(
+            crosshair(&cap, true, false, 1.),
+            Crosshair::MMB | Crosshair::LMB | (5 << Crosshair::MMB_SPRITE_SHIFT)
         );
         // Push hides E. Hose attach and hitch attach replace the mount icon.
         let push = availability(ActionMask::PUSH | ActionMask::ENTER, FeedbackContext::Push);

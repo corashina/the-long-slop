@@ -537,6 +537,8 @@ pub struct OpeningRecord {
     pub valve: f32,
     pub can_tune: bool,
     pub tune_rate: f32,
+    /// `img`: the GCMMB sprite of a `canTune` cap. None shows `ICap`.
+    pub tune_icon: Option<SourceId>,
     pub visuals: CapVisualReference,
     pub presentation: FluidPresentation,
 }
@@ -1001,6 +1003,10 @@ fn hash(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+fn valid_tune_icon(can_tune: bool, icon: &Option<SourceId>, ui: &UiReference) -> bool {
+    icon.as_ref()
+        .is_none_or(|icon| can_tune && ui.sprite(icon).is_some())
+}
 fn valid_tuning(valve: f32, can_tune: bool, tune_rate: f32) -> bool {
     valve.is_finite()
         && (0.0..=1.0).contains(&valve)
@@ -1692,7 +1698,8 @@ impl ReferenceManifest {
         }
         for r in &self.openings {
             require(
-                valid_tuning(r.valve, r.can_tune, r.tune_rate),
+                valid_tuning(r.valve, r.can_tune, r.tune_rate)
+                    && valid_tune_icon(r.can_tune, &r.tune_icon, &self.ui),
                 "opening valve/tuning",
             )?;
             validate_cap_visuals(&r.visuals, |id| node_ids.contains(&id))?;

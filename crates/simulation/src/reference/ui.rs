@@ -104,6 +104,13 @@ pub struct BinocularPrompts {
     pub focus: String,
 }
 impl UiReference {
+    /// The `sprites` index of a source sprite.
+    pub fn sprite(&self, source: &SourceId) -> Option<u32> {
+        self.sprites
+            .iter()
+            .position(|s| s.source == *source)
+            .map(|i| i as u32)
+    }
     pub fn validate(&self) -> Result<(), ReferenceError> {
         require(
             !self.sprites.is_empty() && !self.pairs.is_empty(),
