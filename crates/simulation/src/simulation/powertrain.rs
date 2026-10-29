@@ -202,7 +202,6 @@ mod tests {
             location,
             pose,
             local_pose: pose,
-            generated_condition: None,
             temperature: None,
             fluid: fluid.map(|(fluid_type, amount)| {
                 FluidContainer::new(10., &[FluidEntry { fluid_type, amount }])

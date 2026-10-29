@@ -101,12 +101,7 @@ fn bottle_breaks_on_a_hard_drop_once_and_stays_removed_after_reload() {
     // Save and load.
     let stamp = roadside_stamp(&reference);
     let saved = run
-        .capture_save(
-            &reference,
-            &stamp,
-            crate::save::CameraSave::FirstPerson,
-            "2026-10-26T12:00:00Z",
-        )
+        .capture_save(&reference, &stamp, "2026-10-26T12:00:00Z")
         .unwrap();
     let saved: crate::save::SaveSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
@@ -240,12 +235,7 @@ fn shovel_broken_lamp_stays_broken_after_reload() {
     // Save and load.
     let stamp = roadside_stamp(&reference);
     let saved = run
-        .capture_save(
-            &reference,
-            &stamp,
-            crate::save::CameraSave::FirstPerson,
-            "2026-10-26T12:00:00Z",
-        )
+        .capture_save(&reference, &stamp, "2026-10-26T12:00:00Z")
         .unwrap();
     let saved: crate::save::SaveSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();

@@ -65,8 +65,21 @@ enum Target {
         half_extents: [f32; 3],
     },
 }
+/// Bind inputs of a partconditionscript renderer. A changed state binds its material lazily.
+struct Rebind {
+    primitive: crate::reference::prototype_plan::PlanPrimitive,
+    record: crate::reference::render_lighting::RendererRecord,
+    layer: u8,
+    receive: bool,
+    reflected: bool,
+    has_lod: bool,
+    source_position: Vec3,
+}
 struct Renderer {
     material_source: Option<crate::reference::SourceId>,
+    rebind: Option<Box<Rebind>>,
+    /// Last applied condition color.
+    color: Option<[f32; 4]>,
     variants: Vec<MaterialVariant>,
     node: usize,
     target: Target,
@@ -760,6 +773,27 @@ impl SourceInstances {
                                         && flat.on_root(node.index as usize)
                                         && local.is_some()
                                         && !writer;
+                                    let rebind = stream
+                                        .appearance(&placement.id)
+                                        .iter()
+                                        .any(|a| {
+                                            a.node == source_node.source
+                                                && a.active.is_none()
+                                                && (a.material.is_some()
+                                                    || a.color.is_some()
+                                                    || a.color_material.is_some())
+                                        })
+                                        .then(|| {
+                                            Box::new(Rebind {
+                                                primitive: primitive.clone(),
+                                                record: record.clone(),
+                                                layer: source_node.layer,
+                                                receive,
+                                                reflected: world.determinant() < 0.,
+                                                has_lod,
+                                                source_position,
+                                            })
+                                        });
                                     let Some(mut binding) = materials.bind(
                                         stream.frame().request.session,
                                         prototype,
@@ -818,6 +852,9 @@ impl SourceInstances {
                                         owned_bindings.push((None, binding.clone()));
                                         renderers.push(Renderer {
                                             material_source,
+                                            rebind,
+                                            // The row color already holds it; the first view rewrites the same value.
+                                            color: None,
                                             variants: Vec::new(),
                                             node: source_index,
                                             target: Target::Row {
@@ -1041,6 +1078,8 @@ impl SourceInstances {
                                     };
                                     renderers.push(Renderer {
                                         material_source,
+                                        rebind,
+                                        color,
                                         variants,
                                         node: source_index,
                                         target: Target::Entity(entity),
@@ -1469,6 +1508,95 @@ impl SourceInstances {
                     renderer.binding.apply_sort(entity, commands);
                 }
             }
+            // partconditionscript renderers: a changed state binds its material on change.
+            for renderer in &mut instance.renderers {
+                let Some(rebind) = renderer.rebind.as_deref() else {
+                    continue;
+                };
+                let selected = view
+                    .materials
+                    .iter()
+                    .find(|m| m.node as usize == renderer.node)
+                    .map(|m| &sim.material_sources[m.source as usize]);
+                let color = view
+                    .colors
+                    .iter()
+                    .find(|c| c.node as usize == renderer.node)
+                    .map(|c| c.color);
+                if selected != renderer.material_source.as_ref()
+                    && !renderer
+                        .variants
+                        .iter()
+                        .any(|v| v.source.as_ref() == selected)
+                {
+                    let initial = selected.and_then(|source| {
+                        reference
+                            .rendering
+                            .materials
+                            .iter()
+                            .find(|m| &m.source == source && m.asset == prototype.asset)
+                            .map(|m| (m.asset, m.gltf_material))
+                    });
+                    let row = matches!(renderer.target, Target::Row { .. });
+                    if let Some(mut binding) = materials.bind(
+                        instance.session,
+                        prototype,
+                        &rebind.primitive,
+                        &rebind.record,
+                        initial,
+                        selected,
+                        rebind.layer,
+                        rebind.receive,
+                        rebind.reflected,
+                        rebind.source_position,
+                        Default::default(),
+                        row,
+                    )? {
+                        match &mut renderer.target {
+                            Target::Entity(entity) => {
+                                if rebind.has_lod {
+                                    materials.make_private(&mut binding);
+                                }
+                                binding.visible.replace(*entity, commands);
+                                binding.apply_sort(*entity, commands);
+                                renderer.lod_state = None;
+                                self.lods.queue(&mut instance.lod, instance_index);
+                            }
+                            Target::Row { slot, .. } => {
+                                let mut data = self.props.rows()[*slot as usize];
+                                data.color = materials.row_color(&binding, color)?;
+                                self.props.free(*slot);
+                                *slot = self.props.alloc(
+                                    BatchKey {
+                                        mesh: renderer.mesh.id(),
+                                        material: batch_material(&binding),
+                                    },
+                                    data,
+                                );
+                            }
+                        }
+                        materials.release(std::mem::replace(&mut renderer.binding, binding));
+                        renderer.ticket = None;
+                        renderer.material_source = selected.cloned();
+                        // The new material starts from its own color.
+                        renderer.color = None;
+                    }
+                }
+                if color != renderer.color {
+                    if let Some(c) = color {
+                        match renderer.target {
+                            Target::Entity(entity) => {
+                                materials.color(&mut renderer.binding, c)?;
+                                renderer.binding.visible.replace(entity, commands);
+                            }
+                            Target::Row { slot, .. } => self
+                                .props
+                                .set_color(slot, materials.row_color(&renderer.binding, Some(c))?),
+                        }
+                    }
+                    renderer.color = color;
+                }
+            }
             for renderer in &instance.renderers {
                 // A row impostor shares its material. Its row holds the source position.
                 if renderer.entity().is_none() {
@@ -1770,4 +1898,14 @@ fn local_root(placement: &Placement, origin: crate::world::WorldOrigin) -> DMat4
     }))
     .extend(1.);
     root
+}
+
+/// The shared material of a GPU prop row batch.
+fn batch_material(binding: &RendererMaterial) -> bevy::asset::UntypedAssetId {
+    match &binding.visible {
+        InstanceMaterial::Primary(h) => h.id().untyped(),
+        InstanceMaterial::Specular(h) => h.id().untyped(),
+        InstanceMaterial::Impostor(h) => h.id().untyped(),
+        InstanceMaterial::Grass(_) => unreachable!("Grass renderers are entities"),
+    }
 }

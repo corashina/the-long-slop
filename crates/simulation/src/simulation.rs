@@ -68,6 +68,8 @@ pub mod player_keys {
     pub const MOUSE_DRIVE: u8 = 16;
     /// Source `input.point` (`IN.pointrubwave`, Left Alt): point, rub and wave.
     pub const POINT: u8 = 32;
+    /// Source `IN.map` (M): map view.
+    pub const MAP: u8 = 64;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -164,6 +166,26 @@ pub struct FrameInput {
 }
 
 impl FrameInput {
+    /// Source `otherView()`: head look, lean, zoom, recenter, use, pickup and get-out do not run.
+    /// Releases stay, so a held action can end.
+    pub fn without_view_input(mut self) -> Self {
+        const VIEW_KEYS: u32 = keys::USE
+            | keys::GRAB
+            | keys::PRIMARY
+            | keys::ROTATE
+            | keys::TRANSLATE
+            | keys::RECENTER;
+        const VIEW_PLAYER_KEYS: u8 = player_keys::LEAN | player_keys::ZOOM | player_keys::POINT;
+        self.held &= !VIEW_KEYS;
+        self.pressed &= !VIEW_KEYS;
+        self.player_held &= !VIEW_PLAYER_KEYS;
+        self.player_pressed &= !VIEW_PLAYER_KEYS;
+        self.mouse = [0.; 2];
+        self.wheel = 0.;
+        self.carry.mouse = [0.; 2];
+        self.carry.wheel = 0.;
+        self
+    }
     pub fn merge(&mut self, frame: Self) {
         self.held = frame.held;
         self.pressed |= frame.pressed;

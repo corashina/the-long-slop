@@ -1,20 +1,24 @@
 pub mod body;
 pub mod collision;
+mod depenetration;
 mod head_bob;
 mod ladder;
+mod momentum;
 pub mod normals;
 pub mod point;
 pub mod pose;
 mod posture;
 pub mod ragdoll;
+mod sensor;
 mod view;
+mod wall_jump;
 use collision::PlayerSweepShape;
-use posture::{MovementSpeed, PostureState};
-use rapier3d::parry::shape::Shape;
+use posture::{JumpForces, PostureState};
+use rapier3d::parry::shape::{Ball, Capsule, Shape};
 pub use view::PlayerView;
 use view::ViewState;
 
-use rapier3d::control::{CharacterCollision, KinematicCharacterController};
+use rapier3d::control::{CharacterCollision, CharacterLength, KinematicCharacterController};
 use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::{
     ColliderBuilder, ColliderHandle, Group, InteractionGroups, InteractionTestMode, QueryFilter,
@@ -105,6 +109,8 @@ pub struct SeatValues {
     pub yaw_unlimited: bool,
     /// Source `lookInsteadOfLean`: lean input turns the camera, and recenter does nothing.
     pub look_instead_of_lean: bool,
+    /// Source `rootOrigin`: the outside view pivots on the seat body.
+    pub root_origin: bool,
     pub pitch_limits_degrees: [f32; 2],
     pub default_pitch_degrees: f32,
     pub driver: bool,
@@ -123,6 +129,7 @@ impl SeatValues {
             yaw_limits_degrees: seat.yaw_limits_degrees,
             yaw_unlimited: seat.yaw_unlimited,
             look_instead_of_lean: seat.look_instead_of_lean,
+            root_origin: seat.root_origin,
             pitch_limits_degrees: seat.pitch_limits_degrees,
             default_pitch_degrees: seat.default_pitch_degrees,
             driver: seat.driver,
@@ -149,6 +156,8 @@ struct Occupancy {
     /// Owner body, resolved on enter and restore.
     body: RigidBodyHandle,
     local_pose: Pose,
+    /// Main seatscript node relative to the owner body.
+    node_pose: Pose,
     values: SeatValues,
     /// Body frames relative to the owner body.
     frames: body::SeatFrames,
@@ -159,7 +168,14 @@ pub struct PlayerState {
     controller: KinematicCharacterController,
     sweep: PlayerSweepShape,
     posture: PostureState,
-    movement_speed: MovementSpeed,
+    momentum: momentum::Momentum,
+    wall_jump: wall_jump::WallJumpState,
+    /// Source `canwalljump` capsule and `canwalljump2` sphere.
+    wall_shapes: (Capsule, Ball),
+    /// Source `interiorsens`: sphere, hold and the dynamic body of its last hit.
+    interior_shape: Ball,
+    interior: sensor::SensorContact,
+    interior_body: Option<RigidBodyHandle>,
     view_state: ViewState,
     exit_capsule: SharedShape,
     body: RigidBodyHandle,
@@ -204,7 +220,8 @@ impl PlayerState {
         self.vertical_velocity = saved.vertical_velocity;
         self.recoil_velocity = Vector::from_array(saved.recoil_velocity);
         self.posture.restore(saved.posture);
-        self.movement_speed = MovementSpeed::default();
+        self.reset_motion();
+        self.momentum.restore(Vector::from_array(saved.momentum));
         self.running = saved.running;
         // A world item or world car seat waits for its binding. See `restore_item_seat`.
         self.occupancy = None;
@@ -278,7 +295,19 @@ impl PlayerState {
             controller: KinematicCharacterController::default(),
             sweep,
             posture: PostureState::new(1.0),
-            movement_speed: MovementSpeed::default(),
+            momentum: momentum::Momentum::default(),
+            wall_jump: wall_jump::WallJumpState::default(),
+            wall_shapes: (
+                Capsule::new(
+                    Vector::from_array(reference.wall_sensors.wall.a),
+                    Vector::from_array(reference.wall_sensors.wall.b),
+                    reference.wall_sensors.wall.radius,
+                ),
+                Ball::new(reference.wall_sensors.ledge.radius),
+            ),
+            interior_shape: Ball::new(reference.interior_sensor.radius),
+            interior: sensor::SensorContact::default(),
+            interior_body: None,
             view_state: ViewState::new(reference, pose_reference),
             exit_capsule,
             body,
@@ -368,6 +397,7 @@ impl PlayerState {
             posture: self.posture.value(),
             vertical_velocity: self.vertical_velocity,
             recoil_velocity: self.recoil_velocity.to_array(),
+            momentum: self.momentum.velocity().to_array(),
             running: self.running,
             carry,
             // GarageRuntime owns sleep and sets this field.
@@ -442,9 +472,17 @@ impl PlayerState {
             self.pose.translation = physics.rapier().bodies[self.body].position().translation;
         }
         let was_grounded = self.grounded;
-        let vertical_before_jump = self.vertical_velocity;
         self.ladder.tick(input);
+        self.update_sensors(physics);
         let jump_force = self.update_posture(input, context, physics, dt);
+        if self.wall_jump.gripped() {
+            self.vertical_velocity = wall_jump::grip_vertical(
+                self.vertical_velocity,
+                self.reference.grip_loose,
+                self.reference.max_fall_speed,
+            );
+        }
+        let vertical_before_jump = self.vertical_velocity;
         if self.push_gripping {
             let filter = self.movement_filter();
             let ground = physics.queries(filter).cast_ray(
@@ -494,6 +532,7 @@ impl PlayerState {
             // Source LadderMove replaces the body velocity.
             self.vertical_velocity = 0.0;
             self.recoil_velocity = Vector::ZERO;
+            self.momentum.reset();
         } else if self.ladder.gravity() {
             self.vertical_velocity = (self.vertical_velocity + physics.rapier().gravity.y * dt)
                 .max(-self.reference.max_fall_speed);
@@ -516,16 +555,50 @@ impl PlayerState {
                 self.reference.duck_multiplier,
             )
             * context.movement_multiplier;
-        let speed = self.movement_speed.limit(was_grounded, requested_speed);
+        let rapier = physics.rapier();
+        let interior = self.interior_body.map(|body| rapier.bodies[body].linvel());
+        let direction = self.pose.rotation * direction;
+        // A dynamic floor drags the player. Its vertical motion is not momentum.
+        let floor = self
+            .support_body
+            .filter(|_| was_grounded)
+            .map(|body| &rapier.bodies[body])
+            .filter(|body| body.is_dynamic())
+            .map_or(Vector::ZERO, |body| {
+                body.velocity_at_point(self.pose.translation)
+            });
+        if was_grounded || self.wall_jump.gripping() {
+            let max_speed = requested_speed
+                * if self.wall_jump.gripping() {
+                    self.reference.grip_multiplier
+                } else {
+                    1.0
+                };
+            self.momentum
+                .ground(direction * max_speed, floor, max_speed, interior);
+        } else {
+            self.momentum.air(
+                direction * self.reference.air_force * self.reference.source_force_interval
+                    / self.reference.mass_kg
+                    * dt,
+                interior,
+            );
+        }
         let desired = climb.map_or(
-            self.pose.rotation * direction * speed * dt
-                + self.recoil_velocity * dt
-                + Vector::Y * self.vertical_velocity * dt,
+            (self.momentum.velocity() + self.recoil_velocity) * dt
+                + Vector::Y * (self.vertical_velocity + floor.y) * dt,
             |velocity| velocity * dt,
         );
         self.collisions.clear();
-        let shape = &self.sweep;
         let filter = self.movement_filter();
+        self.pose.translation += depenetration::depenetrate(
+            &physics.queries(filter),
+            &self.sweep,
+            &self.pose,
+            self.controller_offset(),
+            self.reference.max_depenetration_velocity * dt,
+        );
+        let shape = &self.sweep;
         let rapier = physics.rapier();
         let movement = self.controller.move_shape(
             dt,
@@ -554,7 +627,7 @@ impl PlayerState {
             );
         }
         if was_grounded {
-            self.movement_speed.grounded_velocity(
+            self.momentum.grounded(
                 Vector::new(
                     movement.translation.x / dt,
                     vertical_before_jump,
@@ -635,11 +708,85 @@ impl PlayerState {
             self.reference.posture.capsule_filter,
         )
     }
+    fn controller_offset(&self) -> f32 {
+        match self.controller.offset {
+            CharacterLength::Absolute(value) => value,
+            CharacterLength::Relative(value) => value * self.sweep.compute_local_aabb().extents().y,
+        }
+    }
     fn movement_filter(&self) -> QueryFilter<'static> {
         QueryFilter::default()
             .exclude_sensors()
             .exclude_rigid_body(self.body)
             .groups(self.collision_groups())
+    }
+    fn reset_motion(&mut self) {
+        self.momentum.reset();
+        self.wall_jump.reset();
+        self.interior = sensor::SensorContact::default();
+        self.interior_body = None;
+    }
+    /// Source `canwalljump`, `canwalljump2` and `interiorsens` fixed steps.
+    fn update_sensors(&mut self, physics: &PhysicsWorld) {
+        let sensors = &self.reference.wall_sensors;
+        let touching = |membership, filter, pose, shape: &dyn Shape| {
+            physics
+                .queries(
+                    QueryFilter::default()
+                        .exclude_rigid_body(self.body)
+                        .groups(groups(membership, filter)),
+                )
+                .intersect_shape(pose, shape)
+                .next()
+                .is_some()
+        };
+        let wall = touching(
+            sensors.wall.membership,
+            sensors.wall.filter,
+            self.pose,
+            &self.wall_shapes.0,
+        );
+        let ledge = touching(
+            sensors.ledge.membership,
+            sensors.ledge.filter,
+            self.pose * Pose::from_translation(Vector::from_array(sensors.ledge.center)),
+            &self.wall_shapes.1,
+        );
+        let speed = (self.momentum.velocity() + Vector::Y * self.vertical_velocity).length();
+        self.wall_jump.contacts(
+            wall,
+            ledge,
+            self.reference.posture.sensor_hold_steps,
+            wall_jump::grip_ready(
+                self.vertical_velocity,
+                speed,
+                self.reference.max_grip_fall_speed,
+            ),
+        );
+        let interior = &self.reference.interior_sensor;
+        let head = to_rapier(self.view(physics).head_pose);
+        let pose = Pose::from_translation(
+            head.translation + head.rotation * Vector::from_array(interior.local_position),
+        );
+        let rapier = physics.rapier();
+        let hit = physics
+            .queries(QueryFilter::default().exclude_rigid_body(self.body))
+            .intersect_shape(pose, &self.interior_shape)
+            .find(|(_, collider)| {
+                collider.collision_groups().memberships.bits() & interior.mask != 0
+            })
+            .map(|(_, collider)| {
+                collider
+                    .parent()
+                    .filter(|body| rapier.bodies[*body].is_dynamic())
+            });
+        self.interior
+            .step(hit.is_some(), self.reference.posture.sensor_hold_steps);
+        if let Some(body) = hit {
+            self.interior_body = body;
+        } else if !self.interior.sensed() {
+            self.interior_body = None;
+        }
     }
     fn update_posture(
         &mut self,
@@ -671,10 +818,15 @@ impl PlayerState {
             posture_input,
             context.wheel_posture_allowed,
             self.grounded || self.ladder.climbed(),
+            &mut self.wall_jump,
             &self.reference.posture,
             dt,
-            self.reference.duck_jump_multiplier,
-            self.reference.inverse_duck_multiplier,
+            JumpForces {
+                duck: self.reference.duck_jump_multiplier,
+                inverse_duck: self.reference.inverse_duck_multiplier,
+                wall: self.reference.wall_jump_multiplier,
+                ledge: self.reference.ledge_jump_multiplier,
+            },
         );
         if self.posture.value() != before {
             self.update_geometry(physics);
@@ -745,6 +897,7 @@ impl PlayerState {
             owner: seat.owner.clone(),
             body: seat.body,
             local_pose: to_rapier(pose),
+            node_pose: to_rapier(seat.node_pose),
             values: SeatValues::item(&self.reference, &seat.seat),
             frames: seat.frames,
         }
@@ -764,6 +917,7 @@ impl PlayerState {
         self.view_state.enter(head_in_seat);
         self.grounded = false;
         self.running = false;
+        self.reset_motion();
         self.vertical_velocity = 0.0;
         self.update_geometry(physics);
         physics.edit_body(self.body, |body| body.set_position(seated_pose, false));
@@ -830,6 +984,7 @@ impl PlayerState {
         let inherited = physics.rapier().bodies[seat.body].linvel() * 0.3;
         self.vertical_velocity = inherited.y;
         self.recoil_velocity = Vector::new(inherited.x, 0.0, inherited.z);
+        self.reset_motion();
         self.posture.restore(1.0);
         self.cancel_view_input();
         self.grounded = false;
@@ -839,6 +994,9 @@ impl PlayerState {
         physics.edit_body(self.body, |body| body.set_position(candidate, false));
         physics.refresh_queries();
         true
+    }
+    pub fn reference(&self) -> &PlayerReference {
+        &self.reference
     }
     pub fn seated(&self) -> bool {
         self.occupancy.is_some()
@@ -856,6 +1014,28 @@ impl PlayerState {
             SeatOwner::Vehicle(vehicle) => Some(vehicle),
             SeatOwner::Item(_) => None,
         }
+    }
+    /// Source `CarCamParent` anchors of the occupied seat: `seat.transform.position + up` (or the root
+    /// with `rootOrigin`), the seat position, the seat body velocity and the player root.
+    pub fn camera_seat(&self, physics: &PhysicsWorld) -> Option<crate::car_camera::CameraSeat> {
+        let seat = self.occupancy.as_ref()?;
+        let body = &physics.rapier().bodies[seat.body];
+        let node = *body.position() * seat.node_pose;
+        let origin = if seat.values.root_origin {
+            *body.position()
+        } else {
+            node
+        };
+        let up = origin.rotation * Vector::Y;
+        let player = self.body_pose(physics);
+        Some(crate::car_camera::CameraSeat {
+            pivot: glam::Vec3::from_array((origin.translation + up).to_array()),
+            up: glam::Vec3::from_array(up.to_array()),
+            seat: glam::Vec3::from_array(node.translation.to_array()),
+            velocity: glam::Vec3::from_array(body.linvel().to_array()),
+            player: glam::Vec3::from_array(player.position),
+            player_rotation: glam::Quat::from_array(player.rotation),
+        })
     }
     /// The body of the seat owner: car chassis or item body.
     pub fn seat_body(&self) -> Option<RigidBodyHandle> {
@@ -950,7 +1130,10 @@ impl PlayerState {
                 .support_body
                 .map_or(0.0, |body| bodies[body].linvel().length());
         self.view_state.step_walk_bob(
-            (self.grounded || self.ladder.climbed()) && !self.push_gripping && moving,
+            (self.grounded || self.ladder.climbed())
+                && !self.push_gripping
+                && !self.wall_jump.gripping()
+                && moving,
             speed,
             dt,
         );
@@ -1153,7 +1336,7 @@ impl PlayerState {
         self.posture.restore(self.posture.value());
         self.cancel_view_input();
         self.clear_triggers();
-        self.movement_speed = MovementSpeed::default();
+        self.reset_motion();
         self.vertical_velocity = 0.0;
         self.recoil_velocity = Vector::ZERO;
         self.grounded = false;
@@ -1179,6 +1362,7 @@ impl PlayerState {
         }
         self.dead = true;
         self.push_gripping = false;
+        self.reset_motion();
         self.vertical_velocity = 0.0;
         self.recoil_velocity = Vector::ZERO;
         self.grounded = false;

@@ -1,6 +1,6 @@
 //! Prepares a loaded or new runtime offscreen while the active runtime runs.
 use crate::boundary::{CandidateCommand, Change, SimFrame, StateBlock};
-use crate::driver::{CameraMode, LOADING_BUDGET_MS};
+use crate::driver::LOADING_BUDGET_MS;
 use crate::reference::ReferenceManifest;
 use crate::simulation::FIXED_DT;
 use crate::starting_area::{GarageRuntime, WorldInput};
@@ -8,7 +8,6 @@ use crate::world::{PresentationGrant, RendererWorld, WorldMetrics};
 
 pub struct CandidateDriver {
     pub runtime: GarageRuntime,
-    pub camera: CameraMode,
     pub(crate) world: WorldInput,
     /// Renderer bytes that both renderers share. See `CandidateCommand`.
     shared: [usize; 2],
@@ -26,11 +25,10 @@ pub struct CandidateDriver {
 
 impl CandidateDriver {
     /// `sent` is an empty copy for the candidate world.
-    pub fn new(runtime: GarageRuntime, camera: CameraMode, sent: RendererWorld) -> Self {
+    pub fn new(runtime: GarageRuntime, sent: RendererWorld) -> Self {
         Self {
             sent,
             runtime,
-            camera,
             world: WorldInput::default(),
             shared: [0; 2],
             fixed: [0; 2],
@@ -109,9 +107,6 @@ impl CandidateDriver {
         look.position = [player.view(&self.runtime.physics).camera_pose.position; 2];
         look.parent[0] = look.parent[1];
         frame.state.look = look;
-        if self.camera == CameraMode::Chase {
-            frame.state.flags |= StateBlock::CHASE;
-        }
         if self.restored {
             frame.state.flags |= StateBlock::RESTORED;
         }

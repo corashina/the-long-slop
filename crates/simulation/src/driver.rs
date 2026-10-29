@@ -1,7 +1,6 @@
 //! Runs the simulation from renderer commands. It owns the runtime, the input queue and the step clock.
-use crate::boundary::{
-    Change, HudBlock, LookBlock, RenderInput, SimCommand, SimFrame, SimStartup, StateBlock,
-};
+use crate::boundary::{Change, HudBlock, LookBlock, RenderInput, SimCommand, SimFrame, SimStartup};
+use crate::car_camera::{CameraInput, CameraSeat, CarCamera};
 use crate::reference::{ReferenceError, ReferenceManifest};
 use crate::simulation::{FIXED_DT, FrameInput, StepClock, keys};
 use crate::starting_area::{GarageRuntime, WorldInput};
@@ -10,13 +9,6 @@ use glam::{Quat, Vec3};
 
 /// World step milliseconds of a loading frame. The loading panel covers the screen.
 pub const LOADING_BUDGET_MS: f64 = 12.;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum CameraMode {
-    #[default]
-    Cockpit,
-    Chase,
-}
 
 pub struct SimDriver {
     pub runtime: GarageRuntime,
@@ -39,7 +31,12 @@ pub struct SimDriver {
     input_seq: u64,
     /// Sequence of the last command whose input a step consumed or the simulation dropped.
     consumed_seq: u64,
-    pub camera: CameraMode,
+    /// Source seated views: outside view, drop cam and map view.
+    pub camera: CarCamera,
+    /// Rig input of accepted commands that no frame used yet.
+    camera_input: CameraInput,
+    /// Camera seat of the last two steps.
+    camera_seat: [Option<CameraSeat>; 2],
     /// Fixed steps of the last frame.
     pub(crate) frame_steps: u32,
     /// Milliseconds of the last frame steps.
@@ -72,6 +69,7 @@ impl SimDriver {
     /// `source` stamps the saves of this build.
     pub fn new(runtime: GarageRuntime, source: crate::save::SourceStamp) -> Self {
         let sent = crate::world::RendererWorld::new(runtime.stream.world_reference().clone());
+        let camera = CarCamera::new(&runtime.area.player.reference().car_camera);
         let mut driver = Self {
             sent,
             runtime,
@@ -91,7 +89,9 @@ impl SimDriver {
             frame_seq: 0,
             input_seq: 0,
             consumed_seq: 0,
-            camera: CameraMode::default(),
+            camera,
+            camera_input: CameraInput::default(),
+            camera_seat: [None; 2],
             frame_steps: 0,
             physics_ms: 0.,
             world_ms: 0.,
@@ -201,19 +201,14 @@ impl SimDriver {
         if actions != 0 {
             return;
         }
-        if !self.runtime.needs_output().dead
-            && !self.runtime.sleeping()
-            && frame.pressed & keys::CAMERA != 0
-            && self.runtime.area.player.seat_vehicle().is_some()
-        {
-            self.runtime.audio_motion_revision = self.runtime.audio_motion_revision.wrapping_add(1);
-            self.camera = match self.camera {
-                CameraMode::Cockpit => CameraMode::Chase,
-                CameraMode::Chase => CameraMode::Cockpit,
-            };
+        if !self.runtime.needs_output().dead && !self.runtime.sleeping() {
+            self.camera_input.merge(&frame);
         }
-        self.runtime.sleep_camera_allowed = self.camera == CameraMode::Cockpit;
-        self.frame_input.merge(frame);
+        self.frame_input.merge(if self.camera.other_view() {
+            frame.without_view_input()
+        } else {
+            frame
+        });
         self.frame_seq = command.seq;
     }
 
@@ -263,7 +258,7 @@ impl SimDriver {
         }
         let real = self.delta_seconds as f32;
         let delta = real * self.runtime.clock_factors(reference).time_scale;
-        self.runtime.area.conditions.update(delta, true);
+        self.runtime.area.interaction.conditions.update(delta, true);
         let frame = self
             .runtime
             .advance_inventory_frame(reference, raw, delta, self.rendered);
@@ -296,6 +291,15 @@ impl SimDriver {
             self.capture_look();
             self.look.position[0] = previous;
             self.look.parent[0] = parent;
+            let shift = Vec3::from_array(std::array::from_fn(|i| {
+                (new_origin[i] - old_origin[i]) as f32
+            }));
+            let mut seat = self.camera_seat[1];
+            if let Some(seat) = &mut seat {
+                seat.shift(shift);
+            }
+            self.camera_seat = [seat, self.camera_seat()];
+            self.camera.shift(shift);
             if self.runtime.paused {
                 self.clock.reset();
                 break;
@@ -364,6 +368,9 @@ impl SimDriver {
         let alpha = self
             .clock
             .alpha(self.runtime.clock_factors(reference).time_scale);
+        if self.ready && self.runtime.started && !self.runtime.paused {
+            self.update_camera(reference, alpha);
+        }
         self.runtime.fill_frame(reference, alpha, frame);
         if self.input.held & keys::GRAB != 0 {
             frame.hud.flags &= !HudBlock::AUTOSAVE_SAFE;
@@ -387,9 +394,7 @@ impl SimDriver {
         if let Some(failure) = self.failure.take() {
             frame.changes.push(Change::Failure(failure));
         }
-        if self.camera == CameraMode::Chase {
-            frame.state.flags |= StateBlock::CHASE;
-        }
+        self.camera.fill(&mut frame.state);
         self.fill_saves(reference, frame);
     }
 
@@ -400,6 +405,7 @@ impl SimDriver {
         self.frame_input.clear();
         self.runtime.clear_input();
         self.raw_mouse = [0.; 2];
+        self.camera_input = CameraInput::default();
         self.consumed_seq = self.accepted_seq;
         self.reset_look();
         self.clock.reset();
@@ -408,8 +414,10 @@ impl SimDriver {
     }
 
     /// Starts a loaded runtime: paused, with no queued input.
-    pub fn restart(&mut self, camera: CameraMode) {
-        self.camera = camera;
+    pub fn restart(&mut self) {
+        self.camera.leave();
+        self.runtime.other_view = false;
+        self.camera_input = CameraInput::default();
         self.reset_look();
         self.raw_mouse = [0.; 2];
         self.consumed_seq = self.accepted_seq;
@@ -445,6 +453,40 @@ impl SimDriver {
         self.look.position[0] = self.look.position[1];
         self.look.parent[0] = self.look.parent[1];
         self.rendered = self.look.pose(1., [0.; 2]);
+        self.camera_seat = [self.camera_seat(); 2];
+    }
+
+    fn camera_seat(&self) -> Option<CameraSeat> {
+        let runtime = &self.runtime;
+        if runtime.needs_output().dead {
+            return None;
+        }
+        runtime.area.player.camera_seat(&runtime.physics)
+    }
+
+    /// Runs the seated view rig once per frame at the interpolated seat.
+    fn update_camera(&mut self, reference: &ReferenceManifest, alpha: f32) {
+        let seat = match self.camera_seat {
+            [Some(previous), Some(current)] => Some(previous.lerp(&current, alpha)),
+            [_, current] => current,
+        };
+        let head = self.look.pose(alpha, [0.; 2]);
+        let dt = self.delta_seconds as f32 * self.runtime.clock_factors(reference).time_scale;
+        let other_view = self.camera.other_view();
+        self.camera.frame(
+            &self.runtime.area.player.reference().car_camera,
+            &mut self.camera_input,
+            seat.as_ref(),
+            (
+                Vec3::from_array(head.position),
+                Quat::from_array(head.rotation),
+            ),
+            dt,
+        );
+        if other_view != self.camera.other_view() {
+            self.runtime.audio_motion_revision = self.runtime.audio_motion_revision.wrapping_add(1);
+        }
+        self.runtime.other_view = self.camera.other_view();
     }
 }
 

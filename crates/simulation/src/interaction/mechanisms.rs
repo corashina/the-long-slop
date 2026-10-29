@@ -989,7 +989,7 @@ impl MechanismState {
         self.frames[node].local = local;
         self.frames[node].world = pose;
     }
-    pub fn sync(&mut self, physics: &mut PhysicsWorld, commit: bool) {
+    pub fn sync(&mut self, physics: &mut PhysicsWorld) {
         for &i in &self.order {
             let f = &self.frames[i];
             let inactive = f
@@ -1024,13 +1024,16 @@ impl MechanismState {
             if f.inactive || !f.driven {
                 continue;
             }
-            if let Some(handle) = f.handle {
-                physics.try_edit_body(handle, |body| {
-                    if commit {
-                        body.set_position(f.world, false);
-                    }
-                    body.set_next_kinematic_position(f.world);
-                });
+            // Source `usablescript.Rot` sets the transform. A teleport gives contacts no
+            // door velocity, so a fast door cannot fling the player.
+            if let Some(handle) = f.handle
+                && physics
+                    .rapier()
+                    .bodies
+                    .get(handle)
+                    .is_some_and(|body| *body.position() != f.world)
+            {
+                physics.try_edit_body(handle, |body| body.set_position(f.world, true));
             }
         }
     }

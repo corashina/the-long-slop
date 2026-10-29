@@ -197,7 +197,6 @@ impl SpawnEvaluation<'_> {
             lights: Vec::new(),
             fluid: None,
             tanks: Vec::new(),
-            condition: 1.,
             buried: false,
             distance_offset: [0.; 3],
             ammo: None,

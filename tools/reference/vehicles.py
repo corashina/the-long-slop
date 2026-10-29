@@ -360,6 +360,11 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
     lights,light_switch=light_records(source,proto,car_reader,car,asset,material_indices)
     instruments=instrument_record(source,car_reader,proto.nodes,asset,material_indices)
     tanks=[c for c in hierarchy[0]['components'] if c.type.name=='MonoBehaviour' and source.class_name(c)=='tankscript']
+    # carscript.DamageStuff: blood is the washtriggerscript that a hard crash makes dirty. SBlood01 plays there.
+    blood=source.resolve(car_reader,car['blood'])
+    if blood is not None and (blood.type.name!='MonoBehaviour' or source.class_name(blood)!='washtriggerscript'):raise ValueError(f'{key(car_reader)} blood is not washtriggerscript')
+    blood_clip=source.resolve(car_reader,car['SBlood01'])
+    if blood_clip is not None and blood_clip.type.name!='AudioClip':raise ValueError(f'{key(car_reader)} SBlood01 is not AudioClip')
     return {'source':source_id(car_reader),'body':body,'car_type':car['carType'],
         'colliders':[i for i,c in enumerate(colliders) if c['body']==body and c['enabled']],
         'mass_kg':sum(dry_mass(source,n['components']) for n in hierarchy if n['active']),
@@ -375,6 +380,9 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         'auto_shift_stop_speed':car['autoShiftStopSpeed'],'auto_shift_min_rpm':car['autoShiftMinRpm'],'auto_shift_max_rpm':car['autoShiftMaxRpm'],
         'dont_ignite_with_throttle_in_automatic':bool(car['dontIgniteWithThorttleInAutomatic']),'auto_move_min':0.3,
         'collision_gain':car['collisionSoundM'],
+        'crash':{'multiplier':car['crashMultiplier'],'blood':car['crashBloodMultiplier'],'horn':car['crashHornMultiplier'],'fall_off':car['crashFallOffMultiplier']},
+        'blood':None if blood is None else proto.node(blood),'blood_clip':None if blood_clip is None else source_id(blood_clip),
+        'condition':proto.link(car_reader,car['condition']),
         'exhaust':recover_exhaust(source,car_reader,car,hierarchy[0]['reader'],car_reader.path_id,output),
         'wheel_effects':recover_wheel_effects(source,car_reader,car,hierarchy[0]['reader'],[source.get(*identity) for identity in sorted(road)],car_reader.path_id,output),
         'effect_gains':effect_gains(car),

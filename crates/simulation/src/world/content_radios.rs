@@ -404,7 +404,6 @@ mod tests {
                 position: [1., 2., 3.],
                 rotation: [0., 0., 0., 1.],
             },
-            condition: 1.,
             food: None,
             temperature: None,
             fluids: None,

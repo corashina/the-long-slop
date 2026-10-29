@@ -104,12 +104,8 @@ impl GarageRuntime {
                     flags: PoseRow::ACTIVE,
                     rotation: camera.rotation,
                 }),
-            seat_car: match (area.player.seat_vehicle(), self.vehicle.as_ref()) {
-                (Some(_), Some(key)) => {
-                    PoseRow::new(self.physics.snapshot(key).pose, PoseRow::ACTIVE)
-                }
-                _ => PoseRow::default(),
-            },
+            // The driver sets the view camera.
+            view_camera: PoseRow::default(),
             prepared_roads: metrics.prepared_roads as u32,
             glasses: crate::boundary::GlassesState::encode(area.wear.glasses),
             // The driver sets the look and its own counters.
@@ -210,7 +206,7 @@ impl GarageRuntime {
         }
     }
     fn fill_conditions(&mut self, reference: &ReferenceManifest, frame: &mut SimFrame) {
-        let store = &mut self.area.conditions;
+        let store = &mut self.area.interaction.conditions;
         frame.conditions.clear();
         if self.conditions_sent {
             while let Some(id) = store.take_changed() {

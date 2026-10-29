@@ -472,7 +472,7 @@ impl GarageRuntime {
         self.area
             .interaction
             .cleaning
-            .sync_wash_colliders(&self.area.conditions, &mut self.physics);
+            .sync_wash_colliders(&self.area.interaction.conditions, &mut self.physics);
         self.area.interaction.cleaning.begin_frame(frame);
         if let Some(id) = self.area.interaction.equipment.item() {
             self.advance_owned_tool(
@@ -517,7 +517,7 @@ impl GarageRuntime {
             self.area.player.body_pose(&self.physics),
             frame,
             reference,
-            &mut self.area.conditions,
+            &mut self.area.interaction.conditions,
             &self.area.items,
             &self.physics,
             &self.area.interaction.parts,
@@ -526,7 +526,7 @@ impl GarageRuntime {
             frame,
             reference,
             &mut self.area.interaction.cleaning,
-            &mut self.area.conditions,
+            &mut self.area.interaction.conditions,
             &mut self.area.items,
             &self.physics,
         );
@@ -547,7 +547,7 @@ impl GarageRuntime {
         self.area.interaction.cleaning.finish_frame(
             frame,
             reference,
-            &mut self.area.conditions,
+            &mut self.area.interaction.conditions,
             &self.area.items,
             &self.physics,
             &self.area.interaction.parts,
@@ -555,7 +555,7 @@ impl GarageRuntime {
         self.area
             .interaction
             .cleaning
-            .sync_wash_colliders(&self.area.conditions, &mut self.physics);
+            .sync_wash_colliders(&self.area.interaction.conditions, &mut self.physics);
         self.sync_tool_audio(reference);
         let reach = reference.player.aim_reach;
         let aimed = [
@@ -645,7 +645,7 @@ impl GarageRuntime {
             owner,
             frame,
             reference,
-            &mut self.area.conditions,
+            &mut self.area.interaction.conditions,
             &self.area.items,
             &self.physics,
             &self.area.interaction.parts,
@@ -656,7 +656,7 @@ impl GarageRuntime {
             reference,
             &self.area.interaction.cleaning,
             crate::interaction::cleaning::ToolWorld {
-                conditions: &self.area.conditions,
+                conditions: &self.area.interaction.conditions,
                 items: &self.area.items,
                 physics: &self.physics,
                 parts: &self.area.interaction.parts,

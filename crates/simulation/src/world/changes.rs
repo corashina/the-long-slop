@@ -31,7 +31,6 @@ pub struct FoodSnapshot {
 #[serde(deny_unknown_fields)]
 pub struct ObjectSnapshot {
     pub pose: AbsolutePose,
-    pub condition: f32,
     pub food: Option<FoodSnapshot>,
     pub temperature: Option<f32>,
     pub fluids: Option<crate::fluids::FluidSnapshot>,
