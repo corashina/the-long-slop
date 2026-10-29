@@ -4169,7 +4169,7 @@ fn g08_frame_zero_and_multiple_fixed_steps() {
             .unwrap()
             .quantity
             .unwrap();
-        let before_age = run.area.interaction.cleaning.spray_particles(0, 0)[0].age;
+        let before_age = run.area.interaction.cleaning.particles(spray, 0)[0].age;
         let frame = g08_frame(&mut run, &reference, input, 0.04);
         let mut pending = FrameInput::default();
         frame.merge_fixed_input(&mut pending);
@@ -4184,7 +4184,7 @@ fn g08_frame_zero_and_multiple_fixed_steps() {
             .unwrap()
             .quantity
             .unwrap();
-        let after_age = run.area.interaction.cleaning.spray_particles(0, 0)[0].age;
+        let after_age = run.area.interaction.cleaning.particles(spray, 0)[0].age;
         let anchor = reference.clothing.pose.anchors["RH"].node;
         let hand = to_rapier(run.area.pose.anchor(anchor).unwrap()).inverse()
             * run.physics.rapier().bodies[run.area.items.get(spray).unwrap().body.unwrap()]
@@ -4373,7 +4373,7 @@ fn g08_frame_blocked_states_do_not_mutate() {
             .area
             .interaction
             .cleaning
-            .spray_particles(0, 0)
+            .particles(reference.conditions.sprays[0].item, 0)
             .iter()
             .map(|p| p.age)
             .collect();
@@ -4427,7 +4427,7 @@ fn g08_frame_blocked_states_do_not_mutate() {
             run.area
                 .interaction
                 .cleaning
-                .spray_particles(0, 0)
+                .particles(reference.conditions.sprays[0].item, 0)
                 .iter()
                 .map(|p| p.age)
                 .collect::<Vec<_>>(),
@@ -5266,7 +5266,7 @@ fn g08_app_input_skip_consumes_tools_and_particles_once() {
                 run.area
                     .interaction
                     .cleaning
-                    .spray_particles(0, 0)
+                    .particles(reference.conditions.sprays[0].item, 0)
                     .is_empty()
             );
             pending.merge(FrameInput {
@@ -5295,7 +5295,7 @@ fn g08_app_input_skip_consumes_tools_and_particles_once() {
             .area
             .interaction
             .cleaning
-            .spray_particles(0, 0)
+            .particles(reference.conditions.sprays[0].item, 0)
             .iter()
             .map(|p| p.age)
             .collect();
@@ -5324,7 +5324,7 @@ fn g08_app_input_skip_consumes_tools_and_particles_once() {
             run.area
                 .interaction
                 .cleaning
-                .spray_particles(0, 0)
+                .particles(reference.conditions.sprays[0].item, 0)
                 .iter()
                 .map(|p| p.age)
                 .collect::<Vec<_>>(),

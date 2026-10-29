@@ -1010,32 +1010,18 @@ impl GarageRuntime {
 
     fn sync_tool_audio(&mut self, reference: &ReferenceManifest) {
         if let Some(audio) = &mut self.audio {
-            for (b, s) in reference
-                .conditions
-                .brushes
-                .iter()
-                .zip(self.area.interaction.cleaning.signals())
-            {
-                if let Some(voice) = b.tool.voice {
+            let cleaning = &self.area.interaction.cleaning;
+            let c = &reference.conditions;
+            let brushes = c.brushes.iter().map(|b| (b.item, b.tool.voice));
+            for (item, voice) in brushes.chain(c.sprays.iter().map(|b| (b.item, b.tool.voice))) {
+                if let Some(voice) = voice
+                    && let Some(s) = cleaning.signal(item)
+                {
                     audio.voice(voice, s.playing, s.voice_gain, 1.);
                 }
             }
-            for (b, s) in reference.conditions.sprays.iter().zip(
-                self.area
-                    .interaction
-                    .cleaning
-                    .signals()
-                    .iter()
-                    .skip(reference.conditions.brushes.len()),
-            ) {
-                if let Some(voice) = b.voice {
-                    audio.voice(voice, s.playing, s.voice_gain, 1.);
-                }
-            }
-            // The player brush signal comes last.
-            if let Some(voice) = reference.conditions.player_brush.voice
-                && let Some(s) = self.area.interaction.cleaning.signals().last()
-            {
+            if let Some(voice) = c.player_brush.tool.voice {
+                let s = cleaning.player_signal();
                 audio.voice(voice, s.playing, s.voice_gain, 1.);
             }
         }

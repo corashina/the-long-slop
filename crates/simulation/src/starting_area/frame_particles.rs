@@ -58,7 +58,7 @@ impl GarageRuntime {
                     ParticleGroupRow::BRUSH,
                     tool,
                     source,
-                    cleaning.particles(tool, source),
+                    cleaning.particles(b.item, source),
                 );
             }
         }
@@ -67,8 +67,8 @@ impl GarageRuntime {
             out.owner(ParticleGroupRow::SPRAY_BOTTLE, index, 0, particles);
         }
         for (tool, b) in reference.conditions.sprays.iter().enumerate() {
-            for source in 0..b.particles.len() {
-                let particles = cleaning.spray_particles(tool, source);
+            for source in 0..b.tool.particles.len() {
+                let particles = cleaning.particles(b.item, source);
                 out.owner(ParticleGroupRow::SPRAY, tool, source, particles);
             }
         }
