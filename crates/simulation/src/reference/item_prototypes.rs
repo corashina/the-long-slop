@@ -640,7 +640,7 @@ impl ItemPrototype {
                         p.collision_clip.as_ref().is_some_and(|s| {
                             checked(
                                 s,
-                                if matches!(item_id, Some(74 | 218 | 221 | 92 | 230)) {
+                                if matches!(item_id, Some(74 | 218 | 221 | 92 | 230 | 215)) {
                                     4270
                                 } else {
                                     4166
