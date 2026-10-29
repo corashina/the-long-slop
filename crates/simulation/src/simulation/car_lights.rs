@@ -213,17 +213,6 @@ impl CarLights {
         }
     }
 
-    /// Source cabin switch: the next cabin mode of every cabin controller.
-    pub fn cycle_cabin(&mut self, records: &[WorldLightReference]) {
-        for (c, r) in self.controllers.iter_mut().zip(records) {
-            if let Some(cabin) = &r.cabin
-                && !cabin.modes.is_empty()
-            {
-                c.cabin_mode = (c.cabin_mode + 1) % cabin.modes.len();
-            }
-        }
-    }
-
     /// A hash of the lamp materials and node visibility. It changes when the presentation must sync.
     pub fn signature(&self) -> u64 {
         use std::hash::{Hash, Hasher};

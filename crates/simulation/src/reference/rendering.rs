@@ -942,22 +942,4 @@ impl LightingTextureRecord {
         }
         Ok(pixels)
     }
-    pub fn copy_smip_chunk(
-        &self,
-        index: usize,
-        input: &[u8],
-        output: &mut [u8],
-    ) -> Result<(), ReferenceError> {
-        let chunk = self.chunks.get(index).ok_or_else(chunk_overflow)?;
-        require(
-            input.len() >= 16 && &input[..4] == b"SMIP",
-            "fixed row SMIP header",
-        )?;
-        let word = |start| u32::from_le_bytes(input[start..start + 4].try_into().unwrap());
-        require(
-            word(4) == chunk.width && word(8) == chunk.rows && word(12) == 1,
-            "fixed row SMIP dimensions",
-        )?;
-        self.copy_chunk(index, &input[16..], output)
-    }
 }

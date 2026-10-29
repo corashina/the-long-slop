@@ -63,13 +63,6 @@ def _run(args: list[str], log: Path | None = None) -> str:
     return result.stdout
 
 
-def sample_native_noise() -> list[dict]:
-    native_engine_evidence(STEAM_ROOT)
-    checked_harness()
-    result = _run([sys.executable, '-B', str(PROBE_ROOT / 'native_probe.py'), str(STEAM_ROOT)])
-    return json.loads(result)['native']
-
-
 def _read_payload(directory: Path, seeds: list[int]) -> dict:
     try:
         native = json.loads((directory / 'native.json').read_text())

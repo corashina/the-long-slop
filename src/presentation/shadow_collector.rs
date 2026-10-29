@@ -12,7 +12,6 @@ use super::{
     surface_views::SourceSurfaceView,
     view_frame::SourceViewFrame,
 };
-use crate::reference::shadow_profile;
 use bevy::render::{
     Render, RenderApp, RenderSystems,
     render_resource::{ShaderType, encase},
@@ -61,11 +60,6 @@ fn prepare(
     )>,
     status: Res<RendererStateHandle>,
 ) {
-    let mut timing = super::reflection_preparation::Timer::new(
-        super::reflection_preparation::Stage::Collector,
-        &frame,
-    );
-    let mut shadow_timing = shadow_profile::Timer::new(shadow_profile::Stage::Collector);
     if scene.frame == 0
         || scene.frame != frame.frame
         || !frame.required_views_ready()
@@ -88,7 +82,6 @@ fn prepare(
         let Some(snapshot) = frame.views[view.index] else {
             continue;
         };
-        timing.face(view.index);
         let key = super::shadow_preparation::CollectorKey {
             view: scene.view_revision(view.index, &frame),
             cadence: cadence.revision,
@@ -102,7 +95,6 @@ fn prepare(
         if let Some(old) = previous.as_deref_mut() {
             if Arc::ptr_eq(&old.targets, &targets.0) && old.key == key {
                 old.prepared_frame = frame.frame;
-                shadow_timing.hit();
                 continue;
             }
         }

@@ -13,7 +13,6 @@ use super::{
         instances::SourceInstances,
     },
 };
-use crate::reference::shadow_profile;
 use crate::reference::{
     shadow_bounds::{BoundsKey, WorldBoundsCache},
     shadow_candidates::CandidateState,
@@ -101,11 +100,6 @@ pub(super) fn prepare_scene(
     meshes: Query<ShadowMesh, (With<ViewVisibility>, Without<SourceMaterialWarmup>)>,
     mut instances: ResMut<SourceInstances>,
 ) {
-    let mut timing = super::reflection_preparation::Timer::new(
-        super::reflection_preparation::Stage::Shadows,
-        &frame,
-    );
-    let _shadow_timing = shadow_profile::Timer::new(shadow_profile::Stage::Scene);
     scene.frame = 0;
     scene.fits = [None; VIEW_COUNT];
     scene.candidates = [0; VIEW_COUNT];
@@ -215,7 +209,6 @@ pub(super) fn prepare_scene(
             scene.mask_revisions[index] = scene.views[index].revision();
             continue;
         };
-        timing.face(index);
         let atlas = source_atlas_size(v.native_extent.x, v.native_extent.y)
             .expect("validated source view extent");
         let w = v.source_world_from_view;
@@ -407,13 +400,8 @@ fn update_row(scene: &mut ShadowScene, props: &GpuProps, slot: u32) {
 /// Copy bounded arrays into retained render-world storage. No manifest, material, or handle clones.
 pub fn extract_scene(
     input: bevy::render::Extract<Res<ShadowScene>>,
-    frame: bevy::render::Extract<Res<SourceViewFrame>>,
     mut output: ResMut<ShadowScene>,
 ) {
-    let mut timing = super::reflection_preparation::Timer::new(
-        super::reflection_preparation::Stage::Extraction,
-        &frame,
-    );
     output.frame = 0;
     if input.frame == 0 {
         return;
@@ -428,9 +416,6 @@ pub fn extract_scene(
     );
     output.caster_data.extract_from(&input.caster_data);
     for i in 0..VIEW_COUNT {
-        if frame.views[i].is_some() {
-            timing.face(i);
-        }
         if output.mask_revisions[i] != input.mask_revisions[i] {
             output.masks[i].clear();
             output.masks[i].extend_from_slice(&input.masks[i]);

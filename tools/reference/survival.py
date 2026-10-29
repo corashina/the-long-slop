@@ -201,24 +201,6 @@ def recover_drinking(source,player):
         'is_drink_cap':bool(d['isDrinkCap']),'particle_contact_radius_multiplier':.1,'evidence':evidence}
 
 
-def validate_clock_export(manifest: dict, library) -> None:
-    """Check clock fields against the accepted installed records."""
-    from .library.reader import LibraryReader
-    source = LibrarySource(LibraryReader(library))
-    main = source.read(source.get('level1', 64919))
-    survival = source.read(source.get('level1', 73239))
-    if manifest['world']['vehicle_globals']['outside_temperature_modifier'] != main['outsideTempM']:
-        raise ValueError('Outside temperature modifier differs from mainscript.outsideTempM')
-    if manifest['sleep']['need_modifier'] != survival['sleepModifier']:
-        raise ValueError('Sleep need modifier differs from survivalscript.sleepModifier')
-    managed_evidence(source, [
-        'sleepModifierDef = sleepTimeInGame / sleepRealTime * 0.5f;',
-        'sleep *= sleepModifier;',
-        'sleepEndTime = Time.time + sleepRealTime * 2f;',
-        'starSpeed * Time.fixedDeltaTime + tekerve',
-        'currentTempM = Mathf.Lerp(0f, outsideTempM, Mathf.InverseLerp(napszak.tempNights[0], napszak.tempDays[0] + napszak.tempAddNoons[0], napszak.temp));',
-    ])
-
 CIGARETTE_METHODS=[
     'public void UpdParts(bool _updMulti)\n\t{\n\t\tif (continous)\n\t\t{\n\t\t\tfor (int i = 0; i < parts.Length; i++)\n\t\t\t{\n\t\t\t\tparts[i].transform.position = Vector3.Lerp(end[i].position, start[i].position, hp);\n\t\t\t\tparts[i].transform.rotation = Quaternion.Lerp(end[i].rotation, start[i].rotation, hp);\n\t\t\t\tparts[i].transform.localScale = Vector3.Lerp(end[i].localScale, start[i].localScale, hp);\n\t\t\t}\n\t\t}\n\t\telse if (moreParts)',
     'if (!ateOnce)\n\t\t{\n\t\t\thp = 1f;',

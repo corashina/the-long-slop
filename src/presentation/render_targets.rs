@@ -3,7 +3,7 @@ use super::surface_views::{VIEW_COUNT, WORLD_VIEWS};
 
 use bevy::render::{
     render_resource::*,
-    renderer::{RenderAdapter, RenderDevice, RenderQueue},
+    renderer::{RenderDevice, RenderQueue},
 };
 
 pub const HDR_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
@@ -13,54 +13,6 @@ pub const EXPOSURE_FORMAT: TextureFormat = TextureFormat::R32Float;
 pub const HISTOGRAM_FORMAT: TextureFormat = TextureFormat::Rgba32Uint;
 /// The source uses 8 samples. Four samples is an approved image-quality change.
 pub const MSAA_SAMPLES: u32 = 4;
-
-/// Validate the wgpu device contract for both browser backends.
-pub fn validate_source_device(
-    device: &RenderDevice,
-    adapter: &RenderAdapter,
-) -> Result<(), String> {
-    let limits = device.limits();
-    if limits.max_sampled_textures_per_shader_stage < 16
-        || limits.max_samplers_per_shader_stage < 16
-        || limits.max_vertex_attributes < 10
-        || limits.max_texture_dimension_3d < 33
-    {
-        return Err("Source lighting requires16 textures,16 samplers,10 vertex attributes, and a33-cube LUT".into());
-    }
-    let sampled_target = TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING;
-    for format in [
-        HDR_FORMAT,
-        DEPTH_FORMAT,
-        SHADOW_FORMAT,
-        HISTOGRAM_FORMAT,
-        EXPOSURE_FORMAT,
-    ] {
-        let features = adapter.get_texture_format_features(format);
-        if !features.allowed_usages.contains(sampled_target) {
-            return Err(format!(
-                "Source rendering requires sampled render target {format:?}"
-            ));
-        }
-    }
-    for format in [HDR_FORMAT, DEPTH_FORMAT] {
-        if !adapter
-            .get_texture_format_features(format)
-            .flags
-            .sample_count_supported(MSAA_SAMPLES)
-        {
-            return Err(format!(
-                "Source rendering requires {MSAA_SAMPLES}-sample {format:?}"
-            ));
-        }
-    }
-    let hdr = adapter.get_texture_format_features(HDR_FORMAT).flags;
-    if !hdr.contains(TextureFormatFeatureFlags::FILTERABLE | TextureFormatFeatureFlags::BLENDABLE) {
-        return Err(
-            "Source HDR and histogram scatter require filterable, blendable RGBA16F".into(),
-        );
-    }
-    Ok(())
-}
 
 pub struct Target {
     pub texture: Texture,
@@ -396,7 +348,6 @@ pub struct ProbeTargets {
     pub capture_sample_view: TextureView,
 }
 impl ProbeTargets {
-    pub const LOGICAL_BYTES: u64 = 786408;
     pub fn new(device: &RenderDevice, queue: &RenderQueue) -> Self {
         let base = ScratchCube::new(device, "source_probe_base");
         let auxiliary = ScratchCube::new(device, "source_probe_auxiliary");

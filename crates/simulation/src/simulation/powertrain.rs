@@ -150,9 +150,6 @@ impl PowertrainParts {
     pub fn radiators(&self) -> impl Iterator<Item = &RadiatorPart> {
         self.radiators.values()
     }
-    pub fn radiators_mut(&mut self) -> impl Iterator<Item = &mut RadiatorPart> {
-        self.radiators.values_mut()
-    }
     pub fn radiator(&self, item: ItemId) -> Option<&RadiatorPart> {
         self.radiators.get(&item)
     }

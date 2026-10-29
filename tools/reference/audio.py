@@ -941,9 +941,3 @@ def recover_ambient(source):
         'night_volume':[cd['nightAmbientSoundVolumeDay'][0],cd['nightAmbientSoundVolumeNight'][0]],
         'modifier':cd['ambientSoundModifier'],'only_modifier':cd['onlyAmbientSoundModifier'],'recovery_per_second':0.1}
 
-def validate_ambient_export(record, library):
-    from .library.reader import LibraryReader
-    from .source import LibrarySource
-    source=LibrarySource(LibraryReader(library))
-    if record['ambient'] != recover_ambient(source):
-        raise ValueError('Selected ambient differs from source')

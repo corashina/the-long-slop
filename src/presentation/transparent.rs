@@ -60,9 +60,6 @@ impl SourceTransparentPasses {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
-    pub fn allocated_bytes(&self) -> usize {
-        self.entries.capacity() * std::mem::size_of::<OrderedPass>()
-    }
     pub fn capture_at(&self, index: usize) -> bool {
         self.entries[index].capture
     }
@@ -139,10 +136,6 @@ pub(crate) fn prepare_pass_order(
     particles: Res<super::particles::ExtractedParticles>,
     lighting: Res<super::lighting::ExtractedLighting>,
 ) {
-    let mut timing = super::reflection_preparation::Timer::new(
-        super::reflection_preparation::Stage::Transparent,
-        &frame,
-    );
     if !loading.is_ready() || status.failure().is_some() {
         for (_, mut order, _) in &mut views {
             order.entries.clear();
@@ -159,7 +152,6 @@ pub(crate) fn prepare_pass_order(
         if frame.skip_probe_preparation(source.index) {
             continue;
         }
-        timing.face(source.index);
         // One named grab capture precedes the first distortion particle.
         let capacity = loading.transparent_pass_capacity().unwrap_or(0)
             + particles.uniforms.len()

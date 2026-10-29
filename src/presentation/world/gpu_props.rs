@@ -4,7 +4,7 @@ use crate::reference::shadow_candidates::Bounds;
 use bevy::asset::{AssetId, UntypedAssetId};
 use bevy::color::{Color, ColorToComponents};
 use bevy::ecs as bevy_ecs;
-use bevy::math::{Affine3A, DMat4, Mat4, Vec3, Vec4};
+use bevy::math::{Affine3A, Mat4, Vec3, Vec4};
 use bevy::mesh::Mesh;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::Resource;
@@ -97,10 +97,6 @@ impl PropRow {
             0,
         ]
     }
-}
-/// World matrix of a static root renderer. Entities used the root pose times the baked matrix.
-pub fn row_world(root: DMat4, chain: Mat4) -> Mat4 {
-    (root * chain.as_dmat4()).as_mat4()
 }
 /// Linear color of a source sRGBA condition color. Entity materials and rows use this one formula.
 pub fn linear_color(srgba: [f32; 4]) -> Vec4 {

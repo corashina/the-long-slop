@@ -1213,9 +1213,6 @@ impl InteractionState {
             .ok_or_else(|| ReferenceError("Opening identity space exhausted".into()))
     }
 
-    pub fn register_supply(&mut self, item: ItemId) {
-        self.supplies.insert(item);
-    }
     /// Bind checked source contents and opening rules once per generated instance.
     pub fn register_generated_supply(
         &mut self,
@@ -1438,9 +1435,6 @@ impl InteractionState {
             .iter()
             .find(|o| o.reference.id == id)
             .map_or((false, false), |o| (o.fill_called, o.empty_pour))
-    }
-    pub fn opening_is_open(&self, id: OpeningId) -> bool {
-        self.opening_valve(id) > 0.0
     }
     pub fn opening_valves(&self) -> impl Iterator<Item = (OpeningId, f32)> + '_ {
         self.openings.iter().map(|o| (o.reference.id, o.valve))

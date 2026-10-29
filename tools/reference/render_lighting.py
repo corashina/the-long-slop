@@ -47,12 +47,6 @@ def flat_ambient_sh(value):
     return [[0.,0.,0.,gamma_to_linear(value)] for _ in range(3)] + [[0.] * 4 for _ in range(4)]
 
 
-def cube_direction(face, u, v):
-    """Direction for target face texel UV, after the shared geometry conversion."""
-    right, up, back = CUBE_BASES[face]
-    return convert_point(tuple(right[i] * (2*u-1) + up[i] * (2*v-1) - back[i] for i in range(3)))
-
-
 def startup_light_enabled(light, hierarchy_active, switch_active):
     active = hierarchy_active and switch_active is not False
     return bool(light['m_Enabled'] and active)
@@ -179,7 +173,7 @@ def probe_settings(identity, data):
 
 def recover_lights_and_probes(source, roots):
     """Resolve identities through live component links, never prose source IDs."""
-    from .source import key, source_id, vector
+    from .source import key, source_id
     from .collision import world_pose
     from .gltf import convert_rotation
     nodes = [node for root in roots for node in source.hierarchy(root, activate_root=True)]

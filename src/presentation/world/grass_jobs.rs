@@ -22,7 +22,6 @@ use std::sync::Arc;
 struct Geometry {
     mesh: Handle<Mesh>,
     material: Handle<GrassMaterial>,
-    patches: Vec<u32>,
     cpu: usize,
     gpu: usize,
     _ticket: PipelineTicket,
@@ -40,7 +39,6 @@ enum Pending {
         mesh: Handle<Mesh>,
         material: Handle<GrassMaterial>,
         view: GrassView,
-        patches: Vec<u32>,
         ticket: Option<PipelineTicket>,
     },
 }
@@ -187,12 +185,6 @@ impl GrassJobs {
 
     fn get(&self, entity: Entity) -> Option<&Instance> {
         self.index.get(&entity).map(|&index| &self.instances[index])
-    }
-    /// Source patch identities for the admitted canonical triangle expansion.
-    pub fn patch_ids(&self, entity: Entity) -> Option<&[u32]> {
-        self.get(entity)
-            .and_then(|i| i.accepted.as_ref())
-            .map(|g| g.patches.as_slice())
     }
     /// Sets the camera view of this frame for all instances.
     pub fn set_view(&mut self, view: GrassView) {
@@ -667,7 +659,6 @@ impl GrassJobs {
                     mesh,
                     material: materials.add(material),
                     view,
-                    patches: output.patches,
                     ticket: None,
                 });
             }
@@ -705,7 +696,6 @@ impl GrassJobs {
                         mesh,
                         material,
                         view,
-                        patches,
                         ticket,
                     }) = instance.pending.take()
                     else {
@@ -729,7 +719,6 @@ impl GrassJobs {
                     instance.accepted = Some(Geometry {
                         mesh,
                         material,
-                        patches,
                         cpu: instance.pending_cpu,
                         gpu: instance.pending_gpu,
                         _ticket: ticket.unwrap(),

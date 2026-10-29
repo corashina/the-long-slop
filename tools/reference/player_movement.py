@@ -9,7 +9,6 @@ from .survival import managed_evidence
 VIEW_LITERALS = dict(tap_seconds=0.2, return_window_seconds=0.5, return_rate=10.0,
     free_look_limit_degrees=90.0, zoom_multiplier=0.4, zoom_in_rate=10.0,
     zoom_out_rate=20.0, lean_scroll_multiplier=5.0, height_scroll_step=0.05)
-SEATS = {77843, 76381, 65840, 69296, 66466}
 
 
 def recover_player_movement(source):
@@ -97,34 +96,6 @@ def recover_player_movement(source):
         max_walk_bob=data['maxWalkBob'], walk_bob_sound_threshold=data['walkbobSoundF'])
     validate_player_movement(result)
     return result
-
-
-def recover_seat_view(source, reader):
-    data = source.read(reader)
-    if key(reader)[0] != 'level1' or key(reader)[1] not in SEATS:
-        raise ValueError('Selected player seat differs')
-    if key(reader)[1] == 69296 and not (data['driverSeat0'] and data['driverSeat1']):
-        raise ValueError('Selected driver seat flags differ')
-    return seat_view(source, reader)
-
-
-def seat_view(source, reader):
-    """Supported seatscript view fields of any seat."""
-    data = source.read(reader)
-    if (data['lookInsteadOfLean'] or data['BcantSitAngle'] or data['limitLessRot']
-            or data['rotLimit'] != 179.0 or data['defYrot'] != 0.0 or data['minGetUpAnlge'] != 65.0):
-        raise ValueError('Selected seat view differs')
-    transform = source.transform_for(source.resolve(reader, data['m_GameObject']))
-    while transform:
-        _, components = source.components(transform)
-        if any(component.type.name == 'MonoBehaviour' and source.class_name(component) == 'pickupable'
-               for component in components):
-            raise ValueError('Selected seat pickup ancestry differs')
-        transform = source.resolve(transform, source.read(transform)['m_Father'])
-    managed_evidence(source, ['FyRot = Mathf.Clamp(FyRot, -89f, 89f);',
-        'FyRot = Mathf.Lerp(FyRot, seat.defYrot, FduckLerp * dt);',
-        'Time.time - usePressedTime < 0.2f || seatUse == null'])
-    return dict(default_pitch_degrees=data['defYrot'], pitch_limits_degrees=[-89.0, 89.0])
 
 
 def validate_player_movement(value):

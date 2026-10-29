@@ -164,17 +164,4 @@ impl FileCatalog {
                 })
                 .sum::<usize>()
     }
-    pub fn prototype_staging(&self, asset: &super::AssetRecord) -> Result<usize, ReferenceError> {
-        let bytes = asset
-            .dependencies
-            .iter()
-            .filter(|r| r.file.ends_with(".bin"))
-            .try_fold(self.file(&asset.path)?.bytes as usize, |sum, receipt| {
-                sum.checked_add(receipt.bytes as usize)
-                    .ok_or_else(|| ReferenceError("Prototype input size overflow".into()))
-            })?;
-        bytes
-            .checked_mul(2)
-            .ok_or_else(|| ReferenceError("Prototype staging overflow".into()))
-    }
 }

@@ -102,10 +102,6 @@ impl Hitches {
         HitchTarget(index as u32)
     }
 
-    pub fn has_targets(&self, owner: ItemId) -> bool {
-        self.targets.iter().flatten().any(|t| t.owner == owner)
-    }
-
     /// Removes the targets of `owner`. A grip on them goes loose.
     pub fn remove_targets(
         &mut self,

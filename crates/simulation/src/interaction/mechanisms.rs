@@ -405,11 +405,6 @@ impl MechanismState {
         });
         self.apply(index);
     }
-    pub fn generated_local_pose(&self, node: NodeId) -> Option<VehiclePose> {
-        self.nodes
-            .get(&node)
-            .map(|i| from_rapier(&self.frames[*i].local))
-    }
     pub fn item_node(&self, item: ItemId) -> Option<NodeId> {
         self.item_nodes.get(&item).copied()
     }
@@ -639,11 +634,6 @@ impl MechanismState {
             .filter(|i| self.frames[**i].driven)
             .map(|i| self.frames[*i].world)
     }
-    /// Body-local meters, computed without a world-space round trip.
-    pub fn body_local_pose(&self, body: BodyId, root: BodyId) -> Option<Pose> {
-        let f = &self.frames[*self.bodies.get(&body)?];
-        (f.driven && f.root_body == Some(root)).then_some(f.relative)
-    }
     /// Cached node-to-body links for part attachment integration.
     pub fn body_node(&self, body: BodyId) -> Option<NodeId> {
         self.bodies.get(&body).map(|i| self.frames[*i].node)
@@ -712,10 +702,6 @@ impl MechanismState {
         }
         self.order = order;
         self.propagate();
-    }
-    pub fn node_local_pose(&self, node: NodeId, root: BodyId) -> Option<Pose> {
-        let f = &self.frames[*self.nodes.get(&node)?];
-        (f.root_body == Some(root)).then_some(f.relative)
     }
     pub fn uncraft(&mut self, usable: ItemId, node: NodeId) -> Option<Rotation> {
         self.clear_reactions();

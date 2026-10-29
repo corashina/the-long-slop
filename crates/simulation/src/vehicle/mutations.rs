@@ -184,12 +184,6 @@ impl PhysicsWorld {
                 .mark_if_changed(handle, before, body);
         }
     }
-    pub fn edit_colliders(&mut self, mut edit: impl FnMut(ColliderHandle, &mut Collider)) {
-        for (handle, collider) in self.physics.colliders.iter_mut() {
-            self.query_bounds.mark_collider(handle, true);
-            edit(handle, collider);
-        }
-    }
     pub fn insert_impulse_joint(
         &mut self,
         first: RigidBodyHandle,

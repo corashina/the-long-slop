@@ -360,9 +360,6 @@ impl ProbePublication {
     pub fn validation_token(&self) -> Option<u32> {
         self.validation_token
     }
-    pub fn publication_ready(&self) -> bool {
-        self.approved_token.is_some()
-    }
     pub fn waiting(&self) -> bool {
         self.pending.is_some()
             || self.validation_token.is_some()

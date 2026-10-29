@@ -69,10 +69,6 @@ impl WheelSet {
         &self.wheels
     }
 
-    pub fn wheels_mut(&mut self) -> &mut [WheelState] {
-        &mut self.wheels
-    }
-
     pub fn set_profile(&mut self, index: usize, profile: WheelProfile) {
         self.wheels[index].profile = profile;
     }

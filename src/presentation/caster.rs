@@ -1,6 +1,5 @@
 //! Persistent source directional-shadow caster state.
 use super::{readiness::RendererStateHandle, render_targets::SHADOW_FORMAT};
-use crate::reference::shadow_profile;
 use bevy::ecs as bevy_ecs;
 use bevy::prelude::*;
 use bevy::render::{
@@ -61,11 +60,7 @@ impl CasterViews {
                 clip_from_view: Mat4::IDENTITY,
             });
             uniform.set_label(Some("source_caster_uniform"));
-            {
-                let mut timing = shadow_profile::Timer::new(shadow_profile::Stage::Upload);
-                uniform.write_buffer(device, queue);
-                timing.upload(CasterUniform::min_size().get());
-            }
+            uniform.write_buffer(device, queue);
             let binding = device.create_bind_group(
                 "source_caster_view",
                 &cache.get_bind_group_layout(&caster_layout()),
@@ -85,7 +80,6 @@ impl CasterViews {
         device: &RenderDevice,
         queue: &RenderQueue,
     ) {
-        let mut timing = shadow_profile::Timer::new(shadow_profile::Stage::Upload);
         let words = |v: &CasterUniform| {
             v.clip_from_world
                 .to_cols_array()
@@ -100,12 +94,10 @@ impl CasterViews {
             words(self.slots[index].uniform.get()),
             words(&value),
         ) {
-            timing.hit();
             return;
         }
         self.slots[index].uniform.set(value);
         self.slots[index].uniform.write_buffer(device, queue);
-        timing.upload(CasterUniform::min_size().get());
     }
     pub fn uniform(&self, index: usize) -> &CasterUniform {
         self.slots[index].uniform.get()
@@ -322,10 +314,6 @@ pub(crate) fn prepare_views(
     cache: Res<PipelineCache>,
     status: Res<RendererStateHandle>,
 ) {
-    let mut timing = super::reflection_preparation::Timer::new(
-        super::reflection_preparation::Stage::Caster,
-        &frame,
-    );
     if status.failure().is_some() {
         return;
     }
@@ -339,7 +327,6 @@ pub(crate) fn prepare_views(
         if frame.skip_probe_preparation(source.index) {
             continue;
         }
-        timing.face(source.index);
         commands.entity(entity).insert(CasterViews::new(
             &device,
             &queue,

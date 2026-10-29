@@ -844,28 +844,8 @@ impl AudioState {
         }
         self.voice(id, playing, self.fluid_sounds[i].gain, 1.);
     }
-    pub fn remove_owner(&mut self, emitter: u32) {
-        self.removed.insert(emitter);
-        for signal in &mut self.signals {
-            if signal.emitter == emitter {
-                signal.playing = false;
-            }
-        }
-        let mut count = 0;
-        for i in 0..self.length {
-            if self.queue[i].is_some_and(|e| e.emitter != emitter) {
-                self.queue[count] = self.queue[i];
-                count += 1;
-            }
-        }
-        self.queue[count..self.length].fill(None);
-        self.length = count;
-    }
     pub fn owner_alive(&self, emitter: u32) -> bool {
         !self.removed.contains(&emitter)
-    }
-    pub fn event_count(&self) -> usize {
-        self.length
     }
     pub fn push_event(&mut self, event: AudioEvent) {
         if event.session != self.session || self.removed.contains(&event.emitter) {

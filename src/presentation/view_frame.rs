@@ -286,10 +286,6 @@ pub(crate) fn snapshot(
     views: Query<(&SourceSurfaceView, &Camera, &GlobalTransform)>,
     sky_view: Query<(&Camera, &GlobalTransform), With<super::frame_graph::SourceSkyCamera>>,
 ) {
-    let mut timing = super::reflection_preparation::Timer::new(
-        super::reflection_preparation::Stage::Snapshot,
-        &frame,
-    );
     frame.session = sim.frame.state.session;
     frame.selection_revision = sim.frame.state.selection_revision;
     frame.scale = scale.0;
@@ -473,7 +469,6 @@ pub(crate) fn snapshot(
     if decision.restart_scene {
         commands.queue(restart_scene);
     }
-    timing.snapshots(&frame);
 }
 /// Replace Bevy's frusta after its update, before either camera visibility system runs.
 pub fn publish_frusta(

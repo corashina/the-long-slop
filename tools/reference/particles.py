@@ -131,19 +131,6 @@ def recover_outlet_particles(source,manifest,output):
     return [p for opening in manifest['openings']
         for p in cap_particles(source,source.get(opening['source']['file'],opening['source']['path_id']),opening['id'],output)]
 
-def validate_particle_export(particles, manifest, library):
-    from .library.reader import LibraryReader
-    from .source import LibrarySource
-    from tempfile import TemporaryDirectory
-    from pathlib import Path
-    checked=LibrarySource(LibraryReader(library))
-    checked.lighting={'textures':manifest['lighting']['textures']}
-    checked.lighting_textures={(t['source']['file'],t['source']['path_id']):t for t in manifest['lighting']['textures']}
-    with TemporaryDirectory(prefix='source-particles-') as temp:
-        recovered=recover_particles(checked,Path(temp))
-        recovered.extend(recover_outlet_particles(checked,manifest,Path(temp)))
-    if particles!=recovered:
-        raise ValueError('Selected particle source records differ')
 
 
 def validate_curve(c):

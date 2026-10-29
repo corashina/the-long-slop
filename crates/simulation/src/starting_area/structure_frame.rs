@@ -49,11 +49,6 @@ pub struct StructureViews {
 }
 
 impl GarageRuntime {
-    /// A frame with only the structure views, for a renderer that prepares this runtime offscreen.
-    pub fn fill_structure_frame(&mut self, reference: &ReferenceManifest, frame: &mut SimFrame) {
-        frame.changes.clear();
-        self.fill_structures(reference, frame);
-    }
     /// The next frame names every pose, structure, condition, screen, plate and followed car again.
     /// A new frame stream calls it: the old stream consumed the sent state.
     pub fn reset_frame_outputs(&mut self) {
