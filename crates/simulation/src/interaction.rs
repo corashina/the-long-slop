@@ -4,6 +4,7 @@ pub mod cigarettes;
 pub mod cleaning;
 pub mod computer;
 pub mod consumption;
+pub mod crosshair;
 pub mod decals;
 pub mod equipment;
 pub mod equipment_input;

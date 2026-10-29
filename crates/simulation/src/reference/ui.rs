@@ -153,8 +153,25 @@ impl UiReference {
             )?;
         }
         for role in [
-            "default", "door", "mount", "fill", "enter", "exit", "cap", "pickup", "dismount",
+            "default",
+            "door",
+            "slide",
+            "slide-vertical",
+            "switch",
+            "push",
+            "mount",
+            "hose",
+            "attach",
+            "fill",
+            "enter",
+            "exit",
+            "cap",
+            "pickup",
+            "dismount",
             "carrying",
+            "carrying-medium",
+            "carrying-heavy",
+            "too-heavy",
         ] {
             require(
                 self.icons

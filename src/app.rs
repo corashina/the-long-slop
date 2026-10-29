@@ -78,8 +78,6 @@ struct ManifestShell<'a> {
     #[serde(borrow)]
     audio: &'a serde_json::value::RawValue,
     #[serde(borrow)]
-    lighting: &'a serde_json::value::RawValue,
-    #[serde(borrow)]
     content_base: &'a serde_json::value::RawValue,
     #[serde(borrow)]
     file_catalog: &'a serde_json::value::RawValue,
@@ -1079,6 +1077,8 @@ fn update_hud(mut drive: ResMut<Drive>, mut sim: ResMut<SimFrameResource>) {
         f.lmb_use,
         f.prompts.into(),
         f.computer.into(),
+        f.crosshair,
+        f.weight,
     );
 }
 

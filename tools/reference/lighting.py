@@ -414,13 +414,6 @@ def recover_lighting(source: Source, roots: list, output: Path) -> dict:
             elif isinstance(value,list):
                 for child in value:walk(child)
         walk(source.read(r))
-    menu=source.get('level1',74691);switch_reader=source.resolve(menu,source.read(menu)['ISwitch'])
-    switch_data=source.read(switch_reader);switch_image=source.sprite_image(switch_reader)
-    switch_path=output/f'lighting-switch-{switch_reader.assets_file.name}-{switch_reader.path_id}.png'
-    switch_image.save(switch_path)
-    switch_icon={'source':source_id(switch_reader),'path':f'reference/{switch_path.name}',
-        'sha256':hashlib.sha256(switch_path.read_bytes()).hexdigest(),
-        'crop':[switch_data['m_Rect'][n] for n in ('x','y','width','height')],'size':list(switch_image.size)}
     lights=[source.get('level1',56812),*[c for r in records for c in r['components'] if c.type.name=='Light']]
     source.lighting_light_ids={key(r):i for i,r in enumerate(lights,1)};source.lighting_lights=[]
     for r in lights:
@@ -447,7 +440,7 @@ def recover_lighting(source: Source, roots: list, output: Path) -> dict:
                                 if comp.type.name in ('MeshRenderer','SkinnedMeshRenderer'):source.lighting_startup_materials[key(comp)]=source.get(state['off_material']['source']['file'],state['off_material']['source']['path_id'])
     cycle=recover_cycle(source,source.get('level1',64920),output)
     render=source.get('level1',56810);f=source.read(render);settings=source.get('globalgamemanagers',1);p=source.read(settings)
-    result={'switch_icon':switch_icon,'source':source_id(render),'color_space':p['m_ActiveColorSpace'],'ambient_mode':f['m_AmbientMode'],'ambient_intensity':f['m_AmbientIntensity'],
+    result={'source':source_id(render),'color_space':p['m_ActiveColorSpace'],'ambient_mode':f['m_AmbientMode'],'ambient_intensity':f['m_AmbientIntensity'],
         'ambient_sky':rgba(f['m_AmbientSkyColor']),'ambient_equator':rgba(f['m_AmbientEquatorColor']),'ambient_ground':rgba(f['m_AmbientGroundColor']),
         'ambient_probe':list(f['m_AmbientProbe'].values()),'reflection_intensity':f['m_ReflectionIntensity'],
         'fog':{'enabled':bool(f['m_Fog']),'mode':f['m_FogMode'],'density':f['m_FogDensity'],'color':rgba(f['m_FogColor']),'start':f['m_LinearFogStart'],'end':f['m_LinearFogEnd']},
@@ -482,10 +475,6 @@ def validate_lighting_export(manifest: dict, output: Path) -> None:
     if len(lights)!=len(lighting['lights']) or len(controls)!=len(lighting['controllers']):raise ValueError('Duplicate lighting ID')
     documents={a['id']:json.loads((output/Path(a['path']).name).read_bytes()) for a in manifest['assets']}
     def fail(source,field):raise ValueError(f"{source['file']}:{source['path_id']} {field}")
-    icon=lighting['switch_icon'];icon_path=output/Path(icon['path']).name
-    if (icon['source']!={'file':'sharedassets1.assets','path_id':4594} or icon['crop']!=[0.,0.,160.,160.]
-            or icon['size']!=[156,160] or not icon_path.is_file()
-            or hashlib.sha256(icon_path.read_bytes()).hexdigest()!=icon['sha256']):fail(icon['source'],'switch sprite')
     def walk(value):
         if isinstance(value,dict):
             if 'path' in value and 'sha256' in value:

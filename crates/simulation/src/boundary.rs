@@ -561,6 +561,10 @@ pub struct Feedback {
     pub lmb_use: bool,
     pub prompts: u8,
     pub computer: u8,
+    /// `interaction::crosshair::Crosshair` layer bits.
+    pub crosshair: u32,
+    /// Source `weightM` of the carried item. It fades the pickup layer children.
+    pub weight: f32,
 }
 
 /// Use and limit of one world budget.

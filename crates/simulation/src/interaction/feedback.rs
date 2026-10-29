@@ -94,6 +94,8 @@ pub struct ActionAvailability {
     /// `ItemPrompt` bits.
     pub prompts: u8,
     pub(super) hose_cap: Option<OpeningId>,
+    /// The adjust icon of the looked usable.
+    pub adjust: super::crosshair::AdjustIcon,
 }
 pub struct FluidFeedback<'a> {
     pub amount: f32,
@@ -209,6 +211,9 @@ impl InteractionState {
                     Knob::Crank => ActionMask::CRANK,
                     _ => ActionMask::TUNE | ActionMask::SCROLL,
                 };
+                if kind == Knob::Crank {
+                    a.adjust = super::crosshair::AdjustIcon::Rotate;
+                }
             }
             if self.mechanisms.contains(t.item) {
                 a.context = FeedbackContext::Mechanism;
@@ -219,6 +224,7 @@ impl InteractionState {
                     }
                 } else {
                     a.actions.0 |= ActionMask::DOOR;
+                    a.adjust = self.mechanisms.adjust_icon(t.item);
                     if self.mechanisms.scroll_eligible(t.item) {
                         a.actions.0 |= ActionMask::SCROLL;
                     }
@@ -418,6 +424,7 @@ impl InteractionState {
                 | ActionMask::SWITCH
                 | ActionMask::PRIMARY_SWITCH
                 | ActionMask::SCROLL);
+            a.adjust = super::crosshair::AdjustIcon::None;
             a.context = FeedbackContext::LightSwitch;
         }
         if player.seated()

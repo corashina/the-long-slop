@@ -563,6 +563,19 @@ impl MechanismState {
             .get(&item)
             .is_some_and(|i| self.controls[*i].reference.slide.is_some())
     }
+    /// Source `fpscontroller.RayStuff`: `rotateAble` first, then a slide along X or Y. Z slides show no icon.
+    pub fn adjust_icon(&self, item: ItemId) -> super::crosshair::AdjustIcon {
+        use super::crosshair::AdjustIcon;
+        let Some(c) = self.items.get(&item).map(|i| &self.controls[*i]) else {
+            return AdjustIcon::None;
+        };
+        match (&c.reference.rotation, &c.reference.slide) {
+            (Some(_), _) => AdjustIcon::Rotate,
+            (None, Some(s)) if s.axes[0] || s.axes[3] => AdjustIcon::Slide,
+            (None, Some(s)) if s.axes[1] || s.axes[4] => AdjustIcon::SlideVertical,
+            _ => AdjustIcon::None,
+        }
+    }
     pub fn scroll_eligible(&self, item: ItemId) -> bool {
         self.items.get(&item).is_some_and(|i| {
             self.controls[*i].enabled

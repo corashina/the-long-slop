@@ -19,24 +19,25 @@ export function formatTank(r) {
  for(let order=r.fluidOrder??0;order;order>>>=4){const i=(order&15)-1,percent=Math.fround(Math.fround(r.quantities[i]/r.amount)*100);if(percent>=1)result+='\n'+Math.round(percent)+'% '+FLUIDS[i];}
  return result;
 }
-export function selectIcon(mask,context,carrying) {
- if(context===10&&(mask&ACTION.USE))return 'light_switch';
- if(mask&ACTION.MOUNT)return 'mount';
- if(mask&ACTION.DISMOUNT)return 'dismount';
- if(mask&ACTION.FILL)return 'fill';
- if(mask&(ACTION.CONSUME|ACTION.DRINK|ACTION.SMOKE|ACTION.TAKE_ONE))return 'carrying';
- if(mask&ACTION.EXIT)return 'exit';
- if(mask&ACTION.ENTER)return 'enter';
- if(mask&(ACTION.DOOR|ACTION.CRANK))return 'door';
- if(mask&(ACTION.SWITCH|ACTION.PRIMARY_SWITCH))return 'cap';
- if(mask&(ACTION.PUSH|ACTION.GRIP|ACTION.RELEASE_GRIP))return 'pickup';
- if(mask&(ACTION.USE|ACTION.TUNE))return 'cap';
- if(mask&ACTION.PICKUP)return 'pickup';
- if(mask&ACTION.HELD_SWITCH)return 'light_switch';
- return carrying?'carrying':'default';
+/** Rust `Crosshair` layer bits. E, adjust and F hold a sprite choice. */
+export const CROSSHAIR={E_SHIFT:0,ADJUST_SHIFT:2,F_SHIFT:4,MMB:128,LMB:256,DISMOUNT:512,CAN_PICKUP:1024,PICKUP:2048,TOO_HEAVY:4096,DEFAULT:8192,WEAPON:16384};
+const E_ICONS=['','enter','exit','switch'],ADJUST_ICONS=['','door','slide','slide-vertical'],F_ICONS=['','push','mount','hose','attach'];
+/** Source `mainscript.CrossHairStuff` layers in sibling (draw) order: the sprite role, or null when hidden, and the source size. */
+export function crosshairLayers(bits){
+ const e=E_ICONS[bits>>CROSSHAIR.E_SHIFT&3],adjust=ADJUST_ICONS[bits>>CROSSHAIR.ADJUST_SHIFT&3],f=F_ICONS[bits>>CROSSHAIR.F_SHIFT&7];
+ const on=(bit,role)=>bits&bit?role:null;
+ return [[on(CROSSHAIR.DISMOUNT,'dismount'),75,40],[on(CROSSHAIR.CAN_PICKUP,'pickup'),75,40],[on(CROSSHAIR.PICKUP,'carrying'),75,40],
+  [on(CROSSHAIR.DEFAULT,'default'),35,35],[on(CROSSHAIR.TOO_HEAVY,'too-heavy'),75,40],[f||null,40,40],[adjust||null,40,40],
+  [on(CROSSHAIR.WEAPON,'weapon'),50,50],[e||null,40,40],[on(CROSSHAIR.MMB,'cap'),40,40],[on(CROSSHAIR.LMB,'fill'),40,40]];
+}
+/** Source `GCPickups` alphas under the carrying layer: medium and heavy, by `weightM`. */
+export function pickupWeightAlphas(weight){
+ if(!(weight<0.9))return [0,0];
+ const inverse=(a,b,v)=>Math.max(0,Math.min(1,(v-a)/(b-a)));
+ return [inverse(0.9,0.5,weight),inverse(0.5,0,weight)];
 }
 export class FeedbackState {
- constructor(){this.visible=false;this.enabled=true;this.active=false;this.fluidText='';this.fluidName=undefined;this.capacity=undefined;this.amountKey=undefined;this.percentKeys=[-1,-1,-1,-1,-1,-1];this.hasName=undefined;this.noText=undefined;this.empty=undefined;this.lmbUse=false;this.actions=-1;this.context=-1;this.carrying=false;this.notice='';this.targetName='';this.condition=-1;this.throwCharge=0;this.throwActive=false;this.prompts=0;this.computer=0;}
+ constructor(){this.visible=false;this.enabled=true;this.active=false;this.fluidText='';this.fluidName=undefined;this.capacity=undefined;this.amountKey=undefined;this.percentKeys=[-1,-1,-1,-1,-1,-1];this.hasName=undefined;this.noText=undefined;this.empty=undefined;this.lmbUse=false;this.actions=-1;this.context=-1;this.carrying=false;this.notice='';this.targetName='';this.condition=-1;this.throwCharge=0;this.throwActive=false;this.prompts=0;this.computer=0;this.crosshair=0;this.weight=1;}
  setVisible(active){this.active=active;this.visible=active&&this.enabled;}
  toggle(){this.enabled=!this.enabled;this.visible=this.active&&this.enabled;}
  update(r){
@@ -49,12 +50,12 @@ export class FeedbackState {
   const targetName=r.context===11?'Volume +/-':r.context===12?'Tune':r.name;
   const detailChanged=targetName!==this.targetName||r.condition!==this.condition||r.throwCharge!==this.throwCharge||r.throwActive!==this.throwActive;
   this.targetName=targetName;this.condition=r.condition;this.throwCharge=r.throwCharge;this.throwActive=r.throwActive;
-  const actionsChanged=r.actions!==this.actions||r.context!==this.context||r.carrying!==this.carrying||r.notice!==this.notice||r.lmbUse!==this.lmbUse||r.prompts!==this.prompts||r.computer!==this.computer;
-  this.lmbUse=r.lmbUse;this.prompts=r.prompts;this.computer=r.computer;this.actions=r.actions;this.context=r.context;this.carrying=r.carrying;this.notice=r.notice;
+  const actionsChanged=r.actions!==this.actions||r.context!==this.context||r.carrying!==this.carrying||r.notice!==this.notice||r.lmbUse!==this.lmbUse||r.prompts!==this.prompts||r.computer!==this.computer||r.crosshair!==this.crosshair||r.weight!==this.weight;
+  this.lmbUse=r.lmbUse;this.prompts=r.prompts;this.computer=r.computer;this.crosshair=r.crosshair;this.weight=r.weight;this.actions=r.actions;this.context=r.context;this.carrying=r.carrying;this.notice=r.notice;
   return changed||radioChanged||actionsChanged||detailChanged;
  }
 }
-export function createFeedback(ui,switchIconUrl,manifest) {
+export function createFeedback(ui,manifest) {
  const state=new FeedbackState(),root=document.querySelector('#hud'),icon=document.querySelector('#crosshair'),fluid=document.querySelector('#fluid-text'),carry=document.querySelector('#carry-help'),notice=document.querySelector('#action-notice'),target=document.querySelector('#target-name'),condition=document.querySelector('#target-condition'),charge=document.querySelector('#throw-charge'),level=document.querySelector('#throw-level');
  const gear=document.querySelector('#driving-gear');let lastGear,wasSeated;
  const rows=[
@@ -100,7 +101,15 @@ export function createFeedback(ui,switchIconUrl,manifest) {
   [0,'computerDisconnect','[E]: '+ui.computer_prompts.disconnect,0,COMPUTER.DISCONNECT]
  ].map(([bit,role,text,prompt=0,computer=0])=>{const n=document.createElement('p');n.textContent=text;n.className='action-row';n.hidden=true;root.append(n);return {bit,prompt,computer,role,n,family:0,top:0,line:0,offset:-1};});
  const named=Object.fromEntries(rows.map(r=>[r.role,r.n]));
- let lastIcon='',lastFluid='',lastNotice='',lastName='',lastCondition='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='',lastPrimary='',lastCrank='';
+ // fpscontroller GCWeapon: the gun crosshair sprite tinted by its color. It is one crosshair layer.
+ const weapon=document.createElement('div');weapon.id='weapon-crosshair';weapon.hidden=true;let weaponIcon=0;
+ const layers=crosshairLayers(0).map((_,i)=>{if(i===7)return weapon;const n=document.createElement('img');n.alt='';n.hidden=true;return n;});
+ icon.append(...layers);
+ const pickupChildren=['carrying-medium','carrying-heavy'].map(role=>{const n=document.createElement('img');n.alt='';n.src=ui.urls[ui.icons[role]];n.style.opacity=0;n.hidden=true;return n;});
+ layers[2].after(...pickupChildren);
+ layers[3].style.opacity=ui.layouts.reticle.image_color[3];
+ function showWeapon(){weapon.hidden=!(weaponIcon&&state.crosshair&CROSSHAIR.WEAPON);}
+ let lastLayers=-1,lastWeight=-1,lastFluid='',lastNotice='',lastName='',lastCondition='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='',lastPrimary='',lastCrank='';
  const translationHelp='[RMB]+[Mouse]: Move\n[Scroll]: Distance\n[Q]+[Scroll]: Posture';
  const rotationHelp='[RMB]+[Mouse]: Move\n[MMB]+[Mouse]: Rotate\n[RMB]+[MMB]+[Mouse]: Roll\n[Scroll]: Distance\n[Q]+[Scroll]: Posture';
  const counts=new Uint8Array(4);
@@ -113,10 +122,9 @@ export function createFeedback(ui,switchIconUrl,manifest) {
  function resize(){
   for(const row of rows){const role=destinations[row.role],box=applyLayout(row.n,ui.layouts[role]);row.family=families[role];row.top=box.y;row.line=box.fontSize*1.4;row.offset=-1;}
   placeRows();
-  const reticle=applyLayout(icon,ui.layouts.reticle),scale=reticle.scale;weaponScale=scale;weapon.style.width=weapon.style.height=40*scale+'px';
-  const active=lastIcon||'default';icon.style.width=((active==='pickup'||active==='dismount'||active==='carrying')?75:active==='default'?35:40)*scale+'px';
-  icon.style.height=(active==='default'?35:40)*scale+'px';icon.style.left='50%';icon.style.top='50%';
-  icon.style.opacity=active==='default'?ui.layouts.reticle.image_color[3]:1;
+  const scale=applyLayout(icon,ui.layouts.reticle).scale;icon.style.left='50%';icon.style.top='50%';icon.style.width=icon.style.height='0';
+  for(const [layer,[,width,height]] of layers.map((n,i)=>[n,crosshairLayers(0)[i]])){layer.style.width=width*scale+'px';layer.style.height=height*scale+'px';}
+  for(const child of pickupChildren){child.style.width=layers[2].style.width;child.style.height=layers[2].style.height;}
   const fluidBox=applyLayout(fluid,ui.layouts.fluid);fluid.style.top=(fluidBox.y+fluidBox.height/2)+'px';fluid.style.height='auto';fluid.style.width='max-content';fluid.style.left='50%';
   const carryBox=applyLayout(carry,ui.layouts.carry);carry.style.left='auto';carry.style.right='8px';carry.style.width='max-content';carry.style.height='auto';carry.style.top='auto';carry.style.bottom=(innerHeight-carryBox.y-carryBox.height)+'px';
   notice.style.fontSize=ui.layouts.use.font_size*scale+'px';
@@ -147,19 +155,15 @@ export function createFeedback(ui,switchIconUrl,manifest) {
   if(strength!==lastCharge){level.value=strength;lastCharge=strength;}
   carry.hidden=!state.carrying;const help=state.actions&ACTION.ROTATE?rotationHelp:translationHelp;
   if(help!==lastCarry){carry.textContent=help;lastCarry=help;}
-  const selected=selectIcon(state.actions,state.context,state.carrying);
-  if(selected!==lastIcon){icon.src=selected==='light_switch'?switchIconUrl:ui.urls[ui.icons[selected]];lastIcon=selected;resize();}
+  if(state.crosshair!==lastLayers){lastLayers=state.crosshair;crosshairLayers(state.crosshair).forEach(([role],i)=>{const layer=layers[i];if(layer===weapon)return;layer.hidden=!role;if(role&&layer.dataset.role!==role){layer.src=ui.urls[ui.icons[role]];layer.dataset.role=role;}});for(const child of pickupChildren)child.hidden=layers[2].hidden;showWeapon();}
+  if(state.weight!==lastWeight){lastWeight=state.weight;pickupWeightAlphas(state.weight).forEach((alpha,i)=>{pickupChildren[i].style.opacity=alpha;});}
   if(state.fluidText!==lastFluid){fluid.textContent=state.fluidText;lastFluid=state.fluidText;}fluid.hidden=!state.fluidText;
   const message=state.context===6?'Unlimited Gas':state.notice;
   if(message!==lastNotice){notice.textContent=message;lastNotice=message;}notice.hidden=!message;
  }
- // fpscontroller GCWeapon: the gun crosshair sprite tinted by its color. It replaces the default crosshair.
- const weapon=document.createElement('div');weapon.id='weapon-crosshair';weapon.hidden=true;root.append(weapon);let weaponIcon=0,weaponScale=1;
  function setWeapon(sprite,color){
-  if(sprite!==weaponIcon){weaponIcon=sprite;const url=sprite?ui.urls[sprite-1]:'';weapon.style.maskImage=weapon.style.webkitMaskImage=url?`url("${url}")`:'none';}
+  if(sprite!==weaponIcon){weaponIcon=sprite;const url=sprite?ui.urls[sprite-1]:'';weapon.style.maskImage=weapon.style.webkitMaskImage=url?`url("${url}")`:'none';showWeapon();}
   weapon.style.backgroundColor=`rgba(${color&255},${color>>>8&255},${color>>>16&255},${(color>>>24&255)/255})`;
-  weapon.style.width=weapon.style.height=40*weaponScale+'px';
-  weapon.hidden=!sprite;icon.style.visibility=sprite?'hidden':'';
  }
  const inventory=document.createElement('div');inventory.id='inventory';inventory.setAttribute('aria-label','Inventory');root.append(inventory);
  const slotNodes=Array.from({length:4},(_,i)=>{const tile=document.createElement('div'),number=document.createElement('span'),icon=document.createElement('img');number.textContent=String(i+1);icon.hidden=true;tile.append(number,icon);inventory.append(tile);return {tile,icon,id:0};});

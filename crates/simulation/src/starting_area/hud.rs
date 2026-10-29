@@ -29,6 +29,8 @@ pub(super) struct FeedbackStamp {
     throw_active: bool,
     rpm: u32,
     engine_flags: [bool; 5],
+    crosshair: u32,
+    weight: u32,
 }
 
 impl GarageRuntime {
@@ -172,6 +174,13 @@ impl GarageRuntime {
         let seated = self.area.player.seated();
         let throw_charge = self.area.interaction.throw_charge();
         let throw_active = self.area.interaction.throw_active();
+        let weight = self.area.interaction.carry.weight_factors(&self.physics);
+        let crosshair = crate::interaction::crosshair::crosshair(
+            &available,
+            info.carrying,
+            self.area.interaction.guns.crosshair().is_some(),
+            weight[1],
+        );
         let stamp = FeedbackStamp {
             condition: condition.to_bits(),
             held,
@@ -179,6 +188,8 @@ impl GarageRuntime {
             throw_active,
             rpm: engine.rpm.to_bits(),
             engine_flags: [ignition, engine.running, engine.starter, seated, handbrake],
+            crosshair,
+            weight: weight[0].to_bits(),
             actions: info.actions.0
                 | if needs.dead || self.sleeping() {
                     0
@@ -257,6 +268,8 @@ impl GarageRuntime {
             lmb_use: stamp.lmb_use,
             prompts: stamp.prompts,
             computer: stamp.computer,
+            crosshair,
+            weight: weight[0],
         })));
     }
 }

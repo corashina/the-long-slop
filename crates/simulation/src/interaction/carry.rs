@@ -256,6 +256,21 @@ impl CarryState {
     pub fn body(&self) -> Option<RigidBodyHandle> {
         self.held.as_ref().map(|held| held.body)
     }
+    /// Source `weightM` and `weightM2` of the carried item. `Drop` sets both to 1.
+    pub fn weight_factors(&self, physics: &PhysicsWorld) -> [f32; 2] {
+        let Some(held) = &self.held else {
+            return [1.; 2];
+        };
+        let mass = physics.authored_body_mass(held.body);
+        let (min, max) = (
+            self.reference.carry_min_weight,
+            self.reference.carry_max_weight,
+        );
+        [
+            ((mass - max) / (min - max)).clamp(0., 1.),
+            ((mass - max * 2.) / (min - max * 2.)).clamp(0., 1.),
+        ]
+    }
     /// Source `pickedUpPoint` follows `TpickedUpParent`, as after `Drop` or recenter.
     pub fn grip_at_anchor(&mut self) {
         if let Some(held) = self.held.as_mut() {

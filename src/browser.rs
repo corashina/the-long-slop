@@ -339,6 +339,8 @@ extern "C" {
         lmb_use: bool,
         prompts: u32,
         computer: u32,
+        crosshair: u32,
+        weight: f32,
     );
 }
 /// The local month and day.
