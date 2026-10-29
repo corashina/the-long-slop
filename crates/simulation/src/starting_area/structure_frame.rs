@@ -1,6 +1,6 @@
 //! Presentation views of the world structures. A view goes out when its state changes.
 use super::{GarageRuntime, VehicleRuntime};
-use crate::boundary::{Change, MaterialRow, NodePoseRow, SimFrame, StructureRow};
+use crate::boundary::{Change, MaterialRow, NodeColorRow, NodePoseRow, SimFrame, StructureRow};
 use crate::interaction::items::{ItemLocation, ItemState, ItemStore};
 use crate::reference::{
     ItemId, ReferenceError, ReferenceManifest, SourceId, Transform, WorldPrototypeReference,
@@ -69,6 +69,7 @@ impl GarageRuntime {
         frame.structure_poses.clear();
         frame.hidden_nodes.clear();
         frame.node_materials.clear();
+        frame.node_colors.clear();
         let views = &mut self.structure_views;
         views.select(
             reference,
@@ -655,6 +656,38 @@ impl StructureViews {
             }
         }
         row.materials = [start, frame.node_materials.len() as u32];
+        // partconditionscript colors. The renderer keeps the construction color without a row.
+        let start = frame.node_colors.len() as u32;
+        for (i, node) in prototype.nodes.iter().enumerate() {
+            let Some(look) = appearance.iter().rev().find(|a| {
+                a.node == node.source && (a.color.is_some() || a.color_material.is_some())
+            }) else {
+                continue;
+            };
+            let color = look.color.or_else(|| {
+                let id = look.color_material.as_ref()?;
+                reference
+                    .rendering
+                    .materials
+                    .iter()
+                    .find(|m| &m.source == id)
+                    .map(|m| m.color)
+                    .or_else(|| {
+                        prototype
+                            .deferred_materials
+                            .iter()
+                            .find(|m| &m.source == id)
+                            .and_then(|m| m.colors.get("_Color").copied())
+                    })
+            });
+            if let Some(color) = color {
+                frame.node_colors.push(NodeColorRow {
+                    node: i as u32,
+                    color,
+                });
+            }
+        }
+        row.colors = [start, frame.node_colors.len() as u32];
         frame.structures.push(row);
         Ok(())
     }

@@ -65,11 +65,6 @@ impl GarageRuntime {
                     position: item.pose.position,
                     rotation: item.pose.rotation,
                 },
-                condition: self
-                    .area
-                    .conditions
-                    .item_quality(ids.item(&item.instance)?)
-                    .unwrap_or(1.),
                 food: self
                     .area
                     .items
@@ -277,6 +272,7 @@ impl GarageRuntime {
         )?;
         candidate
             .area
+            .interaction
             .conditions
             .restore_save(reference, &saved.conditions)?;
         candidate
@@ -290,7 +286,7 @@ impl GarageRuntime {
             .restore_save(&ids, &saved.items, reference)?;
         candidate
             .wheels
-            .refresh_conditions(&candidate.area.conditions, &candidate.area.items);
+            .refresh_conditions(&candidate.area.interaction.conditions);
         candidate
             .wheels
             .restore_save(&mut candidate.area.items, &mut candidate.physics)?;
@@ -589,7 +585,7 @@ impl GarageRuntime {
             &required,
         );
         self.keep_object_states(&mut world.changes);
-        let (surfaces, washes) = self.area.conditions.capture_save(reference)?;
+        let (surfaces, washes) = self.area.interaction.conditions.capture_save(reference)?;
         let tools = self.area.interaction.cleaning.capture_save(reference)?;
         let mut snapshot = SaveSnapshot {
             conditions: ConditionSnapshot {

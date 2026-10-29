@@ -43,7 +43,7 @@ All tasks are done.
 | X02 | Weapons and damage | L | Starting-area tanks (garage fuel can) explode and leak, cacti breaks, SMG magazine drop on unload, AI parts of the damage model (X03). |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters (attacks hurt the player), UFO, EMP. |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. |
-| X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. |
+| X05 | Save every remaining state | XL | Save and unload of world part conditions (`save_partcondition`); live repair and paint are done. Other fields grow with their features. |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. |
 | X09 | Car crash damage | L | `carscript.DamageStuff`: parts fall off by crash speed and condition, horn, blood, death on hard crashes; blasts call it with power x 5. |
 
@@ -155,6 +155,15 @@ Prepare once:
 1. Run `cargo test --lib two_ladas -- --ignored`.
 2. Park the Lada with the wheels turned. Save and load: the wheels stay turned.
 3. Sleep, wake, save and load: the sleep hint stays off until the cooldown ends.
+
+### World part repair and paint (X05 part 2)
+
+1. Run `cargo test --lib lada_part_paint_and_repair -- --ignored`.
+2. Brush rust off a Lada part and a roadside car part. Rub dirt off with the sponge. The material changes at once.
+3. Paint a Lada door and a loose part with spray paint. The color changes while you spray.
+4. Repair a tire. The HUD condition and the wheel grip follow it.
+5. A state change binds a new material. Check the part does not blink for a frame.
+6. Check F3 while spraying and near many roadside cars. Compare with the frame rate rule.
 
 ### Save slots and autosave (X04b)
 

@@ -34,7 +34,7 @@ pub struct NodeExtras {
     pub cast_shadows: Option<u8>,
     pub receive_shadows: Option<bool>,
 }
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct PlanPrimitive {
     pub mesh: u32,
     pub primitive: u32,
@@ -47,7 +47,7 @@ pub struct PlanPrimitive {
     pub has_source_material: bool,
     pub material: Option<MaterialIdentity>,
 }
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct MaterialIdentity {
     pub asset: crate::reference::AssetId,
     pub gltf_material: u32,

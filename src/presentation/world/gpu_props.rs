@@ -334,6 +334,14 @@ impl GpuProps {
         }
         self.mark_shadow(slot);
     }
+    /// Linear row color: a live condition color.
+    pub fn set_color(&mut self, slot: u32, color: Vec4) {
+        let row = &mut self.rows[slot as usize];
+        if row.color != color {
+            row.color = color;
+            self.mark(slot);
+        }
+    }
     pub fn set_camera_hidden(&mut self, slot: u32, hidden: bool) {
         let row = &mut self.rows[slot as usize];
         if row.camera_hidden != hidden {

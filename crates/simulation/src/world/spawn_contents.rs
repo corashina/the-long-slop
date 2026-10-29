@@ -13,7 +13,6 @@ pub struct SpawnedContent {
     pub lights: Vec<super::WorldLight>,
     pub fluid: Option<crate::fluids::FluidContainer>,
     pub tanks: Vec<(SourceId, crate::fluids::FluidContainer)>,
-    pub condition: f32,
     pub buried: bool,
     pub distance_offset: [f32; 3],
     /// RandomSpawned ammoscript count; None keeps the prefab count.
@@ -317,7 +316,6 @@ impl<'a> SpawnEvaluation<'a> {
                         lights: Vec::new(),
                         fluid,
                         tanks,
-                        condition: 1.,
                         buried: flag(save.fields, "buried")?,
                         distance_offset: self.distance_offset(&child, save)?,
                         ammo,

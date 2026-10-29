@@ -206,7 +206,7 @@ impl GarageRuntime {
         }
     }
     fn fill_conditions(&mut self, reference: &ReferenceManifest, frame: &mut SimFrame) {
-        let store = &mut self.area.conditions;
+        let store = &mut self.area.interaction.conditions;
         frame.conditions.clear();
         if self.conditions_sent {
             while let Some(id) = store.take_changed() {
