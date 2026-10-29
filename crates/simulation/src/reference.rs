@@ -1936,6 +1936,14 @@ impl ReferenceManifest {
         self.guns.validate(self)?;
         self.explosions.validate(self)?;
         self.crash.validate()?;
+        require(
+            self.world
+                .prototypes
+                .iter()
+                .filter_map(|p| p.vehicle.as_ref()?.blood.as_ref())
+                .all(|b| (b.permission as usize) < self.conditions.clean_tables.len()),
+            "car blood clean property",
+        )?;
         ids(
             self.breakables.iter().map(|b| &b.source),
             "breakable sources",

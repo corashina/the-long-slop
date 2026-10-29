@@ -186,6 +186,16 @@ class Prototype:
         return [self.node(r) for p in pointers if (r:=self.source.resolve(owner,p))]
 
 
+def blood_record(source, proto, blood):
+    """carscript.blood washtriggerscript. GotDirty and GotClean set its node and objects active."""
+    if blood is None:return None
+    d=source.read(blood)
+    # The port has no destroyed or start-disabled car blood trigger.
+    if d['destroyOnRepair'] or d['chanceToStartDisabled']>0:raise ValueError(f'{key(blood)} car blood trigger differs')
+    return {'node':proto.node(blood),'objects':proto.links(blood,d['objects']),'permission':d['CleanProperty'],
+        'never_repair':bool(d['neverRepair']),'on':bool(d['ON'])}
+
+
 def gauge_records(source, proto, asset, material_indices) -> list:
     """Gauge part records: each meterscript on a part node that is not a built-in car meter."""
     source=proto.source
@@ -381,7 +391,7 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         'dont_ignite_with_throttle_in_automatic':bool(car['dontIgniteWithThorttleInAutomatic']),'auto_move_min':0.3,
         'collision_gain':car['collisionSoundM'],
         'crash':{'multiplier':car['crashMultiplier'],'blood':car['crashBloodMultiplier'],'horn':car['crashHornMultiplier'],'fall_off':car['crashFallOffMultiplier']},
-        'blood':None if blood is None else proto.node(blood),'blood_clip':None if blood_clip is None else source_id(blood_clip),
+        'blood':blood_record(source,proto,blood),'blood_clip':None if blood_clip is None else source_id(blood_clip),
         'condition':proto.link(car_reader,car['condition']),
         'exhaust':recover_exhaust(source,car_reader,car,hierarchy[0]['reader'],car_reader.path_id,output),
         'wheel_effects':recover_wheel_effects(source,car_reader,car,hierarchy[0]['reader'],[source.get(*identity) for identity in sorted(road)],car_reader.path_id,output),

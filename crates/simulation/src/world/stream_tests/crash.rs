@@ -24,15 +24,16 @@ fn x09_crash_knocks_parts_off() {
     }
     settle(&mut run, &reference, 1.);
     let car = run.area.items.resolve_key(&key).expect("Lada item");
-    let record = run.vehicles[&key].record(&reference);
     let before = mounted(&run, car);
+    let mut vehicle = run.vehicles.remove(&key).unwrap();
 
     // A 5 km/h stop in one step.
-    run.crash_car(&reference, &key, record, 5.);
+    run.crash_car(&reference, &key, &mut vehicle, 5.);
     assert_eq!(mounted(&run, car), before, "a slow stop drops nothing");
 
     // A 100 km/h stop in one step.
-    run.crash_car(&reference, &key, record, 100.);
+    run.crash_car(&reference, &key, &mut vehicle, 100.);
+    run.vehicles.insert(key, vehicle);
     let after = mounted(&run, car);
     let fallen: Vec<_> = before.iter().filter(|i| !after.contains(i)).collect();
     assert!(!fallen.is_empty(), "a fast stop knocks parts off");

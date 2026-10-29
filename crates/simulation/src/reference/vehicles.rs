@@ -49,8 +49,8 @@ pub struct WorldVehicleReference {
     pub auto_move_min: f32,
     pub collision_gain: f32,
     pub crash: CarCrashReference,
-    /// Source `carscript.blood`: the `washtriggerscript` node that a hard crash makes dirty.
-    pub blood: Option<u32>,
+    /// Source `carscript.blood`: the `washtriggerscript` that a hard crash makes dirty.
+    pub blood: Option<CarBloodReference>,
     /// Source `carscript.SBlood01` clip id.
     pub blood_clip: Option<u32>,
     /// Source `carscript.condition` node.
@@ -715,7 +715,9 @@ impl WorldVehicleReference {
                 && self.colliders.iter().all(|i| (*i as usize) < b.colliders)
                 && self.fuel_tank.is_none_or(|i| b.node(i))
                 && self.electronics.is_none_or(|i| b.node(i))
-                && self.blood.is_none_or(|i| b.node(i))
+                && self.blood.as_ref().is_none_or(|blood| {
+                    b.node(blood.node) && blood.objects.iter().all(|&i| b.node(i))
+                })
                 && self.condition.is_none_or(|i| b.node(i)),
         )?;
         check(s, "vehicle crash", self.crash.valid())?;

@@ -1179,6 +1179,21 @@ impl AudioState {
             position,
         });
     }
+    /// carscript.DamageStuff: PlayClipAtPoint(SBlood01, position, 1f, randomPitch, AudioPriorities[6]).
+    /// It has the group, priority and settings of the Break row, so it plays through it.
+    pub fn point_clip(&mut self, clip: u32, position: [f64; 3]) {
+        let pitch = self.random_pitch();
+        self.survival_event(SurvivalAudioEvent {
+            session: self.session,
+            emitter: 0,
+            kind: AudioKind::Break,
+            action: AudioAction::Start,
+            clip,
+            gain: 1.,
+            pitch,
+            position,
+        });
+    }
     /// radioscript.TurnRadio and the band switch share Cturned, played at the radio.
     pub fn radio_click_at(&mut self, position: [f64; 3]) {
         let b = self

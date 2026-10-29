@@ -1,11 +1,13 @@
 //! Car prototypes and engine parts of spawned world contents.
 //! A car copy is a vehicle body, a car runtime, its wheel slots and the engine and radiator
 //! parts on it.
+use crate::crash::Blood;
 use crate::interaction::InteractionState;
+use crate::interaction::cleaning::WashOwner;
 use crate::interaction::items::ItemStore;
 use crate::interaction::wheels::{WheelAssemblies, WorldWheelSlot};
 use crate::reference::{
-    Bounds, EnginePartReference, ItemId, RadiatorPartReference, ReferenceError,
+    Bounds, ColliderId, EnginePartReference, ItemId, RadiatorPartReference, ReferenceError,
     WorldPrototypeReference, WorldReference,
 };
 use crate::simulation::car_lights::CarLightLinks;
@@ -104,6 +106,14 @@ pub(super) fn bind(
         let (slot_sources, wheel_slots) = wheel_slots(content, prototype, world, rules, items)?;
         let owner = content.item.unwrap();
         let key = ObjectKey::Generated(content.content.placement.id.clone());
+        let blood = record
+            .blood
+            .as_ref()
+            .map(|r| {
+                let chassis = prototype.bodies[record.body as usize].node as usize;
+                bind_blood(r, chassis, instance, prototype, interaction, physics)
+            })
+            .transpose()?;
         let ids = spawn(
             CarCopy {
                 key: key.clone(),
@@ -150,6 +160,7 @@ pub(super) fn bind(
                         }
                         tanks
                     }),
+                blood,
             },
             prototype,
             skid,
@@ -234,7 +245,82 @@ pub(super) fn bind(
         }
         powertrain.register_gauge(part);
     }
+    let key = ObjectKey::Generated(content.content.placement.id.clone());
+    if let (Some(owner), Some(blood)) = (
+        content.item,
+        vehicles.get(&key).and_then(|v| v.blood.as_ref()),
+    ) {
+        // A restored `GotDirty` shows the trigger. Repair progress starts at 0.
+        let restored = blood.shown == Some(true);
+        if restored {
+            blood.set_colliders(physics, true);
+        }
+        // Source: the sponge washes the trigger while its GameObject is active.
+        let appearance = &content.content.appearance;
+        if restored
+            || crate::world::spawn_appearance::node_active(
+                prototype,
+                blood.nodes[0] as usize,
+                appearance,
+            )
+        {
+            interaction.cleaning.register_generated_wash(
+                WashOwner::Car(owner),
+                blood.permission,
+                blood.never_repair,
+                blood.colliders.clone(),
+            );
+        }
+    }
     Ok(())
+}
+
+/// The car blood trigger of one car copy. Colliders at and below the trigger node wash it.
+fn bind_blood(
+    r: &crate::reference::CarBloodReference,
+    chassis: usize,
+    instance: &StructureInstance,
+    prototype: &WorldPrototypeReference,
+    interaction: &mut InteractionState,
+    physics: &mut PhysicsWorld,
+) -> Result<Blood, ReferenceError> {
+    let below = |mut i: u32| loop {
+        if i == r.node {
+            return true;
+        }
+        match prototype.nodes[i as usize].parent {
+            Some(p) => i = p,
+            None => return false,
+        }
+    };
+    let mut colliders = Vec::new();
+    for (source, handle) in &instance.colliders {
+        let on_trigger = prototype
+            .colliders
+            .iter()
+            .find(|c| &c.source == source)
+            .is_some_and(|c| c.enabled && below(c.node));
+        if !on_trigger {
+            continue;
+        }
+        let mut id = ColliderId((physics.rapier().colliders[*handle].user_data >> 64) as u32);
+        if id.0 == 0 {
+            id = interaction.allocate_generated_collider()?;
+            physics.edit_collider(*handle, |c| c.user_data |= (id.0 as u128) << 64);
+        }
+        colliders.push((id, *handle));
+    }
+    Ok(Blood {
+        on: r.on,
+        shown: None,
+        permission: r.permission,
+        never_repair: r.never_repair,
+        nodes: std::iter::once(r.node)
+            .chain(r.objects.iter().copied())
+            .collect(),
+        colliders,
+        point: crate::world::placement::node_frame(prototype, chassis, r.node as usize).position,
+    })
 }
 
 /// The source slot and the wheel slot of each record wheel. The slot rim is the prototype
@@ -390,6 +476,8 @@ pub struct CarCopy<'a> {
     pub wheel_part_mass: f32,
     /// Prototype `tankscript` items. Their fluid adds to the chassis mass.
     pub tanks: Vec<ItemId>,
+    /// Source `carscript.blood`.
+    pub blood: Option<Blood>,
 }
 
 /// Makes the chassis a vehicle and adds its car runtime and wheel slots with the retired
@@ -430,6 +518,7 @@ pub fn spawn(
             light_switch: copy.light_switch,
             handbrake_lever: copy.handbrake_lever,
             plates,
+            blood: copy.blood,
         },
     );
     if let Some(state) = changes.take_vehicle(&key) {
@@ -505,7 +594,10 @@ pub(super) fn retire(
     {
         retire_parts(item, items, powertrain, changes);
     }
-    if content.item.is_some() {
+    if let Some(owner) = content.item {
+        interaction
+            .cleaning
+            .remove_generated_wash(WashOwner::Car(owner));
         let key = ObjectKey::Generated(content.content.placement.id.clone());
         if vehicles.contains_key(&key) {
             for (id, sensor) in retire_vehicle(&key, physics, vehicles, wheels, changes) {
@@ -623,6 +715,15 @@ mod tests {
                 wheel_slots,
                 wheel_part_mass,
                 tanks: vec![item],
+                blood: Some(Blood {
+                    on: false,
+                    shown: None,
+                    permission: 0,
+                    never_repair: false,
+                    nodes: vec![1],
+                    colliders: Vec::new(),
+                    point: [0.; 3],
+                }),
             },
             prototype,
             &crate::wheel_effects::tests::skid(),
@@ -827,7 +928,7 @@ mod tests {
     }
 
     #[test]
-    fn saved_car_returns_with_engine_gear_and_handbrake() {
+    fn saved_car_returns_with_engine_gear_handbrake_and_blood() {
         #[derive(serde::Serialize, serde::Deserialize)]
         struct Saved {
             #[serde(with = "crate::save::identity::lossless")]
@@ -918,6 +1019,7 @@ mod tests {
         car_state.drivetrain.restore_gear(2);
         car_state.handbrake = true;
         car_state.ignition.ignition = true;
+        car_state.blood.as_mut().unwrap().got_dirty();
         let mut engine_state = powertrain.engine(part).unwrap().state.capture_save();
         engine_state.rpm = 2400.;
         engine_state.temperature = 86.;
@@ -949,6 +1051,11 @@ mod tests {
         assert_eq!(car_state.drivetrain.gear(), 2);
         assert!(car_state.handbrake);
         assert!(car_state.ignition.ignition);
+        let blood = car_state.blood.as_ref().unwrap();
+        assert!(
+            blood.on && blood.visible(1) == Some(true),
+            "load runs GotDirty"
+        );
         let restored = &powertrain.engine(part).unwrap().state;
         assert_eq!(restored.capture_save(), engine_state);
         assert!(restored.output().running);

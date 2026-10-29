@@ -537,6 +537,7 @@ impl GarageRuntime {
             &mut self.area.interaction.cleaning,
             &mut self.area.items,
         );
+        self.clean_car_blood();
         self.stream.advance_cobwebs(
             frame,
             reference,

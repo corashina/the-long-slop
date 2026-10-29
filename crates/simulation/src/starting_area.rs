@@ -463,6 +463,8 @@ pub struct WorldCarParts {
     pub handbrake_lever: Option<ItemId>,
     /// Plate label texts in `WorldVehicleReference::plates` order.
     pub plates: Vec<String>,
+    /// Source `carscript.blood`.
+    pub blood: Option<crate::crash::Blood>,
 }
 
 /// Car-side state of a car copy. The world change records keep it while the car is retired
@@ -476,6 +478,8 @@ pub struct VehicleState {
     pub trip_m: f64,
     pub requested_headlights: u8,
     pub steer: f32,
+    /// Source save `blood`: the car blood `ON`.
+    pub blood: bool,
 }
 
 /// Source `carscript` state of one car copy. Engine state lives on the engine part.
@@ -516,6 +520,10 @@ pub struct VehicleRuntime {
     previous: [f64; 3],
     /// Source `carscript.lspeed`: forward speed in km/h at the start of the current step.
     last_speed: f32,
+    /// Source `HornHit` state. It is not saved.
+    pub horn_hit: Option<crate::crash::HornHit>,
+    /// Source `carscript.blood`.
+    pub blood: Option<crate::crash::Blood>,
     /// Parts mounted on this car, found once at the start of each step.
     powertrain: Powertrain,
     /// Requested headlight state: off, low or high.
@@ -579,6 +587,8 @@ impl VehicleRuntime {
             bodies: parts.bodies,
             previous: [0.0; 3],
             last_speed: 0.,
+            horn_hit: None,
+            blood: parts.blood,
             powertrain: Powertrain::default(),
             requested_headlights: 0,
             light_switch: parts.light_switch,
@@ -623,6 +633,7 @@ impl VehicleRuntime {
         for v in self.lights.visibility() {
             v.hash(&mut h);
         }
+        self.blood.as_ref().map(|b| b.shown).hash(&mut h);
         h.finish()
     }
     /// Source `carscript.InteractSwitchLights`: off, low, high.
@@ -687,6 +698,7 @@ impl VehicleRuntime {
             trip_m: self.trip_m,
             requested_headlights: self.requested_headlights,
             steer: self.steer,
+            blood: self.blood.as_ref().is_some_and(|b| b.on),
         }
     }
     /// Restores a captured state. The gear must be in the record range.
@@ -706,6 +718,10 @@ impl VehicleRuntime {
         self.trip_m = state.trip_m;
         self.requested_headlights = state.requested_headlights;
         self.steer = state.steer;
+        // Source load: `GotDirty` when the saved blood is on, else the prototype state.
+        if let (true, Some(blood)) = (state.blood, &mut self.blood) {
+            blood.got_dirty();
+        }
     }
 }
 
@@ -2029,6 +2045,7 @@ impl GarageRuntime {
                             && controls
                             && seated == Some(key)
                             && input.held & keys::HORN != 0,
+                        horn_hit: vehicle.horn_hit.map(|h| h.gain()),
                         ambient_temperature,
                         wheels: &vehicle.wheel_effects,
                         skid: &reference.skid,
