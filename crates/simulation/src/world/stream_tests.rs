@@ -21,6 +21,8 @@ mod guns;
 mod item_seats;
 #[path = "stream_tests/long_trip.rs"]
 mod long_trip;
+#[path = "stream_tests/loot_tools.rs"]
+mod loot_tools;
 #[path = "stream_tests/melee.rs"]
 mod melee;
 #[path = "stream_tests/parked_car.rs"]

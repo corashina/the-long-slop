@@ -1477,6 +1477,10 @@ impl CleaningTools {
     pub fn get(&self, item: ItemId) -> Option<&ToolState> {
         self.index.get(&item).map(|&i| &self.tools[i].state)
     }
+    #[cfg(test)]
+    pub fn get_mut(&mut self, item: ItemId) -> Option<&mut ToolState> {
+        self.index.get(&item).map(|&i| &mut self.tools[i].state)
+    }
     /// The garage tools in reference order, with their save source.
     fn fixed<'a>(
         &'a self,

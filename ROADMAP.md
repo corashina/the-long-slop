@@ -43,7 +43,6 @@ All tasks are done.
 | X03 | Creatures | XL | Evil rabbits (roar and attack), ground UFO and EMP, human monster (attacks hurt the player), breakablescript `DamageFrom` for AI. Rabbits do not yet sense engines, radios or hums. |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. |
-| X11 | Loot repair and paint tools | M | Brushes, sponges and spray paint in loot work as tools. Today only the garage ones do. |
 
 Not planned: multiplayer, VR, stereo 3D, mod events, Steam features, developer tools.
 
@@ -323,3 +322,14 @@ Prepare once:
 8. Eat each food. Crumbs, meat, turd and chocolate bits fall from the food. Smoke a cigarette: ash falls now and then.
 9. New game between 15 October and 15 November: the start pumpkin glows and flickers at night. Hold it and wear it: the light follows.
 10. Check F3 with steam on, near Bus02, and near the pumpkin. Compare with the frame rate rule.
+
+### Loot tools (X11)
+
+1. Re-export. The log shows "Loot tools: 3 prototypes".
+2. Run `cargo test --lib loot_tools -- --ignored`.
+3. Find a loot wire brush, sponge and spray paint. Pick up each one and hold LMB to use it.
+4. Clean rust and dirt with the loot wire brush and sponge. The brush model moves on the surface, with particles and sound.
+5. Paint a car part with loot spray paint. The can shows its color, sprays particles with sound, and runs out.
+6. Use a loot brush until it wears out. Its scrub part hides and it stops working.
+7. Save and load. Paint left, color and wear stay. Drive away and back: they stay.
+8. Check F3 while you use each loot tool. Compare with the frame rate rule.

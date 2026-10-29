@@ -484,7 +484,7 @@ mod g04_ordered_state {
     fn older_schemas_are_rejected_before_payload_reconstruction() {
         for version in [
             6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
-            31, 32, 33, 34, 35, 36, 37, 38, 40,
+            31, 32, 33, 34, 35, 36, 37, 38, 39, 41,
         ] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
