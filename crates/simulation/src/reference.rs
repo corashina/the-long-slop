@@ -59,6 +59,8 @@ pub mod guns;
 pub use guns::*;
 pub mod explosions;
 pub use explosions::*;
+pub mod crash;
+pub use crash::*;
 pub mod breakables;
 pub use breakables::*;
 pub mod wheel_effects;
@@ -804,6 +806,8 @@ pub struct PartReference {
     pub enable_if_dismounted: Vec<NodeId>,
     pub disable_if_mounted: Vec<NodeId>,
     pub disable_if_dismounted: Vec<NodeId>,
+    /// Source `partscript.fallOffCategory`: a `mainscript.defFallOffChance` index.
+    pub fall_off_category: u8,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -841,6 +845,8 @@ pub struct WheelPartReference {
     pub tire_main_types: Vec<String>,
     pub tire_types: Vec<String>,
     pub local_rotation_after_mount: [f32; 4],
+    /// Source `partscript.fallOffCategory`: a `mainscript.defFallOffChance` index.
+    pub fall_off_category: u8,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -903,6 +909,7 @@ pub struct ReferenceManifest {
     pub melee: MeleeReference,
     pub guns: GunsReference,
     pub explosions: ExplosionsReference,
+    pub crash: CrashReference,
     pub breakables: Vec<BreakableReference>,
     pub gib_constants: GibConstants,
     pub skid: SkidReference,
@@ -1198,8 +1205,10 @@ impl ReferenceManifest {
                 "part usable mechanism",
             )?;
             require(
-                !p.part_types.is_empty() && p.cover_slot.is_none_or(|s| part_slot_ids.contains(&s)),
-                "part types/cover",
+                !p.part_types.is_empty()
+                    && p.cover_slot.is_none_or(|s| part_slot_ids.contains(&s))
+                    && usize::from(p.fall_off_category) < FALL_OFF_CATEGORIES,
+                "part types/cover/fall-off",
             )?;
             require(
                 p.linear_damping.is_finite()
@@ -1872,7 +1881,8 @@ impl ReferenceManifest {
                     && part.tire_mount.as_ref().is_none_or(transform)
                     && part.main_types.len() <= 16
                     && part.part_types.len() <= 16
-                    && !part.part_types.is_empty(),
+                    && !part.part_types.is_empty()
+                    && usize::from(part.fall_off_category) < FALL_OFF_CATEGORIES,
                 "wheel part geometry/fit",
             )?;
         }
@@ -1902,6 +1912,7 @@ impl ReferenceManifest {
         self.melee.validate(self)?;
         self.guns.validate(self)?;
         self.explosions.validate(self)?;
+        self.crash.validate()?;
         ids(
             self.breakables.iter().map(|b| &b.source),
             "breakable sources",

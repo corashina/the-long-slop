@@ -247,6 +247,7 @@ pub mod tests {
                 "wheel_slip": [1.25, 0.75, 1.25, 0.75], "rim_slip": [0.4, 0.3], "auto_shift_stop_speed": 1.0,
                 "auto_shift_min_rpm": 1500.0, "auto_shift_max_rpm": 4000.0, "dont_ignite_with_throttle_in_automatic": false,
                 "auto_move_min": 0.3, "collision_gain": 1.0, "exhaust": [], "seats": [],
+                "crash": {"multiplier": 1.0, "blood": 1.0, "horn": 1.0, "fall_off": 1.0}, "blood": null, "blood_clip": null, "condition": null,
                 "drive_frames": {"left_hand": null, "right_hand": null, "left_leg": null, "right_leg": null}, "reach": crate::reference::reach_fixture(),
                 "wheel_effects": effects, "effect_gains": {"ground": 1.0, "spring": 1.0, "spring_pitch": 1.0, "slide_angle": 20.0, "max_slide_volume_speed": 10.0},
                 "lever": null, "key_steer_multiplier": 0.0, "oil_led_two_stroke": false,

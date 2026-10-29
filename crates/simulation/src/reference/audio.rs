@@ -531,7 +531,7 @@ impl AudioReference {
                     && p.vehicle.as_ref().is_none_or(|v| {
                         v.audio.as_ref().is_none_or(|a| {
                             a.wheels.len() == v.wheel_effects.len() && car(a, p.interiors.len())
-                        })
+                        }) && v.blood_clip.is_none_or(|c| clips.contains(&c))
                     }),
                 "world car audio",
             )?;
