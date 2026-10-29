@@ -30,7 +30,7 @@ use rapier3d::prelude::{ColliderHandle, QueryFilter, Ray, RigidBodyHandle};
 use rig::{Rig, RigPose};
 use senses::{ScanInput, Sensed, cast};
 use spawner::{Player, Spawner};
-use stimuli::{PlayerStimuli, Stimuli};
+use stimuli::{PlayerStimuli, SoundStimulus, Stimuli};
 
 /// Seconds between the world collision checks of each rabbit.
 const SUPPORT_INTERVAL: f64 = 1.;
@@ -97,6 +97,8 @@ pub struct Creatures {
     eye: usize,
     sources: PlayerStimuli,
     stimuli: Stimuli,
+    /// Engine, horn and radio sound stimuli of this step.
+    bound: Vec<SoundStimulus>,
     spawner: Spawner,
     rabbits: Vec<Rabbit>,
     next_id: u32,
@@ -177,6 +179,7 @@ impl Creatures {
             eye,
             sources,
             stimuli: Stimuli::new(),
+            bound: Vec::with_capacity(32),
             spawner: Spawner::new(now),
             rabbits: Vec::with_capacity(max),
             next_id: 1,
@@ -366,6 +369,11 @@ impl Creatures {
         Ok(&self.rabbits.last().unwrap().bones)
     }
 
+    /// The engine, horn and radio sound stimuli that the next step reads.
+    pub fn bound_sounds(&mut self) -> &mut Vec<SoundStimulus> {
+        &mut self.bound
+    }
+
     /// `PlayClipAtPoint`: a sound stimulus at `position` for `seconds`.
     pub fn sound(&mut self, position: [f64; 3], volume: f32, now: f64, seconds: f32) {
         self.stimuli.sound(position, volume, now, seconds);
@@ -381,9 +389,10 @@ impl Creatures {
     pub fn step(&mut self, r: &RabbitReference, physics: &mut PhysicsWorld, input: &StepInput) {
         let now = input.now;
         let origin = *input.origin;
-        self.stimuli.rebuild(&self.sources, input.head, now, |p| {
-            Vector::from_array(origin.local(p))
-        });
+        self.stimuli
+            .rebuild(&self.sources, input.head, &self.bound, now, |p| {
+                Vector::from_array(origin.local(p))
+            });
         let count = self.rabbits.len();
         let mut spawned = Vec::new();
         self.spawner.step(
