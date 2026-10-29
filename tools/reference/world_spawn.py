@@ -1,7 +1,7 @@
 """Retain nested caller inputs and export only missing supported pool prototypes."""
 import copy
-from . import world_probe
 from .source import key, source_id
+from .world_fields import PROVENANCE_ROOT
 from .world import Selection, RULE_CLASSES, vehicle_exclusion, car_prototypes, EDIBLE_COMPONENTS, selected_actions, part_scope, _source_root, source_material, export_world_prototypes
 
 
@@ -215,7 +215,7 @@ def compact_initialization(world, baseline, source, reader):
     if ancestors.records:
         from .world_fields import project_runtime_fields
         projection=dict(library=world['library'],source_hashes=world['source_hashes'],records=list(ancestors.records.values()),initialization=dict(nodes=[],components=[]),receipts=list(ancestors.receipts.values()))
-        project_runtime_fields(projection,world_probe.PROBE_ROOT)
+        project_runtime_fields(projection)
     world['records']=[r for r in world['records'] if tuple(r['source'].values()) not in moved]
     print(f'Compact initialization: {len(nodes)} nodes, {len(components)} components; original graph {len(world["records"])} records',flush=True)
 
@@ -229,14 +229,13 @@ def project_component_fields(component):
         names=names|{'m_Script','m_Enabled'}
         component['fields']=[f for f in component['fields'] if f['name'] in names]
 
-def project_runtime_receipts(world, output):
+def project_runtime_receipts(world):
     """Preserve complete provenance before retaining the runtime input projection."""
     import hashlib
     import json
-    from pathlib import Path
     original=json.dumps({"library":world["library"],"source_hashes":world["source_hashes"],"receipts":world["receipts"]},separators=(",",":")).encode()
     digest=hashlib.sha256(original).hexdigest()
-    directory=Path(output)/"provenance"
+    directory=PROVENANCE_ROOT
     directory.mkdir(parents=True,exist_ok=True)
     sidecar=directory/f"world-receipts-{digest}.json"
     if sidecar.exists():

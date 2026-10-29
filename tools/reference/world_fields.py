@@ -4,10 +4,13 @@ import json
 from pathlib import Path
 
 
-def project_runtime_fields(world, output):
+PROVENANCE_ROOT = Path(__file__).resolve().parents[2] / '.cache/world-provenance'
+
+
+def project_runtime_fields(world):
     original=json.dumps({name:world[name] for name in ('library','source_hashes','records','initialization','receipts')},separators=(',',':')).encode()
     digest=hashlib.sha256(original).hexdigest()
-    directory=Path(output)/'provenance'
+    directory=PROVENANCE_ROOT
     directory.mkdir(parents=True,exist_ok=True)
     path=directory/f'world-records-{digest}.json'
     if path.exists():

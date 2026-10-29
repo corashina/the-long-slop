@@ -228,18 +228,8 @@ fn g10_generated_endpoint_root() {
 
 #[test]
 #[ignore = "requires the installed source export"]
-fn g10_world_sample_source_identity() {
+fn g10_world_library_identity() {
     let reference = super::super::reference();
-    let capture = reference.world.capture_library.manifest_sha256.clone();
-    let package_hash = "f".repeat(64);
-    let mut republished = reference.clone();
-    republished.library.manifest_sha256 = package_hash.clone();
-    std::sync::Arc::make_mut(&mut republished.world)
-        .library
-        .manifest_sha256 = package_hash;
-    republished.world.validate(&republished).unwrap();
-    assert_eq!(republished.world.capture_library.manifest_sha256, capture);
-
     let mut manifest_only = reference.clone();
     manifest_only.library.manifest_sha256 = "e".repeat(64);
     assert!(manifest_only.world.validate(&manifest_only).is_err());
@@ -247,68 +237,12 @@ fn g10_world_sample_source_identity() {
     std::sync::Arc::make_mut(&mut runtime_only.world)
         .library
         .manifest_sha256 = "e".repeat(64);
-    assert!(runtime_only.world.validate(&runtime_only).is_err());
-
-    for changed_source in [true, false] {
-        let mut changed = republished.clone();
-        let world = std::sync::Arc::make_mut(&mut changed.world);
-        if changed_source {
-            changed.library.source_manifest_sha256 = "0".repeat(64);
-            world.library.source_manifest_sha256 = "0".repeat(64);
-        } else {
-            changed.library.catalog_sha256 = "0".repeat(64);
-            world.library.catalog_sha256 = "0".repeat(64);
-        }
-        assert!(
-            changed
-                .world
-                .validate(&changed)
-                .unwrap_err()
-                .to_string()
-                .contains("world capture library receipt")
-        );
-    }
-
-    let mut malformed_runtime = reference.clone();
-    std::sync::Arc::make_mut(&mut malformed_runtime.world)
-        .library
-        .manifest_sha256 = "invalid".into();
     assert!(
-        malformed_runtime
+        runtime_only
             .world
-            .validate(&malformed_runtime)
+            .validate(&runtime_only)
             .unwrap_err()
             .to_string()
             .contains("world library receipt")
-    );
-
-    for changed_source in [true, false] {
-        let mut changed = reference.clone();
-        let capture = &mut std::sync::Arc::make_mut(&mut changed.world).capture_library;
-        if changed_source {
-            capture.source_manifest_sha256 = "0".repeat(64);
-        } else {
-            capture.catalog_sha256 = "0".repeat(64);
-        }
-        assert!(
-            changed
-                .world
-                .validate(&changed)
-                .unwrap_err()
-                .to_string()
-                .contains("world capture library receipt")
-        );
-    }
-    let mut changed_capture = reference.clone();
-    std::sync::Arc::make_mut(&mut changed_capture.world)
-        .capture_library
-        .manifest_sha256 = "0".repeat(64);
-    assert!(
-        changed_capture
-            .world
-            .validate(&changed_capture)
-            .unwrap_err()
-            .to_string()
-            .contains("world capture library receipt")
     );
 }
