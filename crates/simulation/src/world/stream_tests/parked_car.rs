@@ -1,4 +1,4 @@
-//! A parked start Lada rests: it stays in place and plays no hits.
+//! A parked start Lada rests: it stays in place, plays no hits and sleeps.
 use super::drive_out::frame;
 use super::*;
 use crate::simulation::FIXED_DT;
@@ -42,4 +42,8 @@ fn parked_lada_rests() {
         .sqrt();
     assert!(drift < 0.005, "parked car moved {drift} m");
     assert_eq!(hits, 0, "parked car hits");
+    assert!(
+        run.physics.rapier().bodies[chassis].is_sleeping(),
+        "parked car stays awake"
+    );
 }
