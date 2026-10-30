@@ -34,7 +34,6 @@ Impact is an estimate from the code. No item has F3 numbers yet.
 | 1 | Render bundles for static draws | M-L | Medium-high if CPU bound | Buildings, roads, terrain and parked cars encode the same draws each frame. |
 | 2 | Skip unchanged item visuals | S | Low | The renderer still does a pose lookup and interpolation for every item visual each frame (`src/presentation/reference.rs`, `spawned.rs`). Use the changed pose rows to skip the rest. |
 | 3 | Reuse static shadow cascades | M | Medium if shadow bound | Skip a cascade when its fit and its casters did not change. Start after item 1. |
-| 4 | Warm prop row pipelines before use | M | Removes hitches | A compiling row pipeline makes the whole view wait (`prop_draws.rs`). |
 
 ### Optional quality settings
 
@@ -53,3 +52,4 @@ Rejected: async compute, bindless, Hi-Z occlusion, f16, subgroups, GPU grass, ow
 ## Final test pass
 
 Do on Tomasz's PC after the open items are done: F3 frame time and "GPU ms" before and after each item, in a town and in a grass area.
+Also check that a part condition change, such as rust, shows the new material without a frame freeze. The old material shows until the new pipelines compile.
