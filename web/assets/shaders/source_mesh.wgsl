@@ -8,7 +8,7 @@
     view_transformations::position_world_to_clip,
 }
 
-#import source_view_lighting::{lighting, probe_weight, fog_factor}
+#import source_view_lighting::{lighting, probe_blend, fog_factor}
 #ifdef SOURCE_LAMPS
 #import "shaders/source_lighting.wgsl"::object_light_mask
 #endif
@@ -22,7 +22,8 @@ struct SourceVertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) world_position: vec4<f32>,
     @location(1) world_normal: vec3<f32>,
-    @location(9) @interpolate(flat) source_renderer: vec2<f32>,
+    // x=first probe weight, y=renderer flags, z=first probe slot, w=second probe slot or -1.
+    @location(9) @interpolate(flat) source_renderer: vec4<f32>,
     @location(10) source_fog: f32,
 #ifdef SOURCE_LAMPS
     @location(12) @interpolate(flat) source_lights: vec2<u32>,
@@ -174,7 +175,8 @@ fn vertex(vertex_no_morph: Vertex, @location(8) bounds_center_usage: vec4<f32>, 
 #ifdef SOURCE_TRANSPARENT
     out.position = lighting.clip_from_world * out.world_position;
 #endif
-    out.source_renderer = vec2(probe_weight(world_from_local,bounds_center_usage,bounds_extents_flags),bounds_extents_flags.w);
+    let probes = probe_blend(world_from_local,bounds_center_usage,bounds_extents_flags);
+    out.source_renderer = vec4(probes.x,bounds_extents_flags.w,probes.zw);
 #ifdef SOURCE_LAMPS
     // Authored bounds do not prove the full extent of skinning or morph displacement.
     var bounded = true;

@@ -29,7 +29,7 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | X04c | Rebinding | M | Original action list and default keys. Rebind on the Controls screen. HUD hints show bound keys. |
 | X04d | Languages and help text | M | 10 language files, language dropdown, word table for all menu and HUD text. Help text follows the assists. After X04c. |
 | X06a | Live mirrors | L | Car mirror cameras render to textures. Only the 5 nearest run. FOV and far plane follow distance. Mirrors toggle and Mirror draw distance slider. |
-| X06c | Live reflection probes | M | Only 1 probe is live. Make every building and car probe live, with the 5 s disable distance check and the Reflections toggle. |
+| X06c | Building reflection probes | S | Car probes are live. Check the original building prefabs for realtime `ReflectionProbe`s. Export any as prototype probes. The live probe slots then take them. |
 | X06f | Depth of field and binocular lens | M | Main DoF with focus ray, night clamp and Dof toggle. Binocular DoF, lens distortion and chromatic aberration. |
 | X06g | Heat haze and LUT options | M | Heat haze pass weighted by temperature, old particle heat haze, LUT option (Default, C64, Sepia), grayscale. |
 
@@ -309,3 +309,7 @@ Prepare once:
 9. Stand near 5 or more shadowed lamps: only the 4 nearest cast shadows. No shadow pops when two lamps swap order.
 10. Turn "Lamp shadows" off and on. Reload: the setting stays. Check the F3 cost with it on and off.
 11. Check the page log for "layout requires ... textures": the lamp atlas adds one texture to each surface pipeline.
+12. Park three cars near the garage. Each car body reflects its own surroundings, and the reflections update as the cars and the sun move.
+13. Walk more than 50 m from a car: within 5 s its reflection probe turns off. Walk back: it turns on again within 5 s.
+14. Turn Reflections off: car reflections go away at once. Turn it on: they return. Reload the page: the setting stays.
+15. Check F3 near four cars with Reflections on and off. Live probes render one 64 px cube face each frame.

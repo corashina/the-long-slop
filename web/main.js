@@ -18,6 +18,8 @@ import {installAmbientOcclusion} from './ambient-occlusion.js';
 installAmbientOcclusion(window,()=>localStorage,document.querySelector('#ambient-occlusion'));
 import {installLampShadows} from './lamp-shadows.js';
 installLampShadows(window,()=>localStorage,document.querySelector('#lamp-shadows'));
+import {installReflections} from './reflections.js';
+installReflections(window,()=>localStorage,document.querySelector('#reflections'));
 import {createSettings,installSettingsBridge} from './settings.js';
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
@@ -255,7 +257,7 @@ async function load(){
  const choose=(node,property,value,event)=>{if(node.disabled)return;node[property]=value;node.dispatchEvent(new Event(event));};
  const select=id=>document.querySelector(id);
  const resets={graphics:[()=>choose(sunglasses,'checked',true,'change'),()=>choose(sceneResolution,'value','100','change'),()=>choose(select('#shadow-quality'),'value','0','change'),
-  ()=>choose(select('#grass-quality'),'value','0','change'),()=>choose(select('#motion-blur'),'checked',true,'change'),()=>choose(select('#lamp-shadows'),'checked',true,'change'),()=>choose(select('#antialiasing'),'checked',true,'change'),()=>choose(select('#ambient-occlusion'),'checked',true,'change'),()=>slider.reset()],controls:[()=>drivingSettings.resetMouse()]};
+  ()=>choose(select('#grass-quality'),'value','0','change'),()=>choose(select('#motion-blur'),'checked',true,'change'),()=>choose(select('#lamp-shadows'),'checked',true,'change'),()=>choose(select('#antialiasing'),'checked',true,'change'),()=>choose(select('#ambient-occlusion'),'checked',true,'change'),()=>choose(select('#reflections'),'checked',true,'change'),()=>slider.reset()],controls:[()=>drivingSettings.resetMouse()]};
  menu=createMenu({canvas,appearance,figure,settings,resets,defaultAssists:manifest.driving.default_assists,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,slider,audio,onNewGame:()=>seed.reroll(),onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  feedback=createFeedback(manifest.ui,manifest,settings);
  startup.end('interface');

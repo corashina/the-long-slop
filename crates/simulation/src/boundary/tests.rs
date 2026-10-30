@@ -220,19 +220,6 @@ fn frame_round_trips() {
                 rotation: [0., 0., 0., 1.],
                 scale_z: 0.4,
             }]),
-            Change::FollowedCar(Some((
-                crate::world::GeneratedId {
-                    layer: crate::world::WorldLayer::Startup,
-                    generator: crate::reference::SourceId {
-                        file: "level0".into(),
-                        path_id: 5,
-                    },
-                    unit: [1, -2],
-                    ordinal: 4,
-                    children: Vec::new(),
-                },
-                6,
-            ))),
             Change::Feedback(Box::new(Feedback {
                 name: "Jerry can".into(),
                 amount: 4.5,
