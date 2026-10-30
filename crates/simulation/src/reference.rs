@@ -10,6 +10,8 @@ pub use player::*;
 
 pub mod driving;
 pub use driving::*;
+pub mod settings;
+pub use settings::*;
 
 pub mod audio;
 pub use audio::*;
@@ -750,10 +752,6 @@ pub struct PlayerReference {
     pub carry_max_force: f32,
     pub carry_min_distance: f32,
     pub carry_max_distance: f32,
-    pub obj_move_sensitivity: f32,
-    pub obj_rotation_sensitivity: f32,
-    pub look_sensitivity: [f32; 2],
-    pub scroll_sensitivity: f32,
     pub car_camera: CarCameraReference,
     pub camera_culling_mask: u32,
     /// Source `fpscontroller.pointRange`: pointing ray length.
@@ -920,6 +918,7 @@ pub struct ReferenceManifest {
     pub file_catalog: std::sync::Arc<FileCatalog>,
     pub conditions: ConditionRecord,
     pub driving: DrivingReference,
+    pub settings: SettingsReference,
     pub clothing: ClothingReference,
     pub item_prototypes: Vec<ItemPrototype>,
     pub inventory: InventoryReference,
@@ -1164,6 +1163,7 @@ impl ReferenceManifest {
         }
 
         self.driving.validate()?;
+        self.settings.validate()?;
         require(
             self.assets
                 .iter()
@@ -1751,12 +1751,7 @@ impl ReferenceManifest {
         p.validate_movement()?;
         require(p.camera_culling_mask != 0, "camera culling mask")?;
         require(
-            p.scroll_sensitivity.is_finite() && p.scroll_sensitivity > 0.0,
-            "scroll sensitivity",
-        )?;
-        require(
             finite(&p.carry_anchor_offset)
-                && finite(&p.look_sensitivity)
                 && finite(&[
                     p.carry_min_weight,
                     p.carry_max_weight,
@@ -1766,8 +1761,6 @@ impl ReferenceManifest {
                     p.carry_max_force,
                     p.carry_min_distance,
                     p.carry_max_distance,
-                    p.obj_move_sensitivity,
-                    p.obj_rotation_sensitivity,
                 ])
                 && p.carry_min_weight >= 0.0
                 && p.carry_max_weight > p.carry_min_weight

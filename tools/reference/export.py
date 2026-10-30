@@ -417,10 +417,6 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     (output/'lighting-evidence.json').write_text(json.dumps({'lighting':manifest['lighting'],'render_lighting':manifest['render_lighting'],'byte_checks':source.evidence,'native_engine':native_engine,'fog_setting':source.lighting_fog_evidence,'library':manifest['library']},indent=2,allow_nan=False),encoding='utf-8')
     parameters['controls']={
         'source':{'file':'level0','path_id':16865},
-        'defaults':{'object_move':manifest['player']['obj_move_sensitivity'],'object_rotation':manifest['player']['obj_rotation_sensitivity'],
-            'look_xy':manifest['player']['look_sensitivity'],'foot_fov':manifest['player']['view']['foot_fov_degrees'],'car_fov':manifest['player']['view']['car_fov_degrees'],
-            'keyboard_steering_rate':manifest['driving']['keyboard_steering_rate']},
-        'slider_source_ids':[18564,18972,19178,17280,18711,17625,18360,18191],
         'slider_multiplier_rule':'slidersettingscript.FStart changes zero valueMultipler to one; GetValue returns value * valueMultipler.',
         'carry_minimum_rule':'Distance range derives from the authored carry marker and maxPickupDist offset sphere.',
     }

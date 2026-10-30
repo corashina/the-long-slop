@@ -255,6 +255,11 @@ impl DrivingInput {
         }
     }
 
+    /// Source `FKeySteerSens`: keyboard steer change per second.
+    pub fn set_steering_rate(&mut self, rate: f32) {
+        self.steering_increment = rate * FIXED_DT;
+    }
+
     pub fn clear(&mut self) {
         self.keyboard = DrivingControls::default();
         self.mouse = [0.; 2];

@@ -268,6 +268,7 @@ pub struct InteractionState {
     player_body: Option<RigidBodyHandle>,
     reach: f32,
     action_masks: ActionMasks,
+    /// Source `FMouseSensZ`.
     scroll_sensitivity: f32,
     supplies: HashSet<ItemId>,
     source_supply_emission: HashMap<ItemId, [f32; 2]>,
@@ -294,6 +295,11 @@ struct TankRules {
 }
 
 impl InteractionState {
+    pub fn set_settings(&mut self, settings: crate::reference::PlayerSettings) {
+        self.scroll_sensitivity = settings.scroll;
+        self.mechanisms.scroll_sensitivity = settings.scroll;
+        self.carry.settings = settings;
+    }
     pub fn restore_save(
         &mut self,
         saved: &crate::save::MechanismsSnapshot,
@@ -629,7 +635,7 @@ impl InteractionState {
             player_body: None,
             reach: reference.player.aim_reach,
             action_masks: reference.player.action_masks,
-            scroll_sensitivity: reference.player.scroll_sensitivity,
+            scroll_sensitivity: reference.settings.sliders.scroll.value(),
             supplies: reference
                 .tanks
                 .iter()

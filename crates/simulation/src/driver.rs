@@ -198,6 +198,11 @@ impl SimDriver {
         {
             self.runtime.driving_input.settings = settings;
         }
+        if let Some(settings) = command.player_settings
+            && settings.valid(&reference.settings)
+        {
+            self.runtime.set_player_settings(settings);
+        }
         let frame = command.input;
         if !self.ready || !self.runtime.started || self.runtime.paused {
             self.input.clear();
