@@ -38,7 +38,6 @@ Check F3 in each scenario below. Compare with the frame rate rule.
 
 Known failures on master c0da737f (2026-10-30 browser retest), fix before the next run:
 
-- Save tiles are black: `web/save-screen.js` writes the tile name into the first `span`, which is `.save-thumb`, and deletes the thumbnail.
 - Appearance preview shows only the legs and shoes. The camera framing is wrong for Male and Female.
 - Looking down shows hollow shirt sleeves, floating hands and hollow pant legs. It also shows at normal pitch while walking.
 - Outside the Lada, E on the door handle does not open it. The HUD shows "[LMB]+[Mouse]: Move | [F]: Dismount".
