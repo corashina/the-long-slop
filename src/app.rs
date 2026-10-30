@@ -244,8 +244,10 @@ pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
             presentation::decals::SourceDecalPlugin,
             presentation::world::prototypes::SourcePrototypePlugin,
             presentation::world::pipelines::WorldPipelinePlugin,
-            presentation::outfit_preview::OutfitPreviewPlugin,
+            presentation::figure_stage::FigureStagePlugin,
         ))
+        .init_resource::<presentation::outfit_preview::OutfitPreview>()
+        .init_resource::<presentation::menu_figure::MenuFigure>()
         .init_resource::<presentation::save::CandidateImportedPoses>()
         .init_resource::<presentation::world::SourceWorldVisuals>()
         .init_resource::<presentation::world::instances::SourceInstances>()
@@ -291,6 +293,7 @@ pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
                     presentation::remote_players::sync,
                     presentation::ragdoll::sync,
                     presentation::outfit_preview::sync,
+                    presentation::menu_figure::sync,
                     presentation::sky_traffic::sync,
                     presentation::creatures::sync,
                 )

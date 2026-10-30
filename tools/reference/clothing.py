@@ -98,6 +98,8 @@ def recover_clothing(source,manifest,output):
     result['ragdoll']=recover_ragdoll(source,manifest,output)
     from .appearance_preview import recover_preview
     result['preview']=recover_preview(source)
+    from .menu_figure import recover_menu_figure
+    result['menu_figure']=recover_menu_figure(source)
     return result
 
 
@@ -123,6 +125,8 @@ def validate_clothing(clothing,manifest):
     validate_ragdoll(clothing['ragdoll'],manifest,clothing)
     from .appearance_preview import validate_preview
     validate_preview(clothing['preview'],clothing,manifest)
+    from .menu_figure import validate_menu_figure
+    validate_menu_figure(clothing['menu_figure'],clothing,manifest)
     if len(clothing['wearables'])!=6:raise ValueError('Selected wearable count')
     nodes={n['id']:n for n in manifest['nodes']}
     for w,(pid,root,item,type_index) in zip(clothing['wearables'],FAMILIES,strict=True):
