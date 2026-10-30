@@ -107,6 +107,15 @@ impl GarageRuntime {
             0,
             cigarettes.exhale_particles(),
         );
+        let body = crate::vehicle::to_rapier(area.player.body_pose(&self.physics));
+        out.local(
+            ParticleGroupRow {
+                kind: ParticleGroupRow::HEAT_HAZE,
+                ..Default::default()
+            },
+            self.heat_haze.particles(),
+            body,
+        );
         for effect in 0..reference.small_items.wash_effects.len() {
             let particles = self.stream.cobweb_particles(effect);
             out.owner(ParticleGroupRow::COBWEB, effect, 0, particles);
@@ -191,6 +200,33 @@ impl Rows<'_> {
                 lifetime: p.lifetime,
                 uv_draw: p.uv_draw(),
             }));
+        self.frame.particle_groups.push(group);
+    }
+    /// `particles` are in `space`: the system simulates in its owner space.
+    fn local(
+        &mut self,
+        mut group: ParticleGroupRow,
+        particles: &[ParticleOutput],
+        space: rapier3d::math::Pose,
+    ) {
+        group.start = self.frame.particles.len() as u32;
+        group.count = particles.len() as u32;
+        self.frame.particles.extend(particles.iter().map(|p| {
+            ParticleRow {
+                position: (space.translation
+                    + space.rotation
+                        * rapier3d::math::Vector::from_array(
+                            p.absolute_position.map(|v| v as f32),
+                        ))
+                .to_array(),
+                size: p.size,
+                color: p.color,
+                rotation: p.rotation,
+                age: p.age,
+                lifetime: p.lifetime,
+                uv_draw: p.uv_draw(),
+            }
+        }));
         self.frame.particle_groups.push(group);
     }
     fn fluid(&mut self, mut group: ParticleGroupRow, fluid: &FluidContact) {

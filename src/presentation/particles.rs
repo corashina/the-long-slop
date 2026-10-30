@@ -39,6 +39,10 @@ pub struct ParticleUniform {
     settings: Vec4,
     /// x: soft-particle InvFade (0 off), y: distortion strength scaled (0 off), z: distortion blend, w: bump scale.
     effect: Vec4,
+    /// FX/Glass/Stained BumpDistort: x `_BumpAmt`, y 1 (0 for the other shaders).
+    glass: Vec4,
+    /// `_BumpMap_ST` of the glass shader.
+    bump_st: Vec4,
 }
 impl Default for ParticleUniform {
     fn default() -> Self {
@@ -51,6 +55,8 @@ impl Default for ParticleUniform {
             fog: Vec4::ZERO,
             settings: Vec4::ZERO,
             effect: Vec4::ZERO,
+            glass: Vec4::ZERO,
+            bump_st: Vec4::new(1., 1., 0., 0.),
         }
     }
 }
@@ -78,6 +84,8 @@ enum ParticleShader {
     MobileAdditive,
     /// Particles/Standard Unlit and other `_Color` alpha-blended particles.
     Unlit,
+    /// FX/Glass/Stained BumpDistort: the grab texture offset by `_BumpMap`, times `_MainTex` and `_Color`.
+    StainedBumpDistort,
 }
 impl ParticleShader {
     fn new(name: &str) -> Self {
@@ -85,6 +93,7 @@ impl ParticleShader {
             "Legacy Shaders/Particles/Alpha Blended" => Self::AlphaBlended,
             "Legacy Shaders/Particles/Additive" => Self::Additive,
             "Mobile/Particles/Additive" => Self::MobileAdditive,
+            "FX/Glass/Stained BumpDistort" => Self::StainedBumpDistort,
             _ => Self::Unlit,
         }
     }
@@ -278,6 +287,8 @@ enum Owner {
     },
     /// Player mouth smoke (`fpscontroller.smokeParticle`).
     Exhale,
+    /// `fpscontroller.heatHaze`: the old particle heat haze.
+    HeatHaze,
     /// A washtriggerscript `particleOnDestroy`; the wash effect.
     Cobweb(usize),
 }
@@ -445,10 +456,10 @@ fn add_group(
     let shader = ParticleShader::new(&m.shader.name);
     let legacy = shader.legacy();
     let float = |name: &str| m.floats.get(name).copied().unwrap_or(0.);
+    let glass = shader == ParticleShader::StainedBumpDistort;
     // Particles/Standard Unlit EFFECT_BUMP reads `_GrabTexture` through `_BumpMap`.
-    let bump = (float("_DistortionEnabled") == 1.)
-        .then(|| m.textures.iter().find(|t| t.property == "_BumpMap"))
-        .flatten();
+    let bump_texture = m.textures.iter().find(|t| t.property == "_BumpMap");
+    let bump = bump_texture.filter(|_| float("_DistortionEnabled") == 1. && !glass);
     let tint = match shader {
         ParticleShader::MobileAdditive => [1.; 4],
         _ if legacy => m.colors["_TintColor"],
@@ -472,6 +483,11 @@ fn add_group(
         0.,
     );
     // Source Ultra enables SOFTPARTICLES_ON. Only the legacy shaders compile the fade.
+    if glass {
+        let t = bump_texture.expect("glass particle _BumpMap");
+        uniform.glass = Vec4::new(float("_BumpAmt"), 1., 0., 0.);
+        uniform.bump_st = Vec4::new(t.scale[0], t.scale[1], t.offset[0], t.offset[1]);
+    }
     uniform.effect = Vec4::new(
         if legacy { float("_InvFade") } else { 0. },
         if bump.is_some() {
@@ -482,7 +498,9 @@ fn add_group(
         float("_DistortionBlend"),
         float("_BumpScale"),
     );
-    let bump = bump.map_or_else(|| texture.clone(), |b| image(b.texture));
+    let bump = bump
+        .or(bump_texture.filter(|_| glass))
+        .map_or_else(|| texture.clone(), |b| image(b.texture));
     let mut entities = Vec::with_capacity(count);
     for i in 0..count {
         state.uniforms.push(uniform);
@@ -506,7 +524,7 @@ fn add_group(
                         queue: 3000,
                         additive: false,
                         glass: false,
-                        grab: uniform.effect.y != 0.,
+                        grab: uniform.effect.y != 0. || glass,
                     },
                     Mesh3d(state.mesh.as_ref().unwrap().clone()),
                     MeshMaterial3d(material),
@@ -676,6 +694,15 @@ fn sync_particles(
             Owner::Exhale,
             0,
             &reference.0.small_items.exhale.particle,
+            &lighting,
+            &mut commands,
+            &mut materials,
+        );
+        add_group(
+            &mut state,
+            Owner::HeatHaze,
+            0,
+            &reference.0.small_items.heat_haze,
             &lighting,
             &mut commands,
             &mut materials,
@@ -886,6 +913,7 @@ fn sync_particles(
             Owner::Ember(_) => ember.expect("ember group has its record"),
             Owner::LootTool { tool, .. } => loot_tool_particle(&reference.0, tool, g.source),
             Owner::Exhale => &reference.0.small_items.exhale.particle,
+            Owner::HeatHaze => &reference.0.small_items.heat_haze,
             Owner::Cobweb(effect) => &reference.0.small_items.wash_effects[effect].particle,
         };
         let (fluid, particles) = sim
@@ -968,6 +996,7 @@ fn key(owner: Owner, source: usize) -> ParticleGroupKey {
         Owner::Ember(id) => (ParticleGroupRow::EMBER, id.0, 0, 0),
         Owner::LootTool { item, tool } => (ParticleGroupRow::LOOT_TOOL, item.0, tool as u32, 0),
         Owner::Exhale => (ParticleGroupRow::EXHALE, 0, 0, 0),
+        Owner::HeatHaze => (ParticleGroupRow::HEAT_HAZE, 0, 0, 0),
         Owner::Cobweb(effect) => (ParticleGroupRow::COBWEB, effect as u32, 0, 0),
     };
     ParticleGroupKey {

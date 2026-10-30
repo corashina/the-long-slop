@@ -575,6 +575,7 @@ fn read_input(
     mut sim: ResMut<SimFrameResource>,
     mut drive: ResMut<Drive>,
     mut requests: ResMut<save::SaveRequests>,
+    screen: Res<presentation::screen_effects::ScreenEffects>,
 ) {
     let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Input);
     for json in sim.sandbox.drain(..) {
@@ -669,6 +670,7 @@ fn read_input(
         settings,
         options,
         player_settings,
+        old_heat_haze: screen.old_heat_haze,
         calendar: local_calendar(),
         measure: game_measure_requested(),
         world: std::mem::take(&mut drive.world),

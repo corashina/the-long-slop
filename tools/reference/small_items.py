@@ -173,8 +173,20 @@ def recover_small_items(source, manifest, output) -> dict:
     if key(node) not in node_ids:raise ValueError('level1:80125 smokeParticle node is not exported')
     exhale={'controller':source_id(player),'node':node_ids[key(node)],'max_rate':pd['maxSmokeParticleRate'],
         'charge_speed':pd['smokeParticleChargeSpeed'],'particle':particle(source,system,'mouth_smoke',pd['maxSmokeParticleRate'],output,node)}
+    # fpscontroller.Update: heatHaze.SetActive(BOldHeatHaze). The system simulates in the player root space.
+    haze_object=source.resolve(player,pd['heatHaze'])
+    if haze_object is None or haze_object.type.name!='GameObject':raise ValueError('level1:80125 heatHaze is not GameObject')
+    haze_node=source.transform_for(haze_object)
+    player_node=source.transform_for(source.resolve(player,pd['m_GameObject']))
+    if key(source.resolve(haze_node,source.read(haze_node)['m_Father']))!=key(player_node):raise ValueError('level1:80125 heatHaze is not a player root child')
+    haze_system=component(source,haze_node,'ParticleSystem')
+    haze_data=source.read(haze_system)
+    if haze_data['moveWithTransform']!=0 or not haze_data['prewarm'] or not haze_data['looping']:raise ValueError('Old heat haze is not a local looping prewarm system')
+    if haze_data['ShapeModule']['type']!=0:raise ValueError('Old heat haze shape is not a sphere')
+    managed_evidence(source,['heatHaze.SetActive(settingsscript.s.S.BOldHeatHaze);'])
+    heat_haze=particle(source,haze_system,'old_heat_haze',haze_data['EmissionModule']['rateOverTime']['scalar'],output,player_node)
     return {'spirit_level':spirit_level,'spray_bottle':spray_bottle,'genie_lamp':genie_lamp,'binoculars':binoculars,'start_packs':start_packs,'exhale':exhale,
-        'washes':washes,'wash_effects':wash_effects}
+        'heat_haze':heat_haze,'washes':washes,'wash_effects':wash_effects}
 
 
 def recover_washes(source, manifest, output, lamp):
@@ -238,7 +250,7 @@ def _curve(c):
 
 
 def validate_small_items(record, manifest) -> None:
-    _shape(record,'spirit_level spray_bottle genie_lamp binoculars start_packs exhale washes wash_effects')
+    _shape(record,'spirit_level spray_bottle genie_lamp binoculars start_packs exhale heat_haze washes wash_effects')
     clips={(c['source']['file'],c['source']['path_id']) for c in manifest['audio']['clips']}
     l=record['spirit_level'];_shape(l,'item prototype source bubbles')
     if l['item']!=SPIRIT_LEVEL[0] or len(l['bubbles'])!=3:raise ValueError('Spirit level owner differs')
@@ -269,7 +281,9 @@ def validate_small_items(record, manifest) -> None:
     e=record['exhale'];_shape(e,'controller node max_rate charge_speed particle')
     if e['max_rate']<=0 or e['charge_speed']<=0:raise ValueError('Mouth smoke rates differ')
     _washes(record['washes'],record['wash_effects'],clips)
-    for p in (s['spray'],s['splash'],e['particle'])+tuple(f['particle'] for f in record['wash_effects']):
+    h=record['heat_haze']
+    if [m['shader']['name'] for m in h['materials']]!=['FX/Glass/Stained BumpDistort']:raise ValueError('Old heat haze material differs')
+    for p in (s['spray'],s['splash'],e['particle'],h)+tuple(f['particle'] for f in record['wash_effects']):
         if not p['materials'] or 'InitialModule.startLifetime' not in p['curves']:raise ValueError('Small item particle data missing')
 
 

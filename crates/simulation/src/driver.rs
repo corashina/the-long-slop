@@ -201,6 +201,7 @@ impl SimDriver {
         {
             self.runtime.driving_input.settings = settings;
         }
+        self.runtime.old_heat_haze = command.old_heat_haze;
         if let Some(settings) = command.player_settings
             && settings.valid(&reference.settings)
         {
