@@ -178,9 +178,13 @@ impl WorldStream {
                 present(*item)
                     && (spawned.contains(*item) || active.iter().any(|c| c.item == Some(*item)))
             }
-            BreakKind::Lamp { parent, control } => lamps
-                .iter()
-                .any(|b| b.control == *control && &b.parent == parent),
+            // Lamp bindings can outlive their structure for a step after a far move.
+            BreakKind::Lamp { parent, control } => {
+                lamps
+                    .iter()
+                    .any(|b| b.control == *control && &b.parent == parent)
+                    && structures.iter().any(|s| &s.placement.id == parent)
+            }
             BreakKind::Prop { parent } => structures.iter().any(|s| &s.placement.id == parent),
         });
         // A content item whose world prototype holds a breakablescript without a lamp.
