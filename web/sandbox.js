@@ -1,9 +1,11 @@
+import {parseSeed} from './game-mode.js';
 // Test sandbox of `?sandbox`. Claude runs the ROADMAP test pass with it in the browser.
-// URL flag `date=MM-DD` applies at page load. Each call resolves with its reply.
+// URL flags `date=MM-DD` and `seed=N` apply at page load. Each call resolves with its reply.
+// New games use seed 42 unless `seed` is set, so test coordinates find the same world.
 export function readSandbox(search){
  const params=new URLSearchParams(search);if(!params.has('sandbox'))return null;
  const date=/^(\d\d)-(\d\d)$/.exec(params.get('date')??'');
- return {calendar:date?Number(date[1])*100+Number(date[2]):null};
+ return {calendar:date?Number(date[1])*100+Number(date[2]):null,seed:parseSeed(params.get('seed')??'42')};
 }
 // Source `fluidenum` indices. Other fluids go by number.
 const FLUIDS={petrol:0,diesel:5};

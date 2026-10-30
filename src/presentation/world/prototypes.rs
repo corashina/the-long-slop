@@ -58,22 +58,6 @@ impl Plugin for SourcePrototypePlugin {
     }
 }
 impl SourcePrototypes {
-    pub(crate) fn owns_mesh(
-        &self,
-        id: bevy::asset::AssetId<Mesh>,
-        assets: &Assets<SourceGltf>,
-    ) -> bool {
-        self.entries.iter().any(|entry| {
-            let handle = match &entry.state {
-                State::Loading { asset, .. } => asset,
-                State::Ready(loaded) if Arc::strong_count(loaded) == 1 => &loaded.asset,
-                _ => return false,
-            };
-            assets
-                .get(handle)
-                .is_some_and(|asset| asset.meshes.iter().any(|mesh| mesh.id() == id))
-        })
-    }
     pub fn cancel(&mut self) {
         for e in &mut self.entries {
             e.retired = true;
@@ -130,60 +114,6 @@ impl SourcePrototypes {
         self.entries
             .iter()
             .all(|e| matches!(e.state, State::Ready(_)))
-    }
-    pub fn shared_bytes(&self) -> (usize, usize) {
-        self.entries
-            .iter()
-            .filter(|e| matches!(&e.state, State::Ready(loaded) if Arc::strong_count(loaded)>1))
-            .fold((0, 0), |n, e| (n.0 + e.cpu, n.1 + e.gpu))
-    }
-    pub fn fork(
-        &self,
-        stream: &RendererWorld,
-        ledger: &mut PresentationLedger,
-        facts: &mut crate::world::RendererFacts,
-    ) -> Result<Self, ReferenceError> {
-        if !self.settled() {
-            return Err(ReferenceError("Source prototype loads are pending".into()));
-        }
-        let session = stream.frame().request.session;
-        let control_cpu = control_bytes::<Entry>(
-            self.entries.len(),
-            self.entries.iter().map(|e| e.source.file.len()).sum(),
-            self.entries.len(),
-            0,
-        );
-        let mut allocation = ledger.allocation();
-        allocation.prototype_cpu += control_cpu;
-        ledger.set_allocation(allocation)?;
-        let mut copy = Self {
-            entries: Vec::with_capacity(self.entries.len()),
-            retired_sources: Vec::with_capacity(self.entries.len()),
-            control_cpu,
-            accounted_session: session,
-            ..default()
-        };
-        for e in &self.entries {
-            let State::Ready(_) = &e.state else {
-                unreachable!()
-            };
-            facts.push(crate::world::RendererFact::HoldPrototype(e.source.clone()));
-            facts.push(crate::world::RendererFact::BindPrototype(e.source.clone()));
-            copy.entries.push(Entry {
-                source: e.source.clone(),
-                session,
-                request: e.request,
-                retired: false,
-                cpu: e.cpu,
-                gpu: e.gpu,
-                staging: 0,
-                state: e.state.fork_ready().unwrap(),
-                lods: e.lods.clone(),
-                nodes: e.nodes.clone(),
-            });
-        }
-        copy.account(stream, ledger)?;
-        Ok(copy)
     }
 
     pub fn request(

@@ -139,20 +139,6 @@ impl GrassJobs {
             }
         }
     }
-    pub(crate) fn cancel(&mut self) {
-        // Keep every charge until release_all drops this canceled presentation.
-        self.worker.dispose();
-        for instance in &self.instances {
-            if let Some(continuation) = &instance.continuation {
-                continuation.stop_flight();
-            }
-        }
-    }
-    pub(crate) fn drained(&self) -> bool {
-        self.instances
-            .iter()
-            .all(|i| i.continuation.as_ref().is_none_or(|c| c.drained()))
-    }
     pub fn settled(&self) -> bool {
         self.instances
             .iter()

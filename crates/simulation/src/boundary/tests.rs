@@ -260,14 +260,8 @@ fn frame_round_trips() {
                 payload: "{}".into(),
                 error: String::new(),
             },
-            Change::Restarted,
         ],
         world: crate::world::WorldDelta::default(),
-        candidate: Some(Box::new(SimFrame {
-            seq_consumed: 2,
-            changes: vec![Change::Failure("candidate".into())],
-            ..Default::default()
-        })),
     };
     let mut bytes = Vec::new();
     encode(&frame, &mut bytes);
@@ -313,17 +307,12 @@ fn command_round_trips() {
     command.world.lamps = LampAdmission::Pending;
     command.save = vec![
         SaveCommand::Request {
-            json: r#"{"id":1,"kind":"Prepare"}"#.into(),
+            json: r#"{"id":1,"kind":"PrepareNewGame"}"#.into(),
             mode: crate::world::GameMode::default(),
             epoch: 3,
         },
         SaveCommand::Cancel(1),
     ];
-    command.candidate = Some(CandidateCommand {
-        shared: [1, 2],
-        fixed: [3, 4],
-        ..Default::default()
-    });
     command.listener = Some([1., 2., 3.]);
     let mut bytes = Vec::new();
     encode_command(&command, &mut bytes);
@@ -485,18 +474,11 @@ fn pose_stream_sends_changed_rows_only() {
     frame.previous.push(row(4.));
     frame.current.push(row(4.));
     frame.items.push(ItemRow::default());
-    frame.candidate = Some(Box::new(SimFrame {
-        previous: vec![row(5.)],
-        current: vec![row(5.)],
-        items: vec![ItemRow::default()],
-        ..Default::default()
-    }));
     encoder.encode(&frame, &mut bytes);
     decode(&bytes, &mut decoded).unwrap();
     assert_eq!(decoded, frame);
     assert_eq!(decoded.current[1].position[0].to_bits(), (-0f32).to_bits());
 
-    frame.candidate = None;
     encoder.encode(&frame, &mut bytes);
     assert!(bytes.len() < whole, "an unchanged frame sends no pose rows");
     decode(&bytes, &mut decoded).unwrap();

@@ -232,6 +232,8 @@ pub struct SimInit {
     pub draw_distance: f32,
     /// SHA-256 of the manifest bytes. The saves carry it.
     pub manifest_sha256: String,
+    /// JSON of the save that the simulation starts from. Empty: the garage of a new game.
+    pub save: Vec<u8>,
 }
 
 /// Renderer setup values of a new simulation.
@@ -374,10 +376,6 @@ impl StateBlock {
     pub const OTHER_VIEW: u32 = 1 << 9;
     /// The storage startup frames are done.
     pub const STORAGE_READY: u32 = 1 << 10;
-    /// The simulation has a save candidate.
-    pub const CANDIDATE: u32 = 1 << 13;
-    /// A save candidate restored its saved links.
-    pub const RESTORED: u32 = 1 << 11;
     /// The world has no generation jobs and no pending work.
     pub const WORLD_IDLE: u32 = 1 << 12;
     /// The other view is the drop cam.
@@ -847,6 +845,8 @@ impl ParticleGroupRow {
     pub const FOOD: u32 = 15;
     /// A loot tool: `a` is the item, `b` the `conditions.prototype_tools` index.
     pub const LOOT_TOOL: u32 = 16;
+    /// fpscontroller `heatHaze`: the old particle heat haze.
+    pub const HEAT_HAZE: u32 = 17;
     /// Car systems in `a`.
     pub const CAR_EXHAUST: u32 = 0;
     /// Wheel effects: source is wheel * 8 + system (0 dust, 1.. grass).
@@ -960,8 +960,6 @@ pub enum Change {
         payload: String,
         error: String,
     },
-    /// The prepared candidate replaced the runtime. A new frame stream starts with this frame.
-    Restarted,
 }
 
 /// Local rotation and z scale of one home cable rope.
@@ -1027,8 +1025,6 @@ pub struct SimFrame {
     pub changes: Vec<Change>,
     /// Changes of the renderer world copy.
     pub world: crate::world::WorldDelta,
-    /// The frame of the save candidate.
-    pub candidate: Option<Box<SimFrame>>,
 }
 
 impl SimFrame {
@@ -1039,7 +1035,6 @@ impl SimFrame {
         self.structures.clear();
         self.changes.clear();
         self.world = Default::default();
-        self.candidate = None;
     }
     pub fn valve(&self, opening: OpeningId) -> f32 {
         self.valves
@@ -1071,6 +1066,8 @@ pub struct SimCommand {
     /// Changed game options. They apply at once, also while paused.
     pub options: Option<crate::world::GameOptions>,
     pub player_settings: Option<crate::reference::PlayerSettings>,
+    /// Source `BOldHeatHaze`.
+    pub old_heat_haze: bool,
     /// Local month and day.
     pub calendar: [u8; 2],
     /// The browser asks for a world measurement.
@@ -1078,8 +1075,6 @@ pub struct SimCommand {
     pub world: WorldCommand,
     /// Save requests, in order.
     pub save: Vec<SaveCommand>,
-    /// Renderer input of the next candidate step. `None`: the candidate waits.
-    pub candidate: Option<CandidateCommand>,
     /// Camera position of the last rendered frame.
     pub listener: Option<[f32; 3]>,
     /// Test sandbox commands of the `?sandbox` page, as one JSON array.
@@ -1111,29 +1106,8 @@ pub struct WorldCommand {
     /// Camera views that select required content. Empty: no complete camera view.
     pub views: Vec<crate::world::RequiredView>,
     pub lamps: LampAdmission,
-    /// A save request hides the world. The world step waits.
-    pub freeze: bool,
     /// A renderer failure. The world stops.
     pub failure: Option<String>,
-}
-
-/// Renderer input of one save candidate step.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct CandidateCommand {
-    pub world: WorldCommand,
-    /// Prototype bytes that the candidate renderer shares with the active renderer: CPU, GPU.
-    pub shared: [usize; 2],
-    /// Fixed asset bytes that both renderers share: CPU, GPU.
-    pub fixed: [usize; 2],
-}
-
-impl CandidateCommand {
-    /// Adds a later command.
-    pub fn merge(&mut self, next: Self) {
-        self.world.merge(next.world);
-        self.shared = next.shared;
-        self.fixed = next.fixed;
-    }
 }
 
 /// Lamps the renderer admitted in its last step.
@@ -1159,7 +1133,6 @@ impl WorldCommand {
         if next.lamps != LampAdmission::Same {
             self.lamps = next.lamps;
         }
-        self.freeze = next.freeze;
         self.failure = self.failure.take().or(next.failure);
     }
 }
@@ -1190,13 +1163,6 @@ impl SimCommand {
         self.measure |= next.measure;
         self.world.merge(next.world);
         self.save.extend(next.save);
-        self.candidate = match (self.candidate.take(), next.candidate) {
-            (Some(mut candidate), Some(next)) => {
-                candidate.merge(next);
-                Some(candidate)
-            }
-            (candidate, next) => next.or(candidate),
-        };
         self.listener = next.listener.or(self.listener);
     }
 }
@@ -1370,14 +1336,6 @@ fn write(frame: &SimFrame, out: &mut Vec<u8>, encoder: Option<&mut FrameEncoder>
     put_list(out, &frame.audio);
     put(out, &frame.changes);
     put(out, &frame.world);
-    match &frame.candidate {
-        // The renderer moves each decoded candidate frame away, so the candidate stream is whole.
-        Some(candidate) => {
-            out.push(1);
-            write(candidate, out, None);
-        }
-        None => out.push(0),
-    }
 }
 
 /// Reads `bytes` into `frame`, reusing its arrays.
@@ -1425,12 +1383,7 @@ fn read(rest: &mut &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     take_list(rest, &mut frame.audio)?;
     frame.changes = take_value(rest)?;
     frame.world = take_value(rest)?;
-    if take(rest, 1)?[0] == 1 {
-        read(rest, frame.candidate.get_or_insert_default())
-    } else {
-        frame.candidate = None;
-        Ok(())
-    }
+    Ok(())
 }
 
 fn put_rows<T: Pod>(out: &mut Vec<u8>, rows: &[T]) {

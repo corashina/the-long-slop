@@ -363,6 +363,10 @@ impl ParticleState {
         self.elapsed = 0.;
         self.remainder = 0.;
     }
+    /// Removes every live particle.
+    pub fn clear(&mut self) {
+        self.particles.clear();
+    }
     pub fn reset_emitter(&mut self) {
         self.last_emitter = None;
     }

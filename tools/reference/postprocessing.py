@@ -95,6 +95,18 @@ def recover_postprocessing(source):
         raise ValueError('Binocular vignette mask is missing')
     depth_of_field, lens = recover_depth_of_field(source, profile_reader)
     filtering = p(exposure, 'filtering')
+    # postprocesscontrol on the main camera. Update picks the LDR LUT and the day and night saturation.
+    control_reader, control = read('level1', 80667)
+    luts = {}
+    for name, field in (('c64', 'LutC64'), ('sepia', 'LutSepia')):
+        lut = source.resolve(control_reader, control[field])
+        if lut is None or lut.type.name != 'Texture2D':
+            raise ValueError(f'Source {field} is missing')
+        lut_data = source.read(lut)
+        # Lut2DBaker LutGenLDR requires a strip with width = height * height.
+        if lut_data['m_Width'] != lut_data['m_Height'] ** 2 or lut_data['m_ColorSpace'] != 0:
+            raise ValueError(f'Source {field} is not a linear LUT strip')
+        luts[name] = source_id(lut)
     return {
         'main_layer': source_id(layer_reader),
         'stop_nan': bool(layer['stopNaNPropagation']),
@@ -123,8 +135,48 @@ def recover_postprocessing(source):
                        'color': [p(vignette, 'color')[c] for c in ('r', 'g', 'b', 'a')],
                        'opacity': p(vignette, 'opacity'), 'mask': source_id(mask), **lens},
         'depth_of_field': depth_of_field,
-        'heat_haze_weight': 0.,
+        'saturation': {'day': control['daySaturation'], 'night': control['nightSaturation']},
+        'luts': luts,
+        'heat_haze': recover_heat_haze(source),
     }
+
+
+def recover_heat_haze(source):
+    """The main camera `postprocessingscript` with `Custom/heathazeshader`.
+
+    camscript.FUpd enables it with BHeatHaze. napszakvaltakozas sets `_Weight` from the temperature.
+    """
+    from .source import key, source_id
+    camera = source.get('level1', 40241)
+    haze_reader = source.get('level1', 68652)
+    haze = source.read(haze_reader)
+    if key(source.resolve(haze_reader, haze['m_GameObject'])) != key(source.resolve(camera, source.read(camera)['m_GameObject'])):
+        raise ValueError('Source heat haze is not on the main camera')
+    if not haze['m_Enabled'] or not haze['depthText']:
+        raise ValueError('Source heat haze script state changed')
+    material_reader = source.resolve(haze_reader, haze['M'])
+    material = source.read(material_reader)
+    if key(source.resolve(material_reader, material['m_Shader'])) != ('globalgamemanagers.assets', 18):
+        raise ValueError('Source heat haze shader changed')
+    cycle_reader = source.get('level1', 64920)
+    cycle = source.read(cycle_reader)
+    if key(source.resolve(cycle_reader, cycle['Mheathaze'])) != key(material_reader):
+        raise ValueError('Source heat haze weight material differs')
+    props = material['m_SavedProperties']
+    floats = dict(props['m_Floats'])
+    colors = dict(props['m_Colors'])
+    noise = source.resolve(material_reader, dict(props['m_TexEnvs'])['_Noise']['m_Texture'])
+    if noise is None or noise.type.name != 'Texture2D':
+        raise ValueError('Source heat haze noise is missing')
+    def vector(name):
+        return [colors[name][c] for c in ('r', 'g', 'b', 'a')]
+    return {'material': source_id(material_reader), 'noise': source_id(noise),
+            'temperature': [cycle['heatHazeTempMin'], cycle['heatHazeTempMax']],
+            'min_dist': floats['_MinDist'], 'distance_m': floats['_DistanceM'],
+            'up_speed': [floats['_UpSpeed'], floats['_UpSpeed2']], 'up_strength': floats['_UpStrength'],
+            'up_offset_scale': vector('_UpOffsetScale'),
+            'down_speed': [floats['_DownSpeed'], floats['_DownSpeed2']], 'down_strength': floats['_DownStrength'],
+            'down_offset_scale': vector('_DownOffsetScale')}
 
 
 # postprocesscontrol.Update: the focus ray, the night clamp and `dof.enabled = BDof`.

@@ -34,14 +34,7 @@ pub struct ConsumableVisuals {
     pub warmed: bool,
 }
 
-impl ConsumableVisuals {
-    pub(crate) fn reset(&mut self, world: &mut World) {
-        self.generation = self.generation.wrapping_add(1);
-        for (_, instance) in self.instances.drain() {
-            world.despawn(instance.root);
-        }
-    }
-}
+impl ConsumableVisuals {}
 
 #[derive(serde::Deserialize)]
 struct Identity {

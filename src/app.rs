@@ -1,4 +1,5 @@
 pub(crate) use simulation::cpu_profile;
+mod frame_limit;
 mod performance;
 pub(crate) mod save;
 mod sim_link;
@@ -201,7 +202,8 @@ pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
         })
         .insert_resource(ClearColor(Color::BLACK))
         .init_resource::<crate::render_scale::SceneScaleSetting>()
-        .add_systems(PreUpdate, (update_scene_scale, update_frame_limit))
+        .add_systems(Startup, frame_limit::keep_proxy)
+        .add_systems(PreUpdate, (update_scene_scale, frame_limit::update))
         .init_resource::<presentation::shadow_quality::ShadowQuality>()
         .add_systems(PreUpdate, presentation::shadow_quality::poll)
         .add_plugins(presentation::source_io::SourceIoPlugin::new(
@@ -252,7 +254,6 @@ pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
         ))
         .init_resource::<presentation::outfit_preview::OutfitPreview>()
         .init_resource::<presentation::menu_figure::MenuFigure>()
-        .init_resource::<presentation::save::CandidateImportedPoses>()
         .init_resource::<presentation::world::SourceWorldVisuals>()
         .init_resource::<presentation::world::instances::SourceInstances>()
         .init_resource::<presentation::computer::ComputerScreens>()
@@ -376,25 +377,6 @@ fn setup(
         drive.startup.far_plane,
         *antialiasing,
     );
-}
-
-/// Source `Application.targetFrameRate`: timed updates at the limit, or every browser frame.
-fn update_frame_limit(mut winit: ResMut<bevy::winit::WinitSettings>) {
-    let Some(limit) = game_frame_limit() else {
-        return;
-    };
-    let mode = if limit > 0. {
-        bevy::winit::UpdateMode::Reactive {
-            wait: std::time::Duration::from_secs_f32(1. / limit),
-            react_to_device_events: false,
-            react_to_user_events: false,
-            react_to_window_events: false,
-        }
-    } else {
-        bevy::winit::UpdateMode::Continuous
-    };
-    winit.focused_mode = mode;
-    winit.unfocused_mode = mode;
 }
 
 fn update_scene_scale(
@@ -577,6 +559,7 @@ fn read_input(
     mut sim: ResMut<SimFrameResource>,
     mut drive: ResMut<Drive>,
     mut requests: ResMut<save::SaveRequests>,
+    screen: Res<presentation::screen_effects::ScreenEffects>,
 ) {
     let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Input);
     for json in sim.sandbox.drain(..) {
@@ -671,11 +654,11 @@ fn read_input(
         settings,
         options,
         player_settings,
+        old_heat_haze: screen.old_heat_haze,
         calendar: local_calendar(),
         measure: game_measure_requested(),
         world: std::mem::take(&mut drive.world),
         save: requests.take_commands(),
-        candidate: requests.candidate_command(),
         listener: drive.listener,
         // A pending save drops the input, so the commands wait in the browser.
         sandbox: if hold { None } else { game_sandbox_take() },
@@ -711,13 +694,11 @@ fn select_world_views(
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
     sim: Res<SimFrameResource>,
-    requests: Res<save::SaveRequests>,
     views: Res<presentation::view_frame::SourceViewFrame>,
     mut required_views: Local<Option<crate::world::RequiredViews>>,
     epoch: Res<presentation::view_frame::SourceSceneEpoch>,
 ) {
     let drive = &mut *drive;
-    drive.world.freeze = requests.freezes_world();
     drive.world.views.clear();
     let state = &sim.frame.state;
     let Some(first) = world_snapshot(&views, &epoch, state.session) else {
@@ -755,7 +736,6 @@ fn prepare_world(
     mut drive: ResMut<Drive>,
     mut sim: ResMut<SimFrameResource>,
     mut presentation: presentation::world::runtime::WorldPresentation,
-    requests: Res<save::SaveRequests>,
     camera: Query<(&Projection, &Transform), With<DriveCamera>>,
     views: Res<presentation::view_frame::SourceViewFrame>,
     epoch: Res<presentation::view_frame::SourceSceneEpoch>,
@@ -763,9 +743,6 @@ fn prepare_world(
 ) {
     let drive = &mut *drive;
     drive.world_ms = sim.frame.state.perf.world_ms;
-    if requests.freezes_world() {
-        return;
-    }
     let Ok((projection, camera_transform)) = camera.single() else {
         return;
     };
@@ -859,21 +836,10 @@ pub(crate) fn sync_imported(
         Without<BodyVisual>,
     >,
     time: Res<Time<Real>>,
-    mut caps: Query<
-        (&mut CapVisual, &mut Transform),
-        (
-            Without<BodyVisual>,
-            Without<ItemVisual>,
-            Without<presentation::save::HiddenWorld>,
-        ),
-    >,
+    mut caps: Query<(&mut CapVisual, &mut Transform), (Without<BodyVisual>, Without<ItemVisual>)>,
     mut visibility: Query<
         (&ValveVisibility, &mut Visibility),
-        (
-            Without<BodyVisual>,
-            Without<ItemVisual>,
-            Without<presentation::save::HiddenWorld>,
-        ),
+        (Without<BodyVisual>, Without<ItemVisual>),
     >,
 ) {
     presentation::reference::sync(&frame, &mut query);
@@ -894,11 +860,7 @@ fn sync_instances(
     mut drive: ResMut<Drive>,
     mut sim: ResMut<SimFrameResource>,
     mut presentation: presentation::world::runtime::WorldPresentation,
-    requests: Res<save::SaveRequests>,
 ) {
-    if requests.freezes_world() {
-        return;
-    }
     if let Err(error) = presentation.sync_instances(&reference.0, &mut sim) {
         game_failure(&error.to_string());
         drive.world.failure.get_or_insert(error.to_string());
@@ -925,26 +887,10 @@ fn fill_frame(
         }
     }
     fill(drive, &mut frame);
-    // After a restart the world changes belong to the candidate copy. The commit applies them.
-    if !restarted(&frame.frame) {
-        allocation.apply_world(&reference.0.world, &frame.frame.world);
-    }
-}
-/// The prepared candidate replaced the runtime in this frame.
-pub(crate) fn restarted(frame: &simulation::boundary::SimFrame) -> bool {
-    frame
-        .changes
-        .iter()
-        .any(|c| matches!(c, simulation::boundary::Change::Restarted))
+    allocation.apply_world(&reference.0.world, &frame.frame.world);
 }
 /// Applies the changes of the new frame.
 fn fill(drive: &mut Drive, frame: &mut SimFrameResource) {
-    if restarted(&frame.frame) {
-        // A new frame stream: drop the pose index and the tables of the old runtime.
-        let next = std::mem::take(&mut frame.frame);
-        *frame = SimFrameResource::default();
-        frame.frame = next;
-    }
     drive.view = drive.look.camera(&frame.frame);
     let current = frame.frame.state.look.position[1];
     drive.view_offset = std::array::from_fn(|i| drive.view.position[i] - current[i]);

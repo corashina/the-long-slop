@@ -263,7 +263,7 @@ extern "C" {
     /// Pending `PlayerSettings` JSON, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gamePlayerSettings)]
     pub fn game_player_settings() -> Option<String>;
-    /// Pending frame limit in frames per second, or none. 0 is no limit.
+    /// Pending frame limit in frames per second, or none. 0 is no limit. `web/frame-pacer.js` paces the frames.
     #[wasm_bindgen(js_namespace = window, js_name = gameFrameLimit)]
     pub fn game_frame_limit() -> Option<f32>;
     /// Pending `Outfit` JSON, or none.
@@ -293,6 +293,9 @@ extern "C" {
     /// Pending "Sunglasses effects" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameSunglassesEffects)]
     pub fn game_sunglasses_effects() -> Option<bool>;
+    /// Pending `ScreenEffects` JSON, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameScreenEffects)]
+    pub fn game_screen_effects() -> Option<String>;
     /// Pending "Lamp shadows" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameLampShadows)]
     pub fn game_lamp_shadows() -> Option<bool>;

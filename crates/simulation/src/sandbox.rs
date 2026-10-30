@@ -429,6 +429,11 @@ fn state(runtime: &GarageRuntime, reference: &ReferenceManifest, radius: f32) ->
             .iter()
             .map(|b| (b.name.to_owned(), json!([b.used, b.limit])))
             .collect::<serde_json::Map<_, _>>(),
+        // Renderer asset CPU: [used, credit]. Credit above use goes back on a reclaim.
+        "renderer_asset_cpu": [
+            runtime.stream.presentation_used().prototype_cpu,
+            runtime.stream.presentation_credit().prototype_cpu,
+        ],
         "player_gap": gap(runtime.area.player.focus_position(&runtime.physics)),
         "seated": runtime.area.player.seated(),
         "cycle": runtime.lighting.cycle.capture_save().cycle_seconds,

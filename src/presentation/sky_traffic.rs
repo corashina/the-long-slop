@@ -32,14 +32,7 @@ pub struct SkyTrafficVisuals {
     generation: u64,
 }
 
-impl SkyTrafficVisuals {
-    pub(crate) fn reset(&mut self, world: &mut World) {
-        self.generation = self.generation.wrapping_add(1);
-        for (_, instance) in self.instances.drain() {
-            world.despawn(instance.root);
-        }
-    }
-}
+impl SkyTrafficVisuals {}
 
 #[derive(serde::Deserialize)]
 struct Identity {

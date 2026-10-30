@@ -25,7 +25,7 @@ struct Params {
     gain: Vec4,
     slice: UVec4,
 }
-fn color_balance(temperature: f32, tint: f32) -> [f32; 3] {
+pub(super) fn color_balance(temperature: f32, tint: f32) -> [f32; 3] {
     let t = temperature / 60.;
     let tint = tint / 60.;
     let x = 0.3127099871635437
@@ -47,7 +47,7 @@ fn color_balance(temperature: f32, tint: f32) -> [f32; 3] {
         1.087280035018921 / s,
     ]
 }
-fn trackball(value: [f32; 4], scale: f32, kind: usize) -> [f32; 3] {
+pub(super) fn trackball(value: [f32; 4], scale: f32, kind: usize) -> [f32; 3] {
     let v = value.map(|x| x * scale);
     let lum = (v[0] * 0.2125999927520752 + v[1] * 0.7152000069618225) + v[2] * 0.0722000002861023;
     let offset = if kind == 0 { v[3] } else { v[3] + 1. };

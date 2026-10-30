@@ -21,6 +21,8 @@ struct Params {
     distortion_center: Vec4,
     /// Chromatic aberration amount, binoculars, distortion. 0 is off.
     lens: Vec4,
+    /// LDR `_Lut2D_Params`.
+    strip: Vec4,
 }
 pub struct MainInputs<'a> {
     pub bloom: &'a TextureView,
@@ -29,12 +31,15 @@ pub struct MainInputs<'a> {
     pub dirt_extent: [u32; 2],
     pub vignette_mask: &'a TextureView,
     pub lut: &'a TextureView,
+    /// The LDR grading strip.
+    pub strip: &'a TextureView,
     pub sample_scale: f32,
 }
 pub struct UberPass {
     uniform: UniformBuffer<Params>,
     bindings: Vec<BindGroup>,
-    pipeline: CachedRenderPipelineId,
+    /// HDR then LDR grading, each for the world target and for the single-sample heat haze input.
+    pipelines: [CachedRenderPipelineId; 4],
     sequence: DitherSequence,
     pending: Option<DitherSequence>,
     extent: [u32; 2],
@@ -86,40 +91,47 @@ impl UberPass {
                         10,
                         texture_2d(TextureSampleType::Float { filterable: true }),
                     ),
+                    (
+                        11,
+                        texture_2d(TextureSampleType::Float { filterable: true }),
+                    ),
                 ),
             )
             .to_vec(),
         );
         let layout = BindGroupLayoutDescriptor::new("source_uber", &entries);
-        let pipeline = previous.as_ref().map_or_else(
+        let pipelines = previous.as_ref().map_or_else(
             || {
-                cache.queue_render_pipeline(RenderPipelineDescriptor {
-                    label: Some("source_uber".into()),
-                    layout: vec![layout.clone()],
-                    vertex: VertexState {
-                        shader: shader.clone(),
-                        entry_point: Some("vertex".into()),
+                [(false, samples), (false, 1), (true, samples), (true, 1)].map(|(ldr, count)| {
+                    let mut shader_defs = vec!["SOURCE_UBER_MAIN".into()];
+                    if ldr {
+                        shader_defs.push("SOURCE_UBER_LDR".into());
+                    }
+                    cache.queue_render_pipeline(RenderPipelineDescriptor {
+                        label: Some("source_uber".into()),
+                        layout: vec![layout.clone()],
+                        vertex: VertexState {
+                            shader: shader.clone(),
+                            entry_point: Some("vertex".into()),
+                            ..default()
+                        },
+                        fragment: Some(FragmentState {
+                            shader: shader.clone(),
+                            entry_point: Some("uber".into()),
+                            shader_defs,
+                            targets: vec![Some(ColorTargetState {
+                                format: TextureFormat::Rgba16Float,
+                                blend: None,
+                                write_mask: ColorWrites::ALL,
+                            })],
+                            ..default()
+                        }),
+                        multisample: MultisampleState { count, ..default() },
                         ..default()
-                    },
-                    fragment: Some(FragmentState {
-                        shader,
-                        entry_point: Some("uber".into()),
-                        shader_defs: vec!["SOURCE_UBER_MAIN".into()],
-                        targets: vec![Some(ColorTargetState {
-                            format: TextureFormat::Rgba16Float,
-                            blend: None,
-                            write_mask: ColorWrites::ALL,
-                        })],
-                        ..default()
-                    }),
-                    multisample: MultisampleState {
-                        count: samples,
-                        ..default()
-                    },
-                    ..default()
+                    })
                 })
             },
-            |old| old.pipeline,
+            |old| old.pipelines,
         );
         let mut params = Params {
             extent: Vec4::new(
@@ -137,6 +149,7 @@ impl UberPass {
             distortion: Vec4::ZERO,
             distortion_center: Vec4::ZERO,
             lens: Vec4::ZERO,
+            strip: super::lut_ldr::STRIP_PARAMS,
         };
         // LensDistortionRenderer.Render.
         let d = record.binoculars.distortion;
@@ -230,6 +243,7 @@ impl UberPass {
                         (8, input.lut),
                         (9, &repeat),
                         (10, input.vignette_mask),
+                        (11, input.strip),
                     ))
                     .to_vec(),
                 );
@@ -243,7 +257,7 @@ impl UberPass {
         Ok(Self {
             uniform,
             bindings,
-            pipeline,
+            pipelines,
             sequence: previous.map_or_else(DitherSequence::default, |old| old.sequence),
             pending: None,
             extent,
@@ -274,10 +288,12 @@ impl UberPass {
         }
     }
     pub fn ready(&self, cache: &PipelineCache) -> bool {
-        cache.get_render_pipeline(self.pipeline).is_some()
+        self.pipelines
+            .iter()
+            .all(|p| cache.get_render_pipeline(*p).is_some())
     }
     pub fn failure(&self, cache: &PipelineCache) -> Option<String> {
-        pipeline_failure(cache, &[self.pipeline])
+        pipeline_failure(cache, &self.pipelines)
     }
     pub fn encode(
         &mut self,
@@ -288,6 +304,8 @@ impl UberPass {
         output: &TextureView,
         resolve: Option<&TextureView>,
         exposure_index: usize,
+        ldr: bool,
+        single_sample: bool,
     ) -> bool {
         if !self.ready(cache) || exposure_index > 1 {
             return false;
@@ -311,7 +329,8 @@ impl UberPass {
             color_attachments: &colors,
             ..default()
         });
-        pass.set_pipeline(cache.get_render_pipeline(self.pipeline).unwrap());
+        let pipeline = self.pipelines[usize::from(ldr) * 2 + usize::from(single_sample)];
+        pass.set_pipeline(cache.get_render_pipeline(pipeline).unwrap());
         pass.set_bind_group(0, &self.bindings[exposure_index * 64 + index], &[]);
         pass.draw(0..3, 0..1);
         true

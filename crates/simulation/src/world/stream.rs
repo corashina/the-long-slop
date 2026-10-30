@@ -49,7 +49,7 @@ pub struct WorldRequest {
     pub player: [f64; 3],
     pub vehicle: [f64; 3],
 }
-/// Renderer-owned allocations, including accepted/pending overlap and loader staging.
+/// Renderer-owned allocations, including loader staging.
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PresentationAllocation {
     pub grass_worker_wasm_bytes: usize,
@@ -328,7 +328,6 @@ pub struct WorldStream {
     pub distances: super::DrawDistances,
     limits: super::stream_limits::StreamLimits,
     presentation: PresentationAllocation,
-    overlap: WorldMetrics,
     dependency_staging_reserve: usize,
     dependency_metadata: usize,
     /// Fields that own work waited for this step, as `Reclaim` bits.
@@ -971,7 +970,6 @@ impl WorldStream {
             structure_helpers,
             building_components: Default::default(),
             presentation: PresentationAllocation::default(),
-            overlap: WorldMetrics::default(),
             dependency_staging_reserve: 0,
             dependency_metadata: 0,
             reclaim: std::sync::atomic::AtomicU8::new(0),
@@ -1096,41 +1094,6 @@ impl WorldStream {
         })
     }
 
-    /// Takes the other world use. Growth that fits only without unused renderer credit
-    /// waits: the old use stays, and the renderer gives back that credit.
-    pub fn set_overlap(&mut self, overlap: WorldMetrics) -> Result<(), ReferenceError> {
-        let previous = std::mem::replace(&mut self.overlap, overlap);
-        let Err(error) = self.set_presentation_allocation(self.presentation) else {
-            return Ok(());
-        };
-        let used = self.presentation.zip(self.presentation_used, usize::min);
-        let mut fields = 0;
-        let credit = self.presentation_budgets(self.presentation);
-        for (index, (credit, used)) in credit
-            .iter()
-            .zip(self.presentation_budgets(used))
-            .enumerate()
-        {
-            if credit.used <= credit.limit {
-                continue;
-            }
-            let field = match index {
-                2 => Reclaim::PROTOTYPE_CPU,
-                5 => Reclaim::PENDING,
-                6 | 7 => Reclaim::STAGING,
-                9 => Reclaim::JOBS,
-                _ => 0,
-            };
-            if field == 0 || used.used > used.limit {
-                self.overlap = previous;
-                return Err(error);
-            }
-            fields |= field;
-        }
-        self.overlap = previous;
-        self.wait_for_room(false, fields);
-        Ok(())
-    }
     pub(crate) fn set_presentation_allocation(
         &mut self,
         next: PresentationAllocation,
@@ -1213,9 +1176,7 @@ impl WorldStream {
     fn presentation_room(&self) -> PresentationAllocation {
         let budgets = self.presentation_budgets(self.presentation);
         let free = |i: usize| (budgets[i].limit as usize).saturating_sub(budgets[i].used as usize);
-        let pending = MAX_PENDING
-            .saturating_sub(self.pending_work() + self.overlap.pending_work)
-            .min(free(5));
+        let pending = MAX_PENDING.saturating_sub(self.pending_work()).min(free(5));
         let jobs = if self.initial_generation_ready {
             free(9)
         } else {
@@ -1267,10 +1228,8 @@ impl WorldStream {
             .pending_work
             .saturating_sub(old.pending)
             .saturating_add(next.pending);
-        let staging =
-            next.staging_bytes + self.generation_pending_bytes() + self.overlap.pending_bytes;
+        let staging = next.staging_bytes + self.generation_pending_bytes();
         let jobs = next.jobs
-            + self.overlap.generation_jobs
             + usize::from(self.terrain_execution.has_pending())
             + usize::from(self.road_work.is_some())
             + usize::from(self.contents.has_replay());
@@ -1375,11 +1334,7 @@ impl WorldStream {
         )
     }
     pub(crate) fn available_dependency_staging_bytes(&self) -> usize {
-        STAGING.saturating_sub(
-            self.presentation.staging_bytes
-                + self.generation_pending_bytes()
-                + self.overlap.pending_bytes,
-        )
+        STAGING.saturating_sub(self.presentation.staging_bytes + self.generation_pending_bytes())
     }
     pub fn dependency_staging_configured(&self) -> bool {
         self.dependency_staging_reserve != 0
@@ -1423,8 +1378,7 @@ impl WorldStream {
     pub(crate) fn can_request_independent(&self, claims: usize) -> bool {
         let fits = self
             .pending_work()
-            .checked_add(self.overlap.pending_work)
-            .and_then(|count| count.checked_add(claims))
+            .checked_add(claims)
             .is_some_and(|count| count <= MAX_PENDING);
         self.wait_for_room(fits, Reclaim::PENDING)
     }
@@ -1442,7 +1396,6 @@ impl WorldStream {
         }
         let free = 2usize.saturating_sub(
             self.presentation.jobs
-                + self.overlap.generation_jobs
                 + usize::from(self.terrain_execution.has_pending())
                 + usize::from(self.road_work.is_some())
                 + usize::from(self.contents.has_replay()),
@@ -1491,7 +1444,6 @@ impl WorldStream {
                 "terrain": self.terrain_execution.has_pending(),
                 "road": self.road_work.is_some(),
                 "replays": self.replay_roots.len(),
-                "overlap": self.overlap.pending_work,
             },
             "terrain": self.terrain_execution.has_pending(),
             "contents": self.contents.has_replay(),
@@ -1557,6 +1509,10 @@ impl WorldStream {
     /// Renderer credit: the renderer share of the budgets.
     pub fn presentation_credit(&self) -> PresentationAllocation {
         self.presentation
+    }
+    /// Renderer use of the last report.
+    pub fn presentation_used(&self) -> PresentationAllocation {
+        self.presentation_used
     }
     fn bind_prototype(&mut self, source: &SourceId) -> Result<(), ReferenceError> {
         let bound = self.prototype_holds.get_mut(source).ok_or_else(|| {
@@ -1777,8 +1733,7 @@ impl WorldStream {
             return;
         }
         while !self.initial_generation_ready {
-            let slots =
-                2usize.saturating_sub(self.presentation.jobs + self.overlap.generation_jobs);
+            let slots = 2usize.saturating_sub(self.presentation.jobs);
             let before = (
                 self.roads.prepared_segments(),
                 self.placements.prepared_buildings(),
@@ -2204,8 +2159,8 @@ impl WorldStream {
             return;
         }
         self.failure = Some(format!(
-            "Source building metadata exceeds prototype CPU budget: used {used} of {PROTOTYPE_CPU} bytes, renderer {} bytes, other world {} bytes",
-            self.presentation.prototype_cpu, self.overlap.prototype_cpu_bytes,
+            "Source building metadata exceeds prototype CPU budget: used {used} of {PROTOTYPE_CPU} bytes, renderer {} bytes",
+            self.presentation.prototype_cpu,
         ));
     }
     fn refresh_poles(&mut self) {
@@ -4254,10 +4209,9 @@ impl WorldStream {
                 return Ok(());
             }
             return Err(ReferenceError(format!(
-                "Source collision recipe exceeds prototype CPU budget: recipe {} bytes, used {used} of {PROTOTYPE_CPU} bytes, renderer {} bytes, other world {} bytes",
+                "Source collision recipe exceeds prototype CPU budget: recipe {} bytes, used {used} of {PROTOTYPE_CPU} bytes, renderer {} bytes",
                 bytes + owner_bytes,
                 self.presentation.prototype_cpu,
-                self.overlap.prototype_cpu_bytes,
             )));
         }
         let recipe = super::StructureRecipe::new(&self.reference, prototype)?;
@@ -5162,7 +5116,6 @@ impl WorldStream {
                 .map(|(_, s)| s.heap_bytes())
                 .sum::<usize>();
         let mut metrics = WorldMetrics {
-            shared_input_cpu_bytes: self.shared_cpu_bytes.unwrap_or(0) + self.dependency_metadata,
             road_worker_wasm_bytes: self.road_worker.wasm_bytes(),
             road_worker_reserved_bytes: self.road_worker_reserved_bytes,
             grass_worker_wasm_bytes: self.presentation.grass_worker_wasm_bytes,
@@ -5517,21 +5470,6 @@ impl WorldStream {
                     .map(|(id, _)| id.file.capacity())
                     .sum::<usize>();
         }
-        metrics.road_worker_wasm_bytes += self.overlap.road_worker_wasm_bytes;
-        metrics.road_worker_reserved_bytes += self.overlap.road_worker_reserved_bytes;
-        metrics.grass_worker_wasm_bytes += self.overlap.grass_worker_wasm_bytes;
-        metrics.grass_worker_cache_bytes += self.overlap.grass_worker_cache_bytes;
-        metrics.grass_worker_reserved_bytes += self.overlap.grass_worker_reserved_bytes;
-        metrics.road_worker_cache_bytes += self.overlap.road_worker_cache_bytes;
-        metrics.active_cpu_bytes += self.overlap.active_cpu_bytes;
-        metrics.active_gpu_bytes += self.overlap.active_gpu_bytes;
-        metrics.prototype_cpu_bytes += self.overlap.prototype_cpu_bytes;
-        metrics.prototype_gpu_bytes += self.overlap.prototype_gpu_bytes;
-        metrics.pending_bytes += self.overlap.pending_bytes;
-        metrics.pending_work += self.overlap.pending_work;
-        metrics.generation_jobs += self.overlap.generation_jobs;
-        metrics.generated_objects += self.overlap.generated_objects;
-        metrics.checkpoint_bytes += self.overlap.checkpoint_bytes;
         metrics
     }
 }

@@ -10,13 +10,13 @@ function fakeWorker(){
 
 test('start moves the manifest and resolves with the startup bytes',async()=>{
  const worker=fakeWorker(),simulation=createSimulation(worker,()=>assert.fail());
- const manifest=new Uint8Array([1,2]),started=simulation.start(manifest,'hash',2500,1,-1,7,2);
+ const manifest=new Uint8Array([1,2]),save=new Uint8Array([3]),started=simulation.start(manifest,'hash',2500,1,-1,7,2,save);
  const {data,transfer}=worker.posted[0];
- assert.deepEqual({...data.start,manifest:undefined},{manifest:undefined,hash:'hash',drawDistance:2500,biome:1,startCar:-1,seed:7,options:2});
- assert.equal(transfer[0],manifest.buffer);
+ assert.deepEqual({...data.start,manifest:undefined,save:undefined},{manifest:undefined,hash:'hash',drawDistance:2500,biome:1,startCar:-1,seed:7,options:2,save:undefined});
+ assert.deepEqual(transfer,[manifest.buffer,save.buffer]);
  const startup=new Uint8Array([9]);
- worker.reply({startup});
- assert.equal(await started,startup);
+ worker.reply({startup,loadError:'bad save'});
+ assert.deepEqual(await started,{startup,loadError:'bad save'});
 });
 
 test('a command is copied, its frame is read once, and stats reset',()=>{
@@ -40,7 +40,7 @@ test('a command is copied, its frame is read once, and stats reset',()=>{
 
 test('a worker failure fails once, rejects the start and drops later frames',async()=>{
  const worker=fakeWorker(),failures=[],simulation=createSimulation(worker,message=>failures.push(message));
- const started=simulation.start(new Uint8Array(1),'',0,0,-1);
+ const started=simulation.start(new Uint8Array(1),'',0,0,-1,0,0,new Uint8Array());
  worker.reply({error:'boom'});
  worker.fail('stopped');
  await assert.rejects(started,/boom/);
@@ -56,4 +56,13 @@ test('the frame reports input use to the profile hooks',()=>{
  simulation.hooks({inputConsumed:()=>calls.push('consumed'),clearInput:()=>calls.push('clear')});
  worker.reply({frame:new Uint8Array(1),tickMs:1,wasmBytes:1,inputConsumed:true,clearInput:true});
  assert.deepEqual(calls,['clear','consumed']);
+});
+
+test('a net session before the start waits for it',async()=>{
+ const worker=fakeWorker(),simulation=createSimulation(worker,()=>assert.fail());
+ const started=simulation.start(new Uint8Array(1),'',0,0,-1,0,0,new Uint8Array());
+ simulation.netSession(2,1,()=>{});simulation.netPacket(new Uint8Array([1]));simulation.netLeave(3);
+ assert.equal(worker.posted.length,1);
+ worker.reply({startup:new Uint8Array([9])});await started;
+ assert.deepEqual(worker.posted[1].data,{netSession:{role:2,slot:1}});
 });

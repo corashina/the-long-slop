@@ -751,6 +751,9 @@ pub struct GarageRuntime {
     pub urine: crate::interaction::fluid_contact::FluidContact,
     urine_reference: crate::reference::FluidParticleReference,
     urine_emission: [f32; 2],
+    heat_haze: crate::heat_haze::OldHeatHaze,
+    /// Source `BOldHeatHaze`. The driver sets it.
+    pub old_heat_haze: bool,
     sleep_camera: Option<crate::sleep::SleepCamera>,
     /// Source `otherView()`: a seated outside view, drop cam or map view shows. The driver sets it.
     pub other_view: bool,
@@ -937,6 +940,8 @@ impl GarageRuntime {
             urine,
             urine_reference,
             urine_emission: [0.; 2],
+            heat_haze: crate::heat_haze::OldHeatHaze::new(&reference.small_items.heat_haze),
+            old_heat_haze: false,
             ambient: crate::audio::AmbientState::new(&reference.ambient),
             horror: crate::horror::HorrorSound::new(seed as u64),
             food_particles: crate::food_particles::FoodParticles::new(
@@ -1785,6 +1790,8 @@ impl GarageRuntime {
             .expect("persistent world bindings");
         self.advance_light_fades(reference, FIXED_DT);
         self.advance_cigarettes();
+        self.heat_haze
+            .step(self.old_heat_haze, FIXED_DT, &self.physics);
         self.food_particles
             .advance(FIXED_DT, self.stream.origin.offset, &self.physics);
         self.advance_needs(reference, FIXED_DT, factors.need_scale);

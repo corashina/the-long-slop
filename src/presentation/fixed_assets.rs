@@ -303,10 +303,6 @@ impl SourceFixedAssets {
             && self.cookie_receipt.completed()
             && self.shaders_bound
     }
-    pub fn shared_bytes(&self) -> (usize, usize) {
-        let a = self.allocation().expect("admitted fixed ownership totals");
-        (a.cpu, a.gpu)
-    }
     fn allocation(&self) -> Result<FixedAllocation, ReferenceError> {
         let mut a = FixedAllocation {
             cpu: self.control,
@@ -902,7 +898,9 @@ impl SourceFixedAssets {
                 caster_math: shader("shaders/source_caster_math.wgsl"),
                 bloom: shader("shaders/source_bloom.wgsl"),
                 lut: shader("shaders/source_lut.wgsl"),
+                lut_ldr: shader("shaders/source_lut_ldr.wgsl"),
                 uber: shader("shaders/source_uber.wgsl"),
+                heat_haze: shader("shaders/source_heat_haze.wgsl"),
                 ao_depth: shader("shaders/source_ao_depth.wgsl"),
                 ao_render: shader("shaders/source_ao_render.wgsl"),
                 ao_upsample: shader("shaders/source_ao_upsample.wgsl"),
