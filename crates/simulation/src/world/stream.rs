@@ -1129,7 +1129,10 @@ impl WorldStream {
             && self.ready_structures.is_empty();
         if let Err(error) = self.set_presentation_allocation(covered) {
             self.presentation = credit;
-            self.failure.get_or_insert(error.0);
+            self.failure.get_or_insert(format!(
+                "{} Renderer asset CPU: use {} bytes, credit {} bytes.",
+                error.0, report.used.prototype_cpu, credit.prototype_cpu,
+            ));
         }
         self.presentation_cover = self.presentation_cover.zip(
             covered.zip(credit, usize::saturating_sub),
