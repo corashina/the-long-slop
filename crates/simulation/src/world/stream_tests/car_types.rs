@@ -517,6 +517,15 @@ fn garage_start_car_drives_in_automatic() {
             !run.physics.body_active(chassis),
             body.translation().y,
         );
+        for (a, b, _, joint) in world.impulse_joints.attached_joints(chassis) {
+            let other = if a == chassis { b } else { a };
+            eprintln!(
+                "joint: {other:?} type {:?} at {:?} locked {:?}",
+                world.bodies[other].body_type(),
+                world.bodies[other].translation(),
+                joint.data.locked_axes,
+            );
+        }
         for pair in world.narrow_phase.contact_pairs() {
             let parent = |c: rapier3d::prelude::ColliderHandle| world.colliders[c].parent();
             let other = if parent(pair.collider1) == Some(chassis) {
