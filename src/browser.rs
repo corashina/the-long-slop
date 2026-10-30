@@ -252,6 +252,9 @@ extern "C" {
     /// Pending `Outfit` JSON, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameOutfit)]
     pub fn game_outfit() -> Option<String>;
+    /// "Antialiasing" setting at page load.
+    #[wasm_bindgen(js_namespace = window, js_name = gameAntialiasing)]
+    pub fn game_antialiasing() -> bool;
     /// Pending "Sunglasses effects" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameSunglassesEffects)]
     pub fn game_sunglasses_effects() -> Option<bool>;

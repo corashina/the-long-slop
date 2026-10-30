@@ -1,3 +1,4 @@
+pub mod antialiasing;
 pub mod camera;
 pub mod camera_projection;
 mod candidate_upload;

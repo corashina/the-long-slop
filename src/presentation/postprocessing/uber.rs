@@ -44,6 +44,7 @@ impl UberPass {
         source: &TextureView,
         noise: [&TextureView; 64],
         extent: [u32; 2],
+        samples: u32,
         record: &PostprocessingRecord,
         input: MainInputs<'_>,
         previous: Option<Self>,
@@ -105,7 +106,7 @@ impl UberPass {
                         ..default()
                     }),
                     multisample: MultisampleState {
-                        count: crate::presentation::render_targets::MSAA_SAMPLES,
+                        count: samples,
                         ..default()
                     },
                     ..default()
@@ -249,7 +250,7 @@ impl UberPass {
         queue: &RenderQueue,
         cache: &PipelineCache,
         output: &TextureView,
-        resolve: &TextureView,
+        resolve: Option<&TextureView>,
         exposure_index: usize,
     ) -> bool {
         if !self.ready(cache) || exposure_index > 1 {
@@ -263,7 +264,7 @@ impl UberPass {
         let colors = [Some(RenderPassColorAttachment {
             view: output,
             depth_slice: None,
-            resolve_target: Some(resolve),
+            resolve_target: resolve.map(|view| &**view),
             ops: Operations {
                 load: LoadOp::Load,
                 store: StoreOp::Store,

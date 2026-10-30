@@ -258,6 +258,7 @@ fn prepare(
             &shaders,
             surfaces.targets.views[0].depth.sampled.as_ref().unwrap(),
             extent,
+            colors.samples,
             record,
             previous.as_mut().and_then(|old| old.ao.take()),
         )?;
@@ -271,6 +272,7 @@ fn prepare(
             &textures,
             colors.resolved.sampled.as_ref().unwrap(),
             extent,
+            colors.samples,
             record,
             &assets.record.0.clothing.dead_profile,
             &assets.record.0.clothing.glasses_profiles,
@@ -343,7 +345,7 @@ fn encode_ao(
         &queue,
         &cache,
         targets.0.colors.attachment(),
-        targets.0.colors.resolve_target().unwrap(),
+        targets.0.colors.resolve_target(),
         snapshot.near,
         snapshot.far,
         snapshot.implicit_projection.x_axis.x,
@@ -392,7 +394,7 @@ fn encode_post(
             binoculars: input.binoculars,
         },
         targets.colors.attachment(),
-        targets.colors.resolve_target().unwrap(),
+        targets.colors.resolve_target(),
     );
     match encoded {
         Ok(true) => {

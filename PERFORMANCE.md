@@ -17,7 +17,7 @@ Add only items that increase render FPS or remove hitches. Remove an item when i
 - The worker sends only changed pose rows. The renderer interpolates poses.
 - Physics steps at 50 Hz, at most 2 steps per frame (`STEP_BUDGET` in `crates/simulation/src/simulation.rs`).
 - Terrain tiles and grass meshes are built in their own workers.
-- WebGPU is the only renderer. MSAA is 4x. No TAA, motion blur or camera-depth pass.
+- WebGPU is the only renderer. MSAA is 4x. The "Antialiasing" setting turns it off after a reload (`src/presentation/antialiasing.rs`). No TAA, motion blur or camera-depth pass.
 - World props draw through the own GPU path: compute cull and indirect draws (`src/presentation/prop_draws.rs`). Each view pass runs its prop draws as one render bundle. The bundle records again only when its commands change.
 - Shadow cascades 0 and 1 render each frame, 2 and 3 every 2nd and 4th frame (`crates/simulation/src/reference/shadow_cadence.rs`).
 - Release build: fat LTO, simd128, wasm-opt -O3.
@@ -44,7 +44,6 @@ The default stays as now. Each item adds one menu option.
 | --- | --- | --- | --- | --- |
 | 5 | More scene scale steps or auto scale | S-M | High if GPU bound | Only 100% and 75% exist (`crates/simulation/src/render_scale.rs`). |
 | 6 | Shadow atlas size option | S | Medium-high if GPU bound | 4096x4096 at 1080p and above (`source_atlas_size`). |
-| 7 | MSAA off option | S | Medium on weak GPUs | The code supports 1 sample. |
 | 8 | AO quality option | M | Medium on weak GPUs | Multi-scale AO at full resolution. |
 | 9 | Grass density and distance option | S | Medium in grass areas | |
 
@@ -53,4 +52,4 @@ Rejected: async compute, bindless, Hi-Z occlusion, f16, subgroups, GPU grass, ow
 ## Final test pass
 
 Do on Tomasz's PC after the open items are done: F3 frame time and "GPU ms" before and after each item, in a town and in a grass area.
-- Prop render bundles: no WebGPU errors in the console. Props and their shadows draw as before, also after a scene scale or MSAA change.
+- Prop render bundles: no WebGPU errors in the console. Props and their shadows draw as before, also with Antialiasing off.

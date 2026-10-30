@@ -4,7 +4,7 @@ use super::{
     lighting_scene::{PROBE_COUNT, SourceSceneLighting},
     materials::MaterialLoading,
     readiness::RendererStateHandle,
-    render_targets::{HDR_FORMAT, MSAA_SAMPLES, ProbeTargets, SurfaceTargets},
+    render_targets::{HDR_FORMAT, ProbeTargets, SurfaceTargets},
     source_lighting::SourceViewLighting,
     stained_glass::{GlassViewUniform, SourceGlassView},
     surface_graph::SurfaceViewTargets,
@@ -67,10 +67,11 @@ impl SurfaceResources {
         queue: &RenderQueue,
         width: u32,
         height: u32,
+        samples: u32,
         atlas: u32,
     ) -> Result<Self, String> {
         Ok(Self {
-            targets: SurfaceTargets::new(device, width, height, atlas)?,
+            targets: SurfaceTargets::new(device, width, height, samples, atlas)?,
             probes: std::array::from_fn(|_| ProbeTargets::new(device, queue)),
             probe_sampler: device.create_sampler(&SamplerDescriptor {
                 label: Some("source_probe_sampler"),
@@ -112,10 +113,12 @@ pub(crate) fn prepare_views(
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
     status: Res<RendererStateHandle>,
+    antialiasing: Res<super::antialiasing::Antialiasing>,
 ) {
     if status.failure().is_some() {
         return;
     }
+    let samples = antialiasing.samples();
     let (Some(assets), Some(scene), Some(capacity)) = (
         assets,
         scene.0,
@@ -132,7 +135,7 @@ pub(crate) fn prepare_views(
             || view.target_format != HDR_FORMAT
             || msaa.samples()
                 != if source.index < WORLD_VIEWS {
-                    MSAA_SAMPLES
+                    samples
                 } else {
                     1
                 }
@@ -177,7 +180,7 @@ pub(crate) fn prepare_views(
             // Window resize does not invalidate the fixed-resolution published probe.
             match existing
                 .targets
-                .resize_world(&device, main.x, main.y, atlas)
+                .resize_world(&device, main.x, main.y, samples, atlas)
             {
                 Ok(()) => {}
                 Err(error) => {
@@ -186,7 +189,7 @@ pub(crate) fn prepare_views(
                 }
             }
         } else {
-            match SurfaceResources::new(&device, &queue, main.x, main.y, atlas) {
+            match SurfaceResources::new(&device, &queue, main.x, main.y, samples, atlas) {
                 Ok(value) => {
                     commands.insert_resource(value);
                 }
