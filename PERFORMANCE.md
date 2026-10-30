@@ -55,9 +55,9 @@ Not measured in a browser unless the row says so.
 
 | Change | PR |
 | --- | --- |
-| Body descendant node lists are built once per prototype, not per moved body per frame | this PR |
-| Release build uses fat LTO | this PR |
-| Survival and sleep HUD write to the DOM only on change | this PR |
+| Body descendant node lists are built once per prototype, not per moved body per frame | #273 |
+| Release build uses fat LTO | #273 |
+| Survival and sleep HUD write to the DOM only on change | #273 |
 | Simulation in a Web Worker (tested on PC 2026-10-27) | #153-#211 |
 | Own GPU prop path: compute cull, indirect draws | #122 |
 | Flat prop entities | #120 |
