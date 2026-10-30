@@ -188,6 +188,7 @@ impl StartingArea {
         let player = PlayerState::new(
             &reference.player,
             &reference.clothing.pose,
+            crate::reference::PlayerSettings::defaults(&reference.settings),
             VehiclePose {
                 position: std::array::from_fn(|i| spawn.translation[i] - origin[i] as f32),
                 rotation: spawn.rotation,
@@ -792,6 +793,8 @@ pub struct GarageRuntime {
     pub wheels: crate::interaction::wheels::WheelAssemblies,
     crash: crate::crash::CrashState,
     pub driving_input: crate::simulation::input::DrivingInput,
+    /// The browser settings. A candidate runtime takes them on commit.
+    pub player_settings: crate::reference::PlayerSettings,
     recovery_bodies: Vec<RigidBodyHandle>,
     /// Simulation time of the next under-map check.
     under_map_check: f64,
@@ -814,6 +817,12 @@ pub struct GarageRuntime {
 }
 
 impl GarageRuntime {
+    pub fn set_player_settings(&mut self, settings: crate::reference::PlayerSettings) {
+        self.player_settings = settings;
+        self.area.player.set_settings(settings);
+        self.area.interaction.set_settings(settings);
+        self.driving_input.set_steering_rate(settings.key_steer);
+    }
     pub fn set_driving_assists(
         &mut self,
         mut requested: crate::reference::DrivingAssists,
@@ -973,10 +982,11 @@ impl GarageRuntime {
             wheels,
             crash: Default::default(),
             driving_input: crate::simulation::input::DrivingInput::new(
-                reference.driving.keyboard_steering_rate,
+                reference.settings.sliders.key_steer.value(),
                 reference.driving.pedal_rate,
                 crate::simulation::input::DrivingSettings::defaults(&reference.driving),
             ),
+            player_settings: crate::reference::PlayerSettings::defaults(&reference.settings),
             recovery_bodies: Vec::with_capacity(reference.items.len()),
             recovery_held_bodies: Vec::with_capacity(reference.items.len()),
             under_map_check: 0.,

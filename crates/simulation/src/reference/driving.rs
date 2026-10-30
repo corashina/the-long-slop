@@ -41,8 +41,6 @@ pub struct DrivingBinding {
 pub struct DrivingReference {
     pub source: SourceId,
     pub pedal_rate: f32,
-    /// Settings steering slider value: keyboard steer change per second.
-    pub keyboard_steering_rate: f32,
     pub force_manual: bool,
     pub min_motor_torque_nm: f32,
     pub default_assists: DrivingAssists,
@@ -174,12 +172,8 @@ impl DrivingReference {
             "driving settings source",
         )?;
         require(
-            finite(&[
-                self.pedal_rate,
-                self.keyboard_steering_rate,
-                self.min_motor_torque_nm,
-            ]) && self.pedal_rate > 0.0
-                && self.keyboard_steering_rate > 0.0
+            finite(&[self.pedal_rate, self.min_motor_torque_nm])
+                && self.pedal_rate > 0.0
                 && self.min_motor_torque_nm >= 0.0,
             "driving parameters",
         )?;
