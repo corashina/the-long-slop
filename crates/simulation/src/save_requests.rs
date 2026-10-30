@@ -202,31 +202,31 @@ impl SimDriver {
                     .ok_or_else(|| invalid("Missing draw distance"))?
                     as f32;
                 let runtime = &self.runtime;
-                if request.kind == "PrepareNewGame"
-                    && !runtime.started
-                    && runtime.stream.mode() == mode
-                    && runtime
-                        .distances
-                        .matches(&reference.world.draw_distance, draw_distance)
-                {
+                // A new game starts the garage world. The browser reloads the page for a
+                // started game or another game mode, so the garage has the new mode.
+                if request.kind == "PrepareNewGame" {
+                    if runtime.started
+                        || runtime.stream.mode() != mode
+                        || !runtime
+                            .distances
+                            .matches(&reference.world.draw_distance, draw_distance)
+                    {
+                        return Err(invalid("New game needs a garage in its game mode"));
+                    }
                     let permit = FreshSessionPermit::prepare(request.id, runtime, epoch)?;
                     self.save.prepared = Some(Prepared::Fresh(permit));
                     return Ok(Some(request.id.to_string()));
                 }
-                let mut runtime = if request.kind == "Prepare" {
-                    let saved = payload.get("save").ok_or_else(|| invalid("Missing save"))?;
-                    let saved = SaveSnapshot::deserialize(saved)
-                        .map_err(|error| SaveError::CorruptData(error.to_string()))?;
-                    GarageRuntime::from_save(
-                        reference,
-                        &self.save.source,
-                        &saved,
-                        mode,
-                        draw_distance,
-                    )?
-                } else {
-                    GarageRuntime::new(reference, mode, draw_distance)?
-                };
+                let saved = payload.get("save").ok_or_else(|| invalid("Missing save"))?;
+                let saved = SaveSnapshot::deserialize(saved)
+                    .map_err(|error| SaveError::CorruptData(error.to_string()))?;
+                let mut runtime = GarageRuntime::from_save(
+                    reference,
+                    &self.save.source,
+                    &saved,
+                    mode,
+                    draw_distance,
+                )?;
                 runtime.set_game_options(self.runtime.options);
                 runtime.started = true;
                 runtime.paused = true;

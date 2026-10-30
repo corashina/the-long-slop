@@ -33,9 +33,9 @@ export function installGameOptions(target,toggles,settings,changed=()=>{}){
  target.gameOptions=()=>{const bits=pending;pending=null;return bits??undefined;};
  return {bits:()=>optionBits(v)};
 }
-// The menu rolls a new seed at each start, as `mainmenuscript.Start`.
-export function installSeed(target,input,random=Math.random){
- let seed=randomSeed(random);input.value=String(seed);
+// The menu rolls a new seed at each start, as `mainmenuscript.Start`. `initial` is the seed of a new game reload.
+export function installSeed(target,input,random=Math.random,initial=randomSeed(random)){
+ let seed=initial;input.value=String(seed);
  input.addEventListener('change',()=>{seed=parseSeed(input.value);input.value=String(seed);});
  target.gameSeed=()=>seed;
  return {reroll(){seed=randomSeed(random);input.value=String(seed);}};

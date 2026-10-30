@@ -6,7 +6,11 @@ installShadowQuality(window,()=>localStorage,document.querySelector('#shadow-qua
 import {installGrassQuality} from './grass-quality.js';
 installGrassQuality(window,()=>localStorage,document.querySelector('#grass-quality'));
 import {gameFields,installGameMode,installGameOptions,installSeed,installStartCar} from './game-mode.js';
-const seed=installSeed(window,document.querySelector('#seed'));
+// New game reloads the page with its seed, as the source loads the game scene again.
+// The garage then starts in the menu game mode, and the new game takes it.
+const NEW_GAME_KEY='tls-new-game';
+const newGameSeed=(()=>{try{const v=Number(sessionStorage.getItem(NEW_GAME_KEY)??NaN);sessionStorage.removeItem(NEW_GAME_KEY);return Number.isInteger(v)?v:undefined;}catch{return undefined;}})();
+const seed=installSeed(window,document.querySelector('#seed'),Math.random,newGameSeed);
 import {installSunglassesEffects} from './sunglasses.js';
 import {installScreenEffects} from './screen-effects.js';
 installScreenEffects(window,()=>localStorage,{heatHaze:document.querySelector('#heat-haze'),oldHeatHaze:document.querySelector('#old-heat-haze'),lut:document.querySelector('#lut'),grayscale:document.querySelector('#grayscale')});
@@ -246,7 +250,15 @@ async function load(){
  mirrors.range(manifest.world.mirrors.draw_distance);
  // The simulation parses its own manifest copy while this thread loads the interface.
  worldDrawDistance=slider.value();
- const simulationStarted=simulation.start(bytes.slice(),manifestHash,worldDrawDistance,window.gameBiome(),window.gameStartCar(),window.gameSeed(),gameOptions.bits());
+ const garageMode=[worldDrawDistance,window.gameBiome(),window.gameStartCar(),window.gameSeed()];
+ const simulationStarted=simulation.start(bytes.slice(),manifestHash,...garageMode,gameOptions.bits());
+ // False: the garage is the new game world.
+ const reloadNewGame=started=>{
+  const mode=[slider.value(),window.gameBiome(),window.gameStartCar(),window.gameSeed()];
+  if(!started&&mode.every((v,i)=>v===garageMode[i]))return false;
+  try{sessionStorage.setItem(NEW_GAME_KEY,String(window.gameSeed()));}catch{}
+  location.reload();return true;
+ };
  simulationStarted.catch(()=>{});
  fetched({path:'assets/reference/manifest.json',requiredBytes:bytes.byteLength,receivedBytes:bytes.byteLength});
  startup.build({sourceBuildId:manifest.build_id,manifestSha256:manifestHash,wasm:'release'});
@@ -273,7 +285,7 @@ async function load(){
  const select=id=>document.querySelector(id);
  const resets={graphics:[()=>choose(sunglasses,'checked',true,'change'),()=>choose(select('#heat-haze'),'checked',true,'change'),()=>choose(select('#old-heat-haze'),'checked',false,'change'),()=>choose(select('#lut'),'value','default','change'),()=>choose(select('#grayscale'),'checked',false,'change'),()=>choose(sceneResolution,'value','100','change'),()=>choose(select('#shadow-quality'),'value','0','change'),
   ()=>choose(select('#grass-quality'),'value','0','change'),()=>choose(select('#motion-blur'),'checked',true,'change'),()=>choose(select('#depth-of-field'),'checked',false,'change'),()=>choose(select('#lamp-shadows'),'checked',true,'change'),()=>choose(select('#antialiasing'),'checked',true,'change'),()=>choose(select('#ambient-occlusion'),'checked',true,'change'),()=>choose(select('#reflections'),'checked',true,'change'),()=>mirrors.reset(),()=>slider.reset()],controls:[()=>drivingSettings.resetMouse()]};
- menu=createMenu({canvas,appearance,figure,settings,resets,defaultAssists:manifest.driving.default_assists,ui:manifest.ui,bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,guest:()=>multiplayer?.role===ROLE.GUEST,slider,audio,onNewGame:()=>seed.reroll(),onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+ menu=createMenu({canvas,appearance,figure,settings,resets,defaultAssists:manifest.driving.default_assists,ui:manifest.ui,bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,guest:()=>multiplayer?.role===ROLE.GUEST,slider,audio,onNewGame:()=>seed.reroll(),reloadNewGame,autoNewGame:newGameSeed!==undefined,onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  multiplayer=createMultiplayer({document,target:window,Peer:window.peerjs.Peer,buildId:manifest.build_id,exportHash:manifestHash,simulation,saveSession,menu,outfit,storage:()=>localStorage});
  {const changed=outfit.changed;outfit.changed=()=>{changed();multiplayer.look(outfit.outfit);};}
  feedback=createFeedback(manifest.ui,manifest,settings,actions);
