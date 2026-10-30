@@ -29,7 +29,6 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | X04b | Settings screen | M | Settings store and screen: sensitivities, invert, FOV, crosshair, head bob, help, always-show stats, volume, FPS limit, reset per tab. |
 | X04c | Rebinding | M | Original action list and default keys. Rebind on the Controls screen. HUD hints show bound keys. After X04b. |
 | X04d | Languages and help text | M | 10 language files, language dropdown, word table for all menu and HUD text. Help text follows the assists. After X04c. |
-| X04e | Menu figure IK | S | Start-menu figure turns its head, body and hands towards the mouse, as `menuIkScript`. |
 | X06a | Live mirrors | L | Car mirror cameras render to textures. Only the 5 nearest run. FOV and far plane follow distance. Mirrors toggle and Mirror draw distance slider. |
 | X06b | Lamp shadows | L | Point and spot lights with a shadow mode cast shadows. |
 | X06c | Live reflection probes | M | Only 1 probe is live. Make every building and car probe live, with the 5 s disable distance check and the Reflections toggle. |
@@ -189,6 +188,15 @@ Prepare once:
 3. Pause > Game mode > Survival off: the food and water bars hide, and food and water stay full. Turn it on again: they drain.
 4. Peaceful on, then drive out: no big rabbit has evil eyes. No human monster spawns in new buildings.
 5. Toggles persist after a page reload. Load a save: the current toggles stay, the save does not change them.
+
+### Start menu figure
+
+1. The start menu shows the figure in the menu camera view, under the menu art. It wears the Appearance outfit. Change the outfit: the figure follows.
+2. Move the mouse: the head turns toward it. Hands and feet stay at their rest goals.
+3. Click and hold the left button on the figure, then move: the head and right hand follow the mouse. The right button kicks with the left leg. Both buttons slide the body. Release: the figure returns to rest.
+4. The right button opens no context menu on the start menu.
+5. The figure is gone in the pause menu, Appearance and in game. F3 on the start menu: frame time near the previous run.
+6. Compare with the original menu: pose, place, head turn speed. Note the port choices: no idle clip, no menu scenery, gray background.
 
 ### Player body and outfit
 
