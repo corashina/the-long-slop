@@ -115,6 +115,23 @@ impl PoseRow {
     }
 }
 
+/// One remote player figure. Its joints follow in `SimFrame::remote_joints`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct RemoteRow {
+    /// Peer slot, 1 to 7 on guests and the host, 0 for the host on guests.
+    pub slot: u32,
+    pub flags: u32,
+    /// Player Transform in stream space, like `StateBlock::body_pose`.
+    pub body_pose: PoseRow,
+    /// `CharacterRoot` relative to the Player.
+    pub body_root: PoseRow,
+}
+
+impl RemoteRow {
+    pub const VISIBLE: u32 = 1;
+}
+
 /// Simulation values the renderer reads each frame. New fields come with their readers.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -963,6 +980,10 @@ pub struct SimFrame {
     pub valves: Vec<ValveRow>,
     /// Player body joints relative to `CharacterRoot`.
     pub joints: Vec<PoseRow>,
+    /// Remote players of a multiplayer session.
+    pub remotes: Vec<RemoteRow>,
+    /// Joints of each remote in `remotes` order, `joints` rows per remote.
+    pub remote_joints: Vec<PoseRow>,
     /// World poses of the ragdoll bodies in `RagdollReference::bodies` order. Empty while the ragdoll is inactive.
     pub ragdoll: Vec<PoseRow>,
     pub cigarettes: Vec<CigaretteRow>,
@@ -1310,6 +1331,8 @@ fn write(frame: &SimFrame, out: &mut Vec<u8>, encoder: Option<&mut FrameEncoder>
     put_poses(out, frame, encoder);
     put_rows(out, &frame.valves);
     put_rows(out, &frame.joints);
+    put_rows(out, &frame.remotes);
+    put_rows(out, &frame.remote_joints);
     put_rows(out, &frame.ragdoll);
     put_rows(out, &frame.cigarettes);
     put_rows(out, &frame.particle_groups);
@@ -1363,6 +1386,8 @@ fn read(rest: &mut &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     take_poses(rest, frame)?;
     take_rows(rest, &mut frame.valves)?;
     take_rows(rest, &mut frame.joints)?;
+    take_rows(rest, &mut frame.remotes)?;
+    take_rows(rest, &mut frame.remote_joints)?;
     take_rows(rest, &mut frame.ragdoll)?;
     take_rows(rest, &mut frame.cigarettes)?;
     take_rows(rest, &mut frame.particle_groups)?;

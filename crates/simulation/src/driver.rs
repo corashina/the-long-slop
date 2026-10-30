@@ -65,6 +65,8 @@ pub struct SimDriver {
     listener: Option<[f32; 3]>,
     /// Sandbox replies that the next frame sends.
     sandbox: Vec<String>,
+    /// Multiplayer peers. A load keeps them.
+    pub net: crate::net::Net,
 }
 
 impl SimDriver {
@@ -110,6 +112,7 @@ impl SimDriver {
             candidate: None,
             listener: None,
             sandbox: Vec::new(),
+            net: crate::net::Net::default(),
         };
         driver.reset_look();
         driver
@@ -380,6 +383,8 @@ impl SimDriver {
             self.update_camera(reference, alpha);
         }
         self.runtime.fill_frame(reference, alpha, frame);
+        self.net
+            .fill(reference, &self.runtime, self.delta_seconds as f32, frame);
         if self.input.held & keys::GRAB != 0 {
             frame.hud.flags &= !HudBlock::AUTOSAVE_SAFE;
         }

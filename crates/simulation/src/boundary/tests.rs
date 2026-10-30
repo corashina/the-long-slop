@@ -68,6 +68,13 @@ fn frame_round_trips() {
             },
         ],
         joints: vec![row(9.)],
+        remotes: vec![RemoteRow {
+            slot: 2,
+            flags: RemoteRow::VISIBLE,
+            body_pose: row(11.),
+            body_root: row(12.),
+        }],
+        remote_joints: vec![row(13.)],
         ragdoll: vec![row(10.)],
         cigarettes: vec![CigaretteRow {
             item: 7,
