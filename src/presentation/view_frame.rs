@@ -173,6 +173,8 @@ pub struct SourceViewFrame {
     pub probe_token: u32,
     pub probe_job: Option<ProbeJob>,
     pub views: [Option<ViewSnapshot>; VIEW_COUNT],
+    /// Main-view TAA state. None when antialiasing is off.
+    pub main_motion: Option<super::temporal::MainMotion>,
 }
 impl SourceViewFrame {
     /// Shadow atlas side of a view. The shadow quality shrinks only world views.
@@ -299,6 +301,11 @@ pub(crate) fn snapshot(
     ),
     views: Query<(&SourceSurfaceView, &Camera, &GlobalTransform)>,
     sky_view: Query<(&Camera, &GlobalTransform), With<super::frame_graph::SourceSkyCamera>>,
+    (antialiasing, mut temporal, origin): (
+        Res<super::antialiasing::Antialiasing>,
+        ResMut<super::temporal::TemporalView>,
+        Res<super::lighting_scene::SourceWorldOrigin>,
+    ),
 ) {
     frame.session = sim.frame.state.session;
     frame.selection_revision = sim.frame.state.selection_revision;
@@ -308,6 +315,7 @@ pub(crate) fn snapshot(
     frame.scene = epoch.0;
     frame.probe_job = None;
     frame.views = [None; VIEW_COUNT];
+    frame.main_motion = None;
     frame.sky_clip_from_world = None;
     frame.skybox_clip_from_world = None;
     if sim.frame.state.flags & StateBlock::WORLD_FAILED != 0 {
@@ -402,7 +410,7 @@ pub(crate) fn snapshot(
     let warmup = !clock.preparation_ready;
     let job = probe_job;
     let fov_degrees = sim.frame.state.fov_degrees;
-    let snapshots = std::array::from_fn(|index| {
+    let mut snapshots: [Option<ViewSnapshot>; VIEW_COUNT] = std::array::from_fn(|index| {
         if index >= PROBE_START && !prepare_probe_face(job, index - PROBE_START, warmup) {
             return None;
         }
@@ -435,6 +443,18 @@ pub(crate) fn snapshot(
         }
         Some(snapshot)
     });
+    let main_motion = antialiasing.0.then(|| {
+        temporal.advance(
+            snapshots[0].as_mut().unwrap(),
+            &assets.record.postprocessing.taa,
+            origin.0,
+            sim.frame.state.motion_revision,
+            epoch.0,
+        )
+    });
+    let jitter = main_motion.map_or(Mat4::IDENTITY, |motion| {
+        super::temporal::jitter_clip(motion.jitter)
+    });
     let sky_clips = Some(sky_pose).map(|pose| {
         let sky = &assets.record.cameras[0];
         let projection = Mat4::perspective_rh_gl(
@@ -449,7 +469,10 @@ pub(crate) fn snapshot(
                 projection.to_cols_array_2d(),
                 sky.near,
             ));
-        (gpu_projection(projection) * view, skybox_projection * view)
+        (
+            jitter * gpu_projection(projection) * view,
+            jitter * skybox_projection * view,
+        )
     });
     *frame = SourceViewFrame {
         session: sim.frame.state.session,
@@ -471,6 +494,7 @@ pub(crate) fn snapshot(
         probe_token: clock.probe_token,
         probe_job: job,
         views: snapshots,
+        main_motion,
     };
     let decision = {
         let mut state = graph.lock();
@@ -533,6 +557,7 @@ pub fn install(app: &mut App) {
         .init_resource::<SourceSceneEpoch>()
         .init_resource::<super::lighting_scene::ProbeActivation>()
         .init_resource::<SourceViewFrame>()
+        .init_resource::<super::temporal::TemporalView>()
         .add_plugins(bevy::render::extract_resource::ExtractResourcePlugin::<
             SourceViewFrame,
         >::default())
