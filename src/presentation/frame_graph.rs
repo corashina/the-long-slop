@@ -167,6 +167,7 @@ impl Plugin for SourceFramePlugin {
         );
         super::view_frame::install(app);
         super::shadow_queue::install(app);
+        super::lamp_shadows::install(app);
         super::caster_material::install(app);
         super::shadow_atlas::install(app);
         super::shadow_collector::install(app);
@@ -883,7 +884,9 @@ fn submitted(
             state.audit.first_token = state.audit.token;
         }
         acks.main_submitted(state.audit.token);
-        if THUMBNAIL.swap(false, Ordering::Relaxed) {
+        let thumbnail = THUMBNAIL_TOKEN.load(Ordering::Relaxed);
+        if thumbnail != 0 && state.audit.token >= thumbnail {
+            THUMBNAIL_TOKEN.store(0, Ordering::Relaxed);
             crate::browser::game_thumbnail_frame();
         }
         if crate::app::cpu_profile::enabled() {
@@ -1007,9 +1010,9 @@ struct ViewAudit {
     surface: [u32; 5],
     surface_instances: [u32; 4],
     shadow_epoch: u32,
-    shadow_attempts: [u32; 4],
-    shadow_issued: [u32; 4],
-    shadow_instances: [[u32; 4]; 2],
+    shadow_attempts: [u32; super::lamp_shadows::TILES],
+    shadow_issued: [u32; super::lamp_shadows::TILES],
+    shadow_instances: [[u32; super::lamp_shadows::TILES]; 2],
     /// GPU prop rows, camera-visible rows and issued indirect draws.
     props: [u32; 3],
     collector_frame: u32,
@@ -1025,11 +1028,21 @@ struct SourceDiagnostics {
 static SOURCE_DIAGNOSTICS: OnceLock<SourceDiagnostics> = OnceLock::new();
 
 static THUMBNAIL: AtomicBool = AtomicBool::new(false);
+/// Token of the frame encoded for the thumbnail. 0 is none.
+static THUMBNAIL_TOKEN: AtomicU32 = AtomicU32::new(0);
 
-/// The canvas holds a frame only in the task that drew it, so the next presented frame calls back.
+/// The canvas holds a frame only in the task that drew it, so the thumbnail frame calls back when presented.
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub fn request_thumbnail() {
     THUMBNAIL.store(true, Ordering::Relaxed);
+}
+/// The next encoded main frame is the thumbnail. It has no motion blur.
+pub(crate) fn thumbnail_requested() -> bool {
+    THUMBNAIL.load(Ordering::Relaxed)
+}
+pub(crate) fn thumbnail_encoded(token: u32) {
+    THUMBNAIL.store(false, Ordering::Relaxed);
+    THUMBNAIL_TOKEN.store(token, Ordering::Relaxed);
 }
 
 /// Browser graphics failures use the same terminal state as native device errors.

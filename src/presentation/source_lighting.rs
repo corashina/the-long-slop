@@ -47,6 +47,9 @@ pub struct LightingUniform {
     pub clip_from_world: Mat4,
     pub near_far: Vec4,
     pub sun_shadow: super::shadow_collector::SunShadowUniform,
+    /// Lamp shadow slots. Only the world view fills them.
+    pub lamp_shadows:
+        [super::lamp_shadows::LampShadowUniform; crate::reference::lamp_shadows::LAMP_SLOTS],
 }
 
 /// Layout specialization happens only when a pipeline is prepared.
@@ -64,6 +67,7 @@ pub fn surface_lighting_layout() -> BindGroupLayoutDescriptor {
                 sampler(SamplerBindingType::Filtering),
                 texture_depth_2d(),
                 sampler(SamplerBindingType::Comparison),
+                texture_depth_2d(),
             ),
         ),
     )
@@ -87,6 +91,7 @@ impl SourceViewLighting {
         cookie: (&TextureView, &Sampler),
         probe: ([&TextureView; super::lighting_scene::PROBE_COUNT], &Sampler),
         shadow: (&TextureView, &Sampler),
+        lamp_atlas: &TextureView,
     ) -> Self {
         let mut uniform = UniformBuffer::from(value);
         uniform.set_label(Some("source_view_lighting_uniform"));
@@ -102,6 +107,7 @@ impl SourceViewLighting {
                 probe.1,
                 shadow.0,
                 shadow.1,
+                lamp_atlas,
             )),
         );
         Self {
