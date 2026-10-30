@@ -9,6 +9,7 @@ use super::materials::{
 use super::outfit::Outfit;
 use super::player_body::{Identity, character_renderer, named_joints, outfit_slot};
 use super::reference::ReferenceVisuals;
+use super::renderers::AuthoredRenderer;
 use super::sky::source_pose;
 use crate::app::RuntimeReference;
 use crate::reference::{NodeId, PreviewLightKind};
@@ -184,10 +185,14 @@ fn bind(
         };
         let drawn = character_renderer(characters, node.id);
         for primitive in kids.iter().filter(|e| meshes.contains(*e)) {
-            let Some((character, _)) = drawn else {
+            let Some((character, renderer)) = drawn else {
                 commands.entity(primitive).despawn();
                 continue;
             };
+            // The player glTF has no renderer extras, as in `player_body`.
+            commands
+                .entity(primitive)
+                .insert(AuthoredRenderer(renderer.state.clone()));
             let slot = extras
                 .get(primitive)
                 .map_err(|e| e.to_string())
