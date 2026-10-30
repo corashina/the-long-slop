@@ -1,11 +1,7 @@
 import {trimName,defaultName,AUTOSAVE} from './save-storage.js';
+import {bindToggle} from './settings-screen.js';
 export const PER_PAGE=6,STEP=2;
 const CANT_BOTH=["Can't save\nwhile sitting\nor sleeping","Can't save\nwhile sleeping\nor sitting here","Don't sleep\nand sit","Don't sit\nand sleep","Keep trying"];
-const KEYS={autosave:'the-long-slop.autosave',inCar:'the-long-slop.autosave-in-car',autoLoad:'the-long-slop.auto-load'};
-const DEFAULTS={autosave:true,inCar:true,autoLoad:false};
-function readFlag(storage,key){try{const v=storage.getItem(KEYS[key]);return v===null?DEFAULTS[key]:v==='1';}catch{return DEFAULTS[key];}}
-function writeFlag(storage,key,value){try{storage.setItem(KEYS[key],value?'1':'0');}catch{}}
-export function readAutosaveToggles(storage){return {autosave:readFlag(storage,'autosave'),inCar:readFlag(storage,'inCar'),autoLoad:readFlag(storage,'autoLoad')};}
 export class SaveScreenState {
  // text starts at 4, so the first pick of both texts is from 0-3, as in the source.
  constructor(){this.saves=[];this.autosave=null;this.last=null;this.canLast=false;this.top=0;this.selected=null;this.confirm=null;this.name='';this.inMenu=true;this.dead=false;this.sleeping=false;this.seated=false;this.text=4;}
@@ -41,13 +37,14 @@ export class SaveScreenState {
 }
 const driven=km=>String(Math.round(km)).padStart(4,'0')+' km';
 const details=entry=>[entry.date,'Seed '+entry.seed,driven(entry.drivenKm),entry.version].join(' · ');
-export function createSaveScreen({storage,run,paint}){
+// `settings` is the settings store. The autosave toggles are its source `tabMisc` toggles.
+export function createSaveScreen({settings,run,paint}){
  const state=new SaveScreenState(),q=selector=>document.querySelector(selector),urls=new Map(),kinds=['save','load','delete','last'];
  const tile=selector=>({button:q(selector),img:q(selector+' img'),label:q(selector+' strong'),details:q(selector+' small'),url:null});
  const tiles=Array.from({length:PER_PAGE},(_,i)=>tile('#save-tile-'+i)),auto=tile('#save-autosave');
  const name=q('#save-name'),info=q('#save-info'),cant=q('#save-cant'),pageText=q('#save-page'),countText=q('#save-count'),nameRow=q('#save-name-row');
  const fields=['name','date','seed','driven','version'].map(key=>q('#save-info-'+key));
- const toggles={autosave:q('#autosave-on'),inCar:q('#autosave-no-car'),autoLoad:q('#auto-load')};
+ const toggles=[[q('#autosave-on'),'BAutoSave'],[q('#autosave-no-car'),'BDisableAutoSaveInCar'],[q('#auto-load'),'BAutoLoad']].map(([input,name])=>bindToggle(input,settings,name));
  let text='';
  function operate(kind){
   const entry=state.entry();
@@ -73,11 +70,6 @@ export function createSaveScreen({storage,run,paint}){
   q('#save-'+kind+'-yes').addEventListener('click',()=>{const k=state.answer(true);if(k)operate(k);paint();});
   q('#save-'+kind+'-no').addEventListener('click',()=>{state.answer(false);paint();});
  }
- const stored=readAutosaveToggles(storage);
- toggles.autosave.checked=stored.autosave;toggles.inCar.checked=!stored.inCar;toggles.autoLoad.checked=stored.autoLoad;
- toggles.autosave.addEventListener('change',()=>writeFlag(storage,'autosave',toggles.autosave.checked));
- toggles.inCar.addEventListener('change',()=>writeFlag(storage,'inCar',!toggles.inCar.checked));
- toggles.autoLoad.addEventListener('change',()=>writeFlag(storage,'autoLoad',toggles.autoLoad.checked));
  return {
   state,
   open(flags){
@@ -103,6 +95,7 @@ export function createSaveScreen({storage,run,paint}){
     q('#save-'+kind+'-confirm').hidden=!shown[kind]||!open;q('#save-'+kind+'-yes').disabled=pending;q('#save-'+kind+'-no').disabled=pending;
    }
    cant.hidden=!text;cant.textContent=text;
+   for(const toggle of toggles)toggle();
   }
  };
 }

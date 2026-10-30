@@ -252,6 +252,12 @@ extern "C" {
     /// Pending `DrivingSettings` JSON, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameDrivingSettings)]
     pub fn game_driving_settings() -> Option<String>;
+    /// Pending `PlayerSettings` JSON, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gamePlayerSettings)]
+    pub fn game_player_settings() -> Option<String>;
+    /// Pending frame limit in frames per second, or none. 0 is no limit.
+    #[wasm_bindgen(js_namespace = window, js_name = gameFrameLimit)]
+    pub fn game_frame_limit() -> Option<f32>;
     /// Pending `Outfit` JSON, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameOutfit)]
     pub fn game_outfit() -> Option<String>;

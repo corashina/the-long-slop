@@ -1,15 +1,15 @@
 import {installSceneResolution} from './scene-resolution.js';
-installSceneResolution(window,document.querySelector('#scene-resolution'));
+const sceneResolution=document.querySelector('#scene-resolution');
+installSceneResolution(window,sceneResolution);
 import {installShadowQuality} from './shadow-quality.js';
 installShadowQuality(window,()=>localStorage,document.querySelector('#shadow-quality'));
 import {installGrassQuality} from './grass-quality.js';
 installGrassQuality(window,()=>localStorage,document.querySelector('#grass-quality'));
-import {installGameMode,installGameOptions,installSeed,installStartCar} from './game-mode.js';
-installGameMode(window,document.querySelector('#biome'));
+import {gameFields,installGameMode,installGameOptions,installSeed,installStartCar} from './game-mode.js';
 const seed=installSeed(window,document.querySelector('#seed'));
-const gameOptions=installGameOptions(window,{peaceful:document.querySelector('#peaceful'),survival:document.querySelector('#survival-mode'),homesick:document.querySelector('#homesick')},options=>survival?.setSurvival(options.survival));
 import {installSunglassesEffects} from './sunglasses.js';
-installSunglassesEffects(window,()=>localStorage,document.querySelector('#sunglasses-effects'));
+const sunglasses=document.querySelector('#sunglasses-effects');
+installSunglassesEffects(window,()=>localStorage,sunglasses);
 import {installMotionBlur} from './motion-blur.js';
 installMotionBlur(window,()=>localStorage,document.querySelector('#motion-blur'));
 import {installAntialiasing} from './antialiasing.js';
@@ -18,6 +18,7 @@ import {installAmbientOcclusion} from './ambient-occlusion.js';
 installAmbientOcclusion(window,()=>localStorage,document.querySelector('#ambient-occlusion'));
 import {installLampShadows} from './lamp-shadows.js';
 installLampShadows(window,()=>localStorage,document.querySelector('#lamp-shadows'));
+import {createSettings,installSettingsBridge} from './settings.js';
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
 import {manifestStamp,createSaveStorage,AUTOSAVE} from './save-storage.js';
@@ -25,7 +26,6 @@ import {createSaveSession} from './save-session.js';
 import {createSaveBridge} from './save-bridge.js';
 import {createThumbnail} from './thumbnail.js';
 import {createAutosave} from './autosave.js';
-import {readAutosaveToggles} from './save-screen.js';
 export const saveRuntime=createSaveBridge();
 import {installDrawDistance} from './draw-distance.js';
 import {installDrivingSettings} from './driving-settings.js';
@@ -35,13 +35,13 @@ import {createMenuFigure} from './menu-figure.js';
 import {createGamepad} from './gamepad.js';
 import {installSteeringWheel} from './steering-wheel.js';
 const gamepad=createGamepad(()=>navigator.getGamepads?.());
-let slider,worldDrawDistance,drivingSettings,steeringWheel;
+let slider,worldDrawDistance,drivingSettings,steeringWheel,settings;
 // The slider is locked while a request is pending, so its value is the one the new world uses.
 const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRuntime,drawDistance:()=>slider.value(),onStatus:({operation,state})=>{if(state!=='success'||operation==='remove')return;autosave.reset(performance.now()/1000);if(operation!=='save'){worldDrawDistance=slider.value();slider.store();}}});
 const autosave=createAutosave(),autosaveNotice=document.querySelector('#autosave-notice');
-let toggleStorage=null;try{toggleStorage=window.localStorage;}catch{}
-// Toggles change only on the save screen, so read them when play resumes, not every frame.
-let toggles=readAutosaveToggles(toggleStorage),wasPlaying=false,autosaving=false,noticeTimer=0;
+// Source `BAutoSave` and `BDisableAutoSaveInCar`, kept current by the settings store.
+const toggles={autosave:false,inCar:false};
+let autosaving=false,noticeTimer=0;
 async function runAutosave(){
  autosaving=true;clearTimeout(noticeTimer);autosaveNotice.textContent='Autosaving...';autosaveNotice.hidden=false;
  try{const blob=await thumbnail.capture();if(!saveSession.pending)await saveSession.save(AUTOSAVE,blob,{autosave:true});autosaveNotice.hidden=true;}
@@ -143,7 +143,7 @@ window.gameDrivingSettings=()=>drivingSettings?.take();
 // Rust passes its `GamepadFrame` arrays once per frame.
 window.gameGamepad=(axes,buttons)=>{gamepad.poll();axes.set(gamepad.axes);buttons.set(gamepad.buttons);};
 // `steer` to `handbrake` are the last Rust `DrivingControls`, shown only on the Controls screen.
-window.gameDrivingState=(gear,assists,seated,steer,throttle,brake,clutch,handbrake)=>{window.gameState.gear=gear;window.gameState.drivingAssists=assists;menu?.drivingState(assists);feedback?.drivingState(gear,seated);if(menu?.model.state==='controls')steeringWheel?.live(steer,throttle,brake,clutch,handbrake);};
+window.gameDrivingState=(gear,assists,seated,steer,throttle,brake,clutch,handbrake)=>{window.gameState.gear=gear;window.gameState.drivingAssists=assists;menu?.drivingState(assists);feedback?.drivingState(gear,seated);if(menu?.model.state==='settings')steeringWheel?.live(steer,throttle,brake,clutch,handbrake);};
 window.gameActions=()=>{const a=actions;actions=0;return a;};
 const CAMERA_VIEWS=['First person','Outside','Drop cam','Map'];
 window.gameState = { speedKmh: 0, camera: 'First person', x: 0, y: 0, z: 0, contacts: 0,
@@ -166,8 +166,6 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, surfaces, colliders, a
   state.autosaveSafe = autosaveSafe; state.seated = seated;
   menu?.sync(started,paused,travelM);
   const playing=menu?.model.state==='playing';
-  if(playing&&!wasPlaying)toggles=readAutosaveToggles(toggleStorage);
-  wasPlaying=playing;
   if(autosave.tick(now/1000,playing,autosaveSafe,seated,toggles)&&!autosaving&&!saveSession.pending)runAutosave();
   feedback?.setVisible(started&&!paused&&!dead&&!sleeping&&mode===0&&menu?.model.state==='playing');
   survival?.setVisible(started&&!paused&&!sleeping&&menu?.model.state==='playing');
@@ -221,7 +219,13 @@ async function load(){
  // Rust copies only the shell fields, so JS does not parse the world records.
  const text=manifest_shell(bytes),manifest=JSON.parse(text);
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
- installStartCar(window,document.querySelector('#start-car'),manifest.world.start_cars);
+ settings=createSettings(()=>localStorage,manifest.settings,gameFields(manifest.world.start_cars.length));
+ installGameMode(window,document.querySelector('#biome'),settings);
+ installStartCar(window,document.querySelector('#start-car'),manifest.world.start_cars,settings);
+ const gameOptions=installGameOptions(window,{peaceful:document.querySelector('#peaceful'),survival:document.querySelector('#survival-mode'),homesick:document.querySelector('#homesick')},settings,options=>survival?.setSurvival(options.survival));
+ installSettingsBridge(window,settings,()=>menu?.model.state==='playing');
+ const autosaveToggles=v=>{toggles.autosave=v.BAutoSave;toggles.inCar=!v.BDisableAutoSaveInCar;};
+ autosaveToggles(settings.values);settings.listen(autosaveToggles);
  const outfit=installOutfit(window,()=>localStorage,manifest.clothing.characters);
  const range=manifest.world.draw_distance;
  slider=installDrawDistance(()=>localStorage,document.querySelector('#draw-distance'),document.querySelector('#draw-distance-value'),{minimum:range.minimum.drawDistance,maximum:range.maximum.drawDistance,fallback:range.default});
@@ -240,14 +244,20 @@ async function load(){
  status.textContent='Loading interface assets...';
  loading.stage(status.textContent);
  await loadUiAssets(manifest.ui);
- survival=createSurvival(manifest.ui,manifest.sleep.cooldown_seconds);survival.setSurvival(gameOptions.options().survival);
+  survival=createSurvival(manifest.ui,manifest.sleep.cooldown_seconds,settings);survival.setSurvival(settings.values.survival);
  audio=createAudio(manifest.audio);installAudioBridge(window,audio);
+ const volume=v=>audio.volume(v.FSound);volume(settings.values);settings.listen(volume);
  if(sandbox?.calendar)window.gameAudioCalendar=()=>sandbox.calendar;
  window.addEventListener('pagehide',()=>audio.dispose());
  const appearance=createAppearance({target:window,document,canvas,edit:outfit,characters:manifest.clothing.characters});
  const figure=createMenuFigure({target:window,canvas});
- menu=createMenu({canvas,appearance,figure,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,slider,audio,onNewGame:()=>seed.reroll(),onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
- feedback=createFeedback(manifest.ui,manifest);
+ // Source tab resets of the controls that keep their own storage.
+ const choose=(node,property,value,event)=>{if(node.disabled)return;node[property]=value;node.dispatchEvent(new Event(event));};
+ const select=id=>document.querySelector(id);
+ const resets={graphics:[()=>choose(sunglasses,'checked',true,'change'),()=>choose(sceneResolution,'value','100','change'),()=>choose(select('#shadow-quality'),'value','0','change'),
+  ()=>choose(select('#grass-quality'),'value','0','change'),()=>choose(select('#motion-blur'),'checked',true,'change'),()=>choose(select('#lamp-shadows'),'checked',true,'change'),()=>choose(select('#antialiasing'),'checked',true,'change'),()=>choose(select('#ambient-occlusion'),'checked',true,'change'),()=>slider.reset()],controls:[()=>drivingSettings.resetMouse()]};
+ menu=createMenu({canvas,appearance,figure,settings,resets,defaultAssists:manifest.driving.default_assists,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,slider,audio,onNewGame:()=>seed.reroll(),onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+ feedback=createFeedback(manifest.ui,manifest,settings);
  startup.end('interface');
  if(failed)return;status.textContent='Loading the garage...';loading.stage(status.textContent);
  startup.begin('generation');startup.begin('decodeUpload');startup.begin('pipeline');

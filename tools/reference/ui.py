@@ -119,6 +119,12 @@ def export_ui(source, output, library):
     def image_sprite(image,role):return sprite(source.resolve(image,source.read(image)['m_Sprite']),role)
     for role,field in [('default','GCDef'),('pickup','GCCanPickup'),('dismount','GCDismount'),('carrying','GCPickup'),('too-heavy','GCTooHeavy')]:
         icons[role]=image_sprite(source.resolve(menu,md[field]),role)
+    # mainscript.OldCrossHairStuff: GC tinted by CrosshairColor, GC2 tinted by the carried weight.
+    layout(source.resolve(menu,md['GC']),'old-crosshair')
+    layout(source.resolve(menu,md['GC2']),'old-crosshair-carry')
+    colors=source.read(source.get('level1',64919))
+    crosshair_colors={key:[colors[field][channel] for channel in 'rgba'] for key,field in
+        [('default','defCrosshairColor'),('e','canECrosshairColor'),('f','canFCrosshairColor'),('mmb','canMMBCrosshairColor')]}
     # GCPickups: the children of GCPickup that fade in with the carried weight.
     pickups=md['GCPickups']
     if len(pickups)!=2:raise ValueError('GCPickups must hold the medium and heavy images')
@@ -166,5 +172,5 @@ def export_ui(source, output, library):
     ammo_prompts={'reload':word(source,'reload'),'unload':word(source,'unload')}
     # fpscontroller binoculars: LMB use, MMB focus while used.
     binocular_prompts={'use':word(source,'use'),'focus':word(source,'focus')}
-    return {'hose_prompts':hose_prompts(source),'ammo_prompts':ammo_prompts,'binocular_prompts':binocular_prompts,'computer_prompts':computer_prompts(source),'need_sliders':need_sliders,'sprites':sprites,'pairs':pairs,'icons':icons,'layouts':layouts,
+    return {'crosshair_colors':crosshair_colors,'hose_prompts':hose_prompts(source),'ammo_prompts':ammo_prompts,'binocular_prompts':binocular_prompts,'computer_prompts':computer_prompts(source),'need_sliders':need_sliders,'sprites':sprites,'pairs':pairs,'icons':icons,'layouts':layouts,
             'overlay_color':[180/255,128/255,70/255,64/255],'frame_color':[180/255,128/255,70/255,1.]}

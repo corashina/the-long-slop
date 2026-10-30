@@ -9,6 +9,7 @@ from .mechanisms import recover_mechanisms, bind_mechanisms
 from .visibility import recover_camera_visibility
 from .parts import recover_part_slots
 from .driving import recover_driving
+from .settings import recover_settings
 from .lighting import rgba
 from .player_movement import recover_player_movement
 from .car_camera import recover_car_camera
@@ -266,18 +267,8 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
     held_offset=bake_points([(0.,0.,0.)],source.chain(held),world_pose(source,head))[0]
     player_record.update(carry_min_weight=player['minWeight'],carry_max_weight=player['maxWeight'],carry_anchor_offset=held_offset,carry_offset_radius=player['maxPickupDist'],carry_drop_distance=player['dropDist'],
         carry_force_multiplier=player['pickupForceM'],carry_max_force=player['maxPickupForce'])
-    settings_reader=source.get('level0',16865);settings=source.read(settings_reader)
-    if source.class_name(settings_reader)!='settingsscript':raise ValueError('Required default control settings differ')
-    defaults=[]
-    for index in (0,1,2,4,5,7):
-        slider=source.resolve(settings_reader,settings['tabControls']['sliders'][index]);definition=source.read(slider)
-        multiplier=definition['valueMultipler'] if definition['valueMultipler'] else 1.
-        defaults.append(definition['defValue']*multiplier)
     player_record.update(carry_min_distance=max(0.,math.sqrt(sum(value**2 for value in held_offset))-player['maxPickupDist']),
-        carry_max_distance=math.sqrt(sum(value**2 for value in held_offset))+player['maxPickupDist'],obj_move_sensitivity=defaults[3],
-        obj_rotation_sensitivity=defaults[4],look_sensitivity=[defaults[0]*defaults[1],defaults[0]*defaults[2]])
-    scroll_slider=source.resolve(settings_reader,settings['tabControls']['sliders'][3]);scroll_definition=source.read(scroll_slider)
-    player_record['scroll_sensitivity']=scroll_definition['defValue']*(scroll_definition['valueMultipler'] if scroll_definition['valueMultipler'] else 1.)
+        carry_max_distance=math.sqrt(sum(value**2 for value in held_offset))+player['maxPickupDist'])
     player_record['car_camera']=recover_car_camera(source,player_reader,player,main)
     player_record['camera_culling_mask']=recover_camera_visibility(source)['normal_view_mask']
     player_record['action_masks']=recover_masks(player)
@@ -333,7 +324,7 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
     lower=min(posture['prone_head']['translation'][1], posture['feet']['center'][1]-posture['maximum_radius'])
     position[1]=floor-lower+source.read(physics)['m_DefaultContactOffset']
     spawn={'translation':position,'rotation':list(quaternion_product(car_pose['rotation'],[0.,-math.sqrt(.5),0.,math.sqrt(.5)])),'scale':[1.,1.,1.]}
-    result={'driving':driving['global'],'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'mechanisms':mechanisms,'wheel_parts':wheel_parts,'parts':[],'part_slots':part_slots,'part_scan':{'source':source_id(main_reader),'mask':main['scanLayer']['m_Bits'],'radius':main['defScanRadius']},'items':items,'openings':openings,'tanks':tanks,
+    result={'driving':driving['global'],'settings':recover_settings(source),'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'mechanisms':mechanisms,'wheel_parts':wheel_parts,'parts':[],'part_slots':part_slots,'part_scan':{'source':source_id(main_reader),'mask':main['scanLayer']['m_Bits'],'radius':main['defScanRadius']},'items':items,'openings':openings,'tanks':tanks,
         'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed'],'burn_colors':burn_colors(main),
             'min_tube_vertical_height':main['minTubeVerticalHeight'],'max_tube_vertical_height':main['maxTubeVerticalHeight'],'words':default_words(source)},'player':player_record,
         'area':{'source':source_id(source.get('level1',64896)),'home_root':home_root,'home_pose':home_pose,'home_bounds':bounds,'player_spawn':spawn}}
