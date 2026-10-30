@@ -144,9 +144,10 @@ impl StructureRecipe {
                     )
                 });
         if scale.iter().any(|v| !v.is_finite() || *v <= 0.) || (nonuniform && !checked_nonuniform) {
-            return Err(ReferenceError(
-                "Unresolved source structure collision scale or rotated body".into(),
-            ));
+            return Err(ReferenceError(format!(
+                "Unresolved source structure collision scale or rotated body: {}:{} scale {scale:?}",
+                prototype.source.file, prototype.source.path_id
+            )));
         }
         let active = |mut node: usize| {
             for _ in 0..prototype.nodes.len() {
