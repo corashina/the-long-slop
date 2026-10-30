@@ -25,13 +25,20 @@ export class FrameTimings {
  }
 }
 
+// GPU ms per world view stage, from timestamp queries. Unavailable without the browser feature.
+export function gpuLine(stages){
+ if(!stages)return '\nGPU ms: unavailable';
+ const total=stages.reduce((a,b)=>a+b,0);
+ return '\nGPU ms shadow / opaque / resolve+AO / transparent / post: '+stages.map(v=>v.toFixed(2)).join(' / ')+' (sum '+total.toFixed(2)+')';
+}
+
 // Draws per pass in the world view. Counts come from the renderer audit.
 function renderLines(audit){
  if(!audit?.graph)return '';
  const view=audit.graph.views[0],sum=values=>values.reduce((a,b)=>a+b,0);
  const [rows,visible,draws]=view.props;
  return '\nDraws shadow / surface: '+sum(view.shadow_issued)+' / '+(view.surface[2]+view.surface[4])+
-  '\nGPU props rows / visible / indirect draws: '+rows+' / '+visible+' / '+draws;
+  '\nGPU props rows / visible / indirect draws: '+rows+' / '+visible+' / '+draws+gpuLine(audit.gpu_ms);
 }
 
 // `readWorker` gives the simulation worker tick average since its last read and its WASM bytes.
