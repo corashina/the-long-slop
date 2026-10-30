@@ -1,7 +1,7 @@
 # Project roadmap
 
 Goal: recreate The Long Drive for the web.
-Behavior authority: Steam build `11140890` and its decompiled code in `.cache/reference-library/decompiled/managed/Assembly-CSharp.cs`.
+Behavior authority: Steam build `11140890` and its decompiled code in `.cache/reference-library/records/managed/Assembly-CSharp.cs`.
 Save format authority: [save schema](crates/simulation/src/save/schema.rs).
 
 ## Frame rate rule
@@ -31,7 +31,13 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | X04c | Rebinding | M | Original action list and default keys. Rebind on the Controls screen. HUD hints show bound keys. After X04b. |
 | X04d | Languages and help text | M | 10 language files, language dropdown, word table for all menu and HUD text. Help text follows the assists. After X04c. |
 | X04e | Menu figure IK | S | Start-menu figure turns its head, body and hands towards the mouse, as `menuIkScript`. |
-| X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binocular lens distortion and chromatic aberration, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. |
+| X06a | Live mirrors | L | Car mirror cameras render to textures. Only the 5 nearest run. FOV and far plane follow distance. Mirrors toggle and Mirror draw distance slider. |
+| X06b | Lamp shadows | L | Point and spot lights with a shadow mode cast shadows. |
+| X06c | Live reflection probes | M | Only 1 probe is live. Make every building and car probe live, with the 5 s disable distance check and the Reflections toggle. |
+| X06d | Motion vectors and TAA | L | Velocity buffer and TAA with the source jitter, blend and sharpness. The Antialiasing toggle switches 4x MSAA and TAA together. Off is 1 sample and no TAA. WebGPU has no 8x. |
+| X06e | Motion blur | M | Needs X06d motion vectors. Shutter angle follows car speed. Off where the source turns it off. |
+| X06f | Depth of field and binocular lens | M | Main DoF with focus ray, night clamp and Dof toggle. Binocular DoF, lens distortion and chromatic aberration. |
+| X06g | Heat haze and LUT options | M | Heat haze pass weighted by temperature, old particle heat haze, LUT option (Default, C64, Sepia), grayscale. |
 
 Not planned: multiplayer, VR, stereo 3D, mod events, Steam features.
 
