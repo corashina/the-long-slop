@@ -190,21 +190,8 @@ Prepare once:
 
 ### Settings
 
-1. Mouse sensitivity, X, Y and each Invert change the look. Scroll, item move and item rotate change carry, posture and slides.
-2. Key steer sensitivity changes the keyboard steering speed.
-3. Field of view on foot and in a car: walk, then sit in the Lada.
-4. Walk head bob off: the camera does not bob. Drive head bob off: the car camera does not bob.
 5. Crosshair off hides it. Old crosshair shows the source dot, tinted for E, F and MMB, with the carry bar. Crosshair scale changes its size.
-6. Help off hides the action hints and the item help.
-7. Always show health, food, water, bladder and bowel keep each bar visible.
-8. Sound volume 0 mutes the game. 50 is quieter.
 9. Fresh profile: FPS limit is off, and F3 follows the display refresh. FPS limit 60 on holds F3 at 59 to 61 FPS while playing, also on a 144 Hz display. The menu runs at 30.
-10. Rebind Move Forward to Up arrow: walk with Up arrow. W still gives throttle in the Lada. Rebind Throttle to T: T drives, W does not.
-11. Rebind Steer Left/Right, Brake, Toggle Handbrake, a gear and Inventory Slot 1: each new key works. The keys stay after a page reload.
-12. Look Up on a key looks up while held. Look Down set to None stops looking down with the mouse. Scroll Up on a key scrolls.
-13. Seated, hold J (key look) and press WASD: the view turns. Key look sensitivity changes the speed. While leaning, J does nothing.
-14. HUD hints show the bound keys: rebind Use to G, then aim at a door. Hide HUD follows its binding.
-15. Seated with the clutch held, the inventory keys select nothing while Inventory Slot 1 and Shift To 1 share a key name. Rebind one: they select again.
 
 ### Languages and help text
 
