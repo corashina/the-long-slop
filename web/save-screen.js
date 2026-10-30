@@ -40,9 +40,10 @@ export class SaveScreenState {
  }
 }
 const driven=km=>String(Math.round(km)).padStart(4,'0')+' km';
+const details=entry=>[entry.date,'Seed '+entry.seed,driven(entry.drivenKm),entry.version].join(' · ');
 export function createSaveScreen({storage,run,paint}){
  const state=new SaveScreenState(),q=selector=>document.querySelector(selector),urls=new Map(),kinds=['save','load','delete','last'];
- const tile=selector=>({button:q(selector),img:q(selector+' img'),label:q(selector+'>span:last-child'),url:null});
+ const tile=selector=>({button:q(selector),img:q(selector+' img'),label:q(selector+' strong'),details:q(selector+' small'),url:null});
  const tiles=Array.from({length:PER_PAGE},(_,i)=>tile('#save-tile-'+i)),auto=tile('#save-autosave');
  const name=q('#save-name'),info=q('#save-info'),cant=q('#save-cant'),pageText=q('#save-page'),countText=q('#save-count'),nameRow=q('#save-name-row');
  const fields=['name','date','seed','driven','version'].map(key=>q('#save-info-'+key));
@@ -59,7 +60,7 @@ export function createSaveScreen({storage,run,paint}){
   t.button.hidden=!entry;if(!entry)return;
   const url=urls.get(entry.name)??null;
   if(t.url!==url){t.url=url;if(url)t.img.src=url;else t.img.removeAttribute?.('src');}
-  t.img.hidden=!url;t.label.textContent=entry.name;
+  t.img.hidden=!url;t.label.textContent=entry.name;t.details.textContent=details(entry);
   t.button.classList.toggle('no-image',!url);t.button.classList.toggle('last',entry.name===state.last);t.button.classList.toggle('selected',selected);
  }
  tiles.forEach((t,i)=>t.button.addEventListener('click',()=>{state.select(state.top+i);paint();}));
