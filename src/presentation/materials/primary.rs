@@ -289,6 +289,9 @@ impl SourceMaterials {
             .or_insert_with(|| Arc::new(()));
         Ok(())
     }
+    pub fn world_primary_admitted(&self, identity: (SourceAssetId, u32)) -> bool {
+        self.world_primary.materials.contains(&identity)
+    }
     pub fn world_primary_ready(&self, identity: (SourceAssetId, u32)) -> bool {
         self.world_primary.materials.contains(&identity)
             && self

@@ -123,6 +123,7 @@ impl WorldPresentation<'_, '_> {
             &mut self.roots,
             &mut self.materials,
             &self.screens,
+            &mut self.allocation.ledger,
         )
     }
     /// Updates the renderer copy of `stream`.

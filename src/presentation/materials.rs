@@ -2212,17 +2212,26 @@ pub(crate) fn sync_lamp_materials(
     }
 }
 
+#[track_caller]
 pub fn authored_material(
     key: (source::AssetId, u32),
     reflected: bool,
     mask: u32,
     source: &SourceMaterials,
 ) -> SourceMaterial {
-    let record = source
+    let Some(record) = source
         .records
         .iter()
         .find(|r| (r.asset, r.gltf_material) == key)
-        .expect("validated authored material choice");
+    else {
+        panic!(
+            "Missing authored material {}:{} (asset records {}, world admitted {})",
+            key.0.0,
+            key.1,
+            source.records.iter().filter(|r| r.asset == key.0).count(),
+            source.world_primary_admitted(key),
+        );
+    };
     let mut material = make_material(record, reflected, mask, source);
     material.preparation = source.preparation.clone();
     material
