@@ -25,6 +25,7 @@ installReflections(window,()=>localStorage,document.querySelector('#reflections'
 import {installMirrors} from './mirrors.js';
 const mirrors=installMirrors(window,()=>localStorage,document.querySelector('#mirrors'),document.querySelector('#mirror-draw-distance'),document.querySelector('#mirror-draw-distance-value'));
 import {createSettings,installSettingsBridge} from './settings.js';
+import {actionIndex,compileBindings,inputsField} from './bindings.js';
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
 import {manifestStamp,createSaveStorage,AUTOSAVE} from './save-storage.js';
@@ -142,10 +143,10 @@ window.gameSaveResult=(id,kind,payload,error)=>{
 window.gameTypingKeys=()=>input.state.typingKeys();
 window.gameTypedText=buffer=>input.state.takeText(buffer);
 window.gameInventoryKeys=()=>frame.inventoryHeld|(frame.inventoryReleased<<4);
-window.gamePlayerKeys=()=>frame.playerHeld|(frame.playerPressed<<8)|(frame.playerReleased<<16);
+window.gamePlayerKeys=()=>(frame.playerHeld|(frame.playerPressed<<16))>>>0;window.gamePlayerReleased=()=>frame.playerReleased;
 window.gameKeys=()=>{frame=input.takeFrame();return frame.held;};
 window.gamePressed=()=>frame.pressed;window.gameReleased=()=>frame.released;
-window.gameMouseX=()=>frame.mouseX;window.gameMouseY=()=>frame.mouseY;window.gameWheel=()=>frame.wheel;
+window.gameMouseX=()=>frame.mouseX;window.gameMouseY=()=>frame.mouseY;window.gameWheel=()=>frame.wheel;window.gameDriveMouseX=()=>frame.driveX;window.gameDriveMouseY=()=>frame.driveY;
 window.gameDrivingAssists=()=>menu?.takeDrivingAssists()??0;
 window.gameDrivingSettings=()=>drivingSettings?.take();
 // Rust passes its `GamepadFrame` arrays once per frame.
@@ -228,11 +229,12 @@ async function load(){
  // Rust copies only the shell fields, so JS does not parse the world records.
  const text=manifest_shell(bytes),manifest=JSON.parse(text);
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
- settings=createSettings(()=>localStorage,manifest.settings,gameFields(manifest.world.start_cars.length));
+ const bindings=manifest.driving.bindings,actions=actionIndex(bindings);
+ settings=createSettings(()=>localStorage,manifest.settings,{...gameFields(manifest.world.start_cars.length),inputs:inputsField(bindings)});
  installGameMode(window,document.querySelector('#biome'),settings);
  installStartCar(window,document.querySelector('#start-car'),manifest.world.start_cars,settings);
  const gameOptions=installGameOptions(window,{peaceful:document.querySelector('#peaceful'),survival:document.querySelector('#survival-mode'),homesick:document.querySelector('#homesick')},settings,options=>survival?.setSurvival(options.survival));
- installSettingsBridge(window,settings,()=>menu?.model.state==='playing');
+ installSettingsBridge(window,settings,()=>menu?.model.state==='playing',actions);
  const autosaveToggles=v=>{toggles.autosave=v.BAutoSave;toggles.inCar=!v.BDisableAutoSaveInCar;};
  autosaveToggles(settings.values);settings.listen(autosaveToggles);
  const outfit=installOutfit(window,()=>localStorage,manifest.clothing.characters);
@@ -249,7 +251,9 @@ async function load(){
  startup.end('manifest');startup.begin('interface');
  drivingSettings=installDrivingSettings(()=>localStorage,[document.querySelector('#mouse-drive-x'),document.querySelector('#mouse-drive-y')],[document.querySelector('#mouse-drive-x-value'),document.querySelector('#mouse-drive-y-value')],manifest.driving);
  steeringWheel=installSteeringWheel(document.querySelector('#steering-wheel'),drivingSettings,manifest.driving.steering_wheel,gamepad,callback=>requestAnimationFrame(callback));
- input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas && !multiplayer?.typing(),manifest.driving.bindings,cpuProfile);
+ input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas && !multiplayer?.typing(),compileBindings(bindings,settings.values.inputs),cpuProfile);
+ // Source `S.inputs`: the input maps change once per binding change.
+ {let inputs=settings.values.inputs;settings.listen(v=>{if(v.inputs!==inputs){inputs=v.inputs;input.setMaps(compileBindings(bindings,inputs));}});}
  bootstrap.manifestUtf16PayloadBytes=text.length*2;
  status.textContent='Loading interface assets...';
  loading.stage(status.textContent);
@@ -266,10 +270,10 @@ async function load(){
  const select=id=>document.querySelector(id);
  const resets={graphics:[()=>choose(sunglasses,'checked',true,'change'),()=>choose(sceneResolution,'value','100','change'),()=>choose(select('#shadow-quality'),'value','0','change'),
   ()=>choose(select('#grass-quality'),'value','0','change'),()=>choose(select('#motion-blur'),'checked',true,'change'),()=>choose(select('#depth-of-field'),'checked',false,'change'),()=>choose(select('#lamp-shadows'),'checked',true,'change'),()=>choose(select('#antialiasing'),'checked',true,'change'),()=>choose(select('#ambient-occlusion'),'checked',true,'change'),()=>choose(select('#reflections'),'checked',true,'change'),()=>mirrors.reset(),()=>slider.reset()],controls:[()=>drivingSettings.resetMouse()]};
- menu=createMenu({canvas,appearance,figure,settings,resets,defaultAssists:manifest.driving.default_assists,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,guest:()=>multiplayer?.role===ROLE.GUEST,slider,audio,onNewGame:()=>seed.reroll(),onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+ menu=createMenu({canvas,appearance,figure,settings,resets,defaultAssists:manifest.driving.default_assists,ui:manifest.ui,bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,guest:()=>multiplayer?.role===ROLE.GUEST,slider,audio,onNewGame:()=>seed.reroll(),onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  multiplayer=createMultiplayer({document,target:window,Peer:window.peerjs.Peer,buildId:manifest.build_id,exportHash:manifestHash,simulation,saveSession,menu,outfit,storage:()=>localStorage});
  {const changed=outfit.changed;outfit.changed=()=>{changed();multiplayer.look(outfit.outfit);};}
- feedback=createFeedback(manifest.ui,manifest,settings);
+ feedback=createFeedback(manifest.ui,manifest,settings,actions);
  startup.end('interface');
  if(failed)return;status.textContent='Loading the garage...';loading.stage(status.textContent);
  startup.begin('generation');startup.begin('decodeUpload');startup.begin('pipeline');

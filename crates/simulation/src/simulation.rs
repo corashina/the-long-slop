@@ -26,7 +26,8 @@ pub mod keys {
     pub const BACK: u32 = 2;
     pub const LEFT: u32 = 4;
     pub const RIGHT: u32 = 8;
-    pub const SPACE: u32 = 16;
+    /// Source `IN.jump`.
+    pub const JUMP: u32 = 16;
     pub const USE: u32 = 32;
     pub const RUN: u32 = 64;
     pub const CROUCH: u32 = 128;
@@ -58,18 +59,26 @@ pub mod keys {
 }
 
 pub mod player_keys {
-    pub const LEAN: u8 = 1;
-    pub const ZOOM: u8 = 2;
+    pub const LEAN: u16 = 1;
+    pub const ZOOM: u16 = 2;
     /// Source `input.smoke` (Caps Lock).
-    pub const SMOKE: u8 = 4;
+    pub const SMOKE: u16 = 4;
     /// Source `input.removeSunglasses` (X).
-    pub const TAKE_OFF: u8 = 8;
+    pub const TAKE_OFF: u16 = 8;
     /// Source `IN.togglemousedrive` (U).
-    pub const MOUSE_DRIVE: u8 = 16;
+    pub const MOUSE_DRIVE: u16 = 16;
     /// Source `input.point` (`IN.pointrubwave`, Left Alt): point, rub and wave.
-    pub const POINT: u8 = 32;
+    pub const POINT: u16 = 32;
     /// Source `IN.map` (M): map view.
-    pub const MAP: u8 = 64;
+    pub const MAP: u16 = 64;
+    /// Source `IN.keylook` (J): seated look with the move keys.
+    pub const KEY_LOOK: u16 = 128;
+    /// Source `IN.gas`, `IN.brake`, `IN.steerleft`, `IN.steerright` and `IN.handbrake`.
+    pub const GAS: u16 = 256;
+    pub const BRAKE: u16 = 512;
+    pub const STEER_LEFT: u16 = 1024;
+    pub const STEER_RIGHT: u16 = 2048;
+    pub const HANDBRAKE: u16 = 4096;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -151,9 +160,9 @@ pub struct FrameInput {
     pub held: u32,
     pub pressed: u32,
     pub released: u32,
-    pub player_held: u8,
-    pub player_pressed: u8,
-    pub player_released: u8,
+    pub player_held: u16,
+    pub player_pressed: u16,
+    pub player_released: u16,
     pub inventory_held: u8,
     pub inventory_released: u8,
     pub mouse: [f32; 2],
@@ -175,7 +184,7 @@ impl FrameInput {
             | keys::ROTATE
             | keys::TRANSLATE
             | keys::RECENTER;
-        const VIEW_PLAYER_KEYS: u8 = player_keys::LEAN | player_keys::ZOOM | player_keys::POINT;
+        const VIEW_PLAYER_KEYS: u16 = player_keys::LEAN | player_keys::ZOOM | player_keys::POINT;
         self.held &= !VIEW_KEYS;
         self.pressed &= !VIEW_KEYS;
         self.player_held &= !VIEW_PLAYER_KEYS;

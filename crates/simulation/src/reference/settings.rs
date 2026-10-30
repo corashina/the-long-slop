@@ -149,6 +149,8 @@ pub struct PlayerSettings {
     /// `FMouseMove`, `FMouseRot`.
     pub object_move: f32,
     pub object_rotation: f32,
+    /// `FKeyLookSens`.
+    pub key_look: f32,
     /// `FKeySteerSens`.
     pub key_steer: f32,
     /// `FFieldOfViewFoot`, `FFieldOfViewCar`.
@@ -157,6 +159,9 @@ pub struct PlayerSettings {
     pub invert: [bool; 5],
     /// `BWalkHeadBob`, `BDriveHeadBob`.
     pub head_bob: [bool; 2],
+    /// `inputs[inventory1].GetName() == inputs[gear1].GetName()`: a seated clutch blocks the
+    /// inventory keys.
+    pub inventory_gear_keys: bool,
 }
 
 impl PlayerSettings {
@@ -170,18 +175,30 @@ impl PlayerSettings {
         "BDriveHeadBob",
     ];
 
-    pub fn defaults(reference: &SettingsReference) -> Self {
+    pub fn defaults(manifest: &super::ReferenceManifest) -> Self {
+        let reference = &manifest.settings;
         let s = &reference.sliders;
         let t = |i: usize| reference.toggle(Self::TOGGLES[i]);
+        // Source `oneInput.GetName`: the first key that is not None.
+        let name = |action: &str| {
+            manifest
+                .driving
+                .bindings
+                .iter()
+                .find(|b| b.action == action)
+                .and_then(|b| b.keys.iter().flatten().next())
+        };
         Self {
             mouse: [s.mouse_xy.value(), s.mouse_x.value(), s.mouse_y.value()],
             scroll: s.scroll.value(),
             object_move: s.object_move.value(),
             object_rotation: s.object_rotation.value(),
+            key_look: s.key_look.value(),
             key_steer: s.key_steer.value(),
             fov: [s.fov_foot.value(), s.fov_car.value()],
             invert: [t(0), t(1), t(2), t(3), t(4)],
             head_bob: [t(5), t(6)],
+            inventory_gear_keys: name("inventory1") == name("gear1"),
         }
     }
 
@@ -193,6 +210,7 @@ impl PlayerSettings {
             && s.scroll.contains(self.scroll)
             && s.object_move.contains(self.object_move)
             && s.object_rotation.contains(self.object_rotation)
+            && s.key_look.contains(self.key_look)
             && s.key_steer.contains(self.key_steer)
             && s.fov_foot.contains(self.fov[0])
             && s.fov_car.contains(self.fov[1])

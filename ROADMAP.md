@@ -26,8 +26,7 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X03 | Creatures | XL | Ground UFO, EMP and green-eyed evil rabbits, human monster (attacks hurt the player), breakablescript `DamageFrom` for AI. Rabbits do not yet sense the player hum. |
-| X04c | Rebinding | M | Original action list and default keys. Rebind on the Controls screen. HUD hints show bound keys. |
-| X04d | Languages and help text | M | 10 language files, language dropdown, word table for all menu and HUD text. Help text follows the assists. After X04c. |
+| X04d | Languages and help text | M | 10 language files, language dropdown, word table for all menu and HUD text. Help text follows the assists. |
 | X06c | Building reflection probes | S | Car probes are live. Check the original building prefabs for realtime `ReflectionProbe`s. Export any as prototype probes. The live probe slots then take them. |
 | X06g | Heat haze and LUT options | M | Heat haze pass weighted by temperature, old particle heat haze, LUT option (Default, C64, Sepia), grayscale. |
 
@@ -210,6 +209,14 @@ Prepare once:
 11. FPS limit 60 caps F3 near 60 while playing. Limit off lifts the cap. The menu runs at 30.
 12. Fresh profile: autosave on, no autosave in a car on, auto-load off. Autosave off locks no autosave in a car.
 13. Game mode biome, start car and options stay after a page reload.
+14. Re-export first: the export now holds all 62 source actions. Controls lists them with 3 key cells, None and Reset, and a gap before Throttle.
+15. Click a key cell, then press a key, LMB, RMB or MMB: the cell shows the source key name. Escape cancels and keeps the menu open. Reset keys restores all defaults.
+16. Rebind Move Forward to Up arrow: walk with Up arrow. W still gives throttle in the Lada. Rebind Throttle to T: T drives, W does not.
+17. Rebind Steer Left/Right, Brake, Toggle Handbrake, a gear and Inventory Slot 1: each new key works. The keys stay after a page reload.
+18. Look Up on a key looks up while held. Look Down set to None stops looking down with the mouse. Scroll Up on a key scrolls.
+19. Seated, hold J (key look) and press WASD: the view turns. Key look sensitivity changes the speed. While leaning, J does nothing.
+20. HUD hints show the bound keys: rebind Use to G, then aim at a door. Hide HUD follows its binding.
+21. Seated with the clutch held, the inventory keys select nothing while Inventory Slot 1 and Shift To 1 share a key name. Rebind one: they select again.
 
 ### Start menu figure
 

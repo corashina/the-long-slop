@@ -2,26 +2,6 @@ use super::{ReferenceError, SourceId, Transform, finite, require};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DrivingAction {
-    Clutch,
-    ShiftUp,
-    ShiftDown,
-    Reverse,
-    Neutral,
-    Gear1,
-    Gear2,
-    Gear3,
-    Gear4,
-    Gear5,
-    Gear6,
-    /// Source `IN.togglemousedrive`.
-    MouseDrive,
-    /// Source `IN.pointrubwave`: a player bit (`player_keys::POINT`).
-    Point,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DrivingAssists {
@@ -31,9 +11,12 @@ pub struct DrivingAssists {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct DrivingBinding {
-    pub action: DrivingAction,
-    pub codes: Vec<String>,
+/// Source `inputscript.IN` action (by source name) and its `InitDefault` keys. The browser reads
+/// them. A key is a `KeyboardEvent.code`, `Mouse0` to `Mouse2`, or a mouse axis named like
+/// `oneKey.GetName`. None is null.
+pub struct InputBinding {
+    pub action: String,
+    pub keys: [Option<String>; 3],
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -44,7 +27,7 @@ pub struct DrivingReference {
     pub force_manual: bool,
     pub min_motor_torque_nm: f32,
     pub default_assists: DrivingAssists,
-    pub bindings: Vec<DrivingBinding>,
+    pub bindings: Vec<InputBinding>,
     pub mouse_drive: MouseDriveReference,
     pub lever: LeverTiming,
     pub steering_wheel: SteeringWheelReference,
@@ -181,45 +164,12 @@ impl DrivingReference {
             !self.default_assists.automatic_gears || self.default_assists.automatic_clutch,
             "driving assist dependency",
         )?;
-        let allowed = [
-            "ControlLeft",
-            "ControlRight",
-            "Numpad0",
-            "ArrowUp",
-            "ArrowDown",
-            "KeyR",
-            "KeyN",
-            "NumpadAdd",
-            "NumpadSubtract",
-            "Digit0",
-            "Digit1",
-            "Digit2",
-            "Digit3",
-            "Digit4",
-            "Digit5",
-            "Digit6",
-            "Numpad1",
-            "Numpad2",
-            "Numpad3",
-            "Numpad4",
-            "Numpad5",
-            "Numpad6",
-            "KeyU",
-            "AltLeft",
-        ];
         let mut actions = HashSet::new();
         require(
-            self.bindings.len() == 13
-                && self.bindings.iter().all(|binding| {
-                    actions.insert(binding.action)
-                        && !binding.codes.is_empty()
-                        && binding
-                            .codes
-                            .iter()
-                            .all(|code| allowed.contains(&code.as_str()))
-                        && binding.codes.iter().collect::<HashSet<_>>().len() == binding.codes.len()
-                }),
-            "driving bindings",
+            self.bindings
+                .iter()
+                .all(|binding| !binding.action.is_empty() && actions.insert(&binding.action)),
+            "input bindings",
         )?;
         require(
             [

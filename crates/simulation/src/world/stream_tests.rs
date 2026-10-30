@@ -4464,23 +4464,13 @@ fn g08_frame_blocked_states_do_not_mutate() {
 #[test]
 #[ignore = "requires the installed source export"]
 fn g08_frame_clutch_binding_collision() {
-    use crate::{
-        reference::DrivingAction,
-        simulation::{FrameInput, keys},
-    };
+    use crate::simulation::{FrameInput, keys};
+    let reference = reference();
     for collision in [false, true] {
-        let mut reference = reference();
-        if collision {
-            reference
-                .driving
-                .bindings
-                .iter_mut()
-                .find(|b| b.action == DrivingAction::Clutch)
-                .unwrap()
-                .codes
-                .push("Digit1".into());
-        }
         let mut run = g08_ready(&reference);
+        let mut settings = run.player_settings;
+        settings.inventory_gear_keys = collision;
+        run.set_player_settings(settings);
         assert!(drive_out::enter(&mut run, &reference));
         let input = FrameInput {
             held: keys::CLUTCH,

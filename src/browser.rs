@@ -231,8 +231,11 @@ extern "C" {
     pub fn game_failure(message: &str);
     #[wasm_bindgen(js_namespace = window, js_name = gameKeys)]
     pub fn game_keys() -> u32;
+    /// Held player keys in bits 0-15, pressed in bits 16-31.
     #[wasm_bindgen(js_namespace = window, js_name = gamePlayerKeys)]
     pub fn game_player_keys() -> u32;
+    #[wasm_bindgen(js_namespace = window, js_name = gamePlayerReleased)]
+    pub fn game_player_released() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gamePressed)]
     pub fn game_pressed() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gameReleased)]
@@ -245,6 +248,11 @@ extern "C" {
     pub fn game_mouse_y() -> f32;
     #[wasm_bindgen(js_namespace = window, js_name = gameWheel)]
     pub fn game_wheel() -> f32;
+    /// Source `Mouse X` and `Mouse Y` axes for mouse driving, outside the look bindings.
+    #[wasm_bindgen(js_namespace = window, js_name = gameDriveMouseX)]
+    pub fn game_drive_mouse_x() -> f32;
+    #[wasm_bindgen(js_namespace = window, js_name = gameDriveMouseY)]
+    pub fn game_drive_mouse_y() -> f32;
     #[wasm_bindgen(js_namespace = window, js_name = gameActions)]
     pub fn game_actions() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gameDrivingAssists)]

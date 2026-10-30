@@ -43,7 +43,7 @@ impl LadderState {
     }
     /// One player step on foot.
     pub(super) fn tick(&mut self, input: FrameInput) {
-        if input.released & keys::SPACE != 0 {
+        if input.released & keys::JUMP != 0 {
             self.jump_released = true;
         }
         self.active = self.countdown > 0;
@@ -97,7 +97,7 @@ impl LadderState {
             sum += right;
         }
         sum += vertical.normalize_or_zero();
-        if input.pressed & keys::SPACE != 0 {
+        if input.pressed & keys::JUMP != 0 {
             self.jump_released = false;
             return None;
         }

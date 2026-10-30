@@ -84,7 +84,7 @@ impl PostureState {
             self.duck_jumped = false;
             wall.grounded();
         }
-        if wall.hold(input.held & keys::SPACE != 0) {
+        if wall.hold(input.held & keys::JUMP != 0) {
             self.grip(wall);
         }
         if input.released & keys::CROUCH != 0 && self.last_ducked {
@@ -97,7 +97,7 @@ impl PostureState {
         if input.held & keys::CROUCH != 0 {
             self.rising = false;
         }
-        let space_released = input.held & keys::SPACE == 0 && self.space_duck;
+        let space_released = input.held & keys::JUMP == 0 && self.space_duck;
         if space_released {
             if self.last_ducked {
                 self.rising = true;
@@ -107,7 +107,7 @@ impl PostureState {
         let mut force = 0.0;
         let ctrl_jump = input.pressed & keys::CROUCH != 0
             && self.can_duck_jump
-            && (!grounded || input.held & keys::SPACE != 0);
+            && (!grounded || input.held & keys::JUMP != 0);
         if ctrl_jump && self.value >= 0.5 {
             force += forces.duck;
             self.duck_jumped = true;
@@ -116,7 +116,7 @@ impl PostureState {
             duck = true;
         }
         if wall.supported(grounded) {
-            if input.pressed & keys::SPACE != 0 {
+            if input.pressed & keys::JUMP != 0 {
                 force += 1.0;
                 self.can_duck_jump = true;
                 self.duck_jumped = false;
@@ -127,7 +127,7 @@ impl PostureState {
                 force -= forces.inverse_duck;
                 self.duck_jumped = false;
             }
-            if input.pressed & keys::SPACE != 0 {
+            if input.pressed & keys::JUMP != 0 {
                 if let Some(kind) = wall.air_jump() {
                     self.grip(wall);
                     force += match kind {

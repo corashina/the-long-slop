@@ -39,11 +39,13 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 .setting-slider input[type=number] {width:6em;min-height:36px;background:#0008;border:1px solid #b48046;color:#fff;font:inherit;}
 .settings-list input[type=checkbox] {margin:0;width:20px;height:20px;accent-color:#b48046;}
 .setting-toggle:has(input:disabled) {opacity:.45;}
-.control-columns {display:grid;grid-template-columns:1fr 1fr;gap:32px;}
-.control-columns h3 {font-size:clamp(20px,2.5vw,50px);font-weight:400;margin:0 0 24px;text-shadow:2px 2px 2px #000;}
-.control-columns dl {margin:0;font-family:Arial,sans-serif;font-size:clamp(16px,1.65vw,36px);line-height:1.5;text-shadow:2px 2px 2px #000;}
-.control-columns dl div {display:grid;grid-template-columns:minmax(130px,1.2fr) 1fr;gap:16px;margin-bottom:8px;}
-.control-columns dd {margin:0;}
+.key-bindings-head {display:flex;align-items:center;gap:16px;margin:0 0 8px;}
+.key-bindings-head h3 {font-size:clamp(20px,2.5vw,50px);font-weight:400;margin:0;text-shadow:2px 2px 2px #000;}
+.key-bindings {display:flex;flex-direction:column;gap:4px;max-width:1100px;font:16px Arial,sans-serif;}
+.key-row {display:grid;grid-template-columns:minmax(160px,1.4fr) repeat(3,minmax(72px,1fr)) auto auto;align-items:center;gap:8px;min-height:44px;}
+.key-row span {text-shadow:2px 2px 2px #000;}
+.key-gap {margin-top:44px;}
+.key-row button,#key-bindings-reset {position:static;min-height:44px;padding:4px 12px;background:#b4804640;border:1px solid #b48046;font:16px Arial,sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .display-controls {position:absolute;left:16px;right:16px;bottom:16px;display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;font:18px Arial,sans-serif;}
 .display-controls label {display:flex;align-items:center;gap:8px;}
 #draw-distance-value {min-width:5.5em;}
@@ -134,9 +136,9 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
  #menu.narrow .menu-actions {inset:auto 16px 16px;display:grid;gap:12px;max-height:calc(100dvh - 210px);overflow:auto;}
  #menu.narrow .menu-actions button {position:relative;}
  #menu.narrow #session-distance {position:static;margin:8px 0;font-size:16px;}
- .control-columns {grid-template-columns:1fr;}
+ .key-row {grid-template-columns:repeat(3,minmax(0,1fr));}
+ .key-row span {grid-column:1/-1;}
  .settings-body {left:16px;right:16px;}
- .control-columns dl {font-size:16px;}
  #menu.narrow #status {top:70px;font-size:18px;}
  .save-body {inset:190px 16px 76px;grid-template-columns:1fr;}
  #save-tiles {grid-template-columns:repeat(2,minmax(0,1fr));}

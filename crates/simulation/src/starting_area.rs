@@ -188,7 +188,7 @@ impl StartingArea {
         let player = PlayerState::new(
             &reference.player,
             &reference.clothing.pose,
-            crate::reference::PlayerSettings::defaults(&reference.settings),
+            crate::reference::PlayerSettings::defaults(reference),
             VehiclePose {
                 position: std::array::from_fn(|i| spawn.translation[i] - origin[i] as f32),
                 rotation: spawn.rotation,
@@ -279,10 +279,8 @@ impl StartingArea {
         Ok(Self {
             inventory: crate::inventory::InventoryState::new(&reference.inventory),
             inventory_offsets: [None; 4],
-            inventory_clutch_conflict: reference.driving.bindings.iter().any(|binding| {
-                binding.action == crate::reference::DrivingAction::Clutch
-                    && binding.codes.iter().any(|code| code == "Digit1")
-            }),
+            inventory_clutch_conflict: crate::reference::PlayerSettings::defaults(reference)
+                .inventory_gear_keys,
             pose: crate::player::pose::PlayerPoseState::new(reference)?,
             body: crate::player::body::BodyState::new(reference)?,
             ragdoll: crate::player::ragdoll::Ragdoll::new(reference)?,
@@ -824,6 +822,7 @@ impl GarageRuntime {
         self.area.player.set_settings(settings);
         self.area.interaction.set_settings(settings);
         self.driving_input.set_steering_rate(settings.key_steer);
+        self.area.inventory_clutch_conflict = settings.inventory_gear_keys;
     }
     pub fn set_driving_assists(
         &mut self,
@@ -991,7 +990,7 @@ impl GarageRuntime {
                 reference.driving.pedal_rate,
                 crate::simulation::input::DrivingSettings::defaults(&reference.driving),
             ),
-            player_settings: crate::reference::PlayerSettings::defaults(&reference.settings),
+            player_settings: crate::reference::PlayerSettings::defaults(reference),
             recovery_bodies: Vec::with_capacity(reference.items.len()),
             recovery_held_bodies: Vec::with_capacity(reference.items.len()),
             under_map_check: 0.,
@@ -1533,7 +1532,7 @@ impl GarageRuntime {
             self.reach_seated_car(reference, &key, crate::simulation::reach::lights);
         }
         if (driving || self.area.player.driving2())
-            && input.pressed & keys::SPACE != 0
+            && input.player_pressed & crate::simulation::player_keys::HANDBRAKE != 0
             && let Some(key) = self.vehicle.clone()
             && let Some(vehicle) = self.vehicles.get_mut(&key)
         {
