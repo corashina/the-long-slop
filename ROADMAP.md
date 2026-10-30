@@ -35,8 +35,8 @@ Match the source Steam multiplayer (`sns`, `snl`, `snTempPlayerSync`). WebRTC pe
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| M01 | Join and see each other | L | Room code, join with the host save, remote player figures with IK and outfit, collision, chat, ping. |
-| M02 | Shared cars | L | Driver input sync (`carfloats`, gears, ignition, lamps, handbrake), passengers. |
+| M01 | Join and see each other | S | Remote player collision: export the `mpplayerscript` capsule (`minBodyRadius`, `maxBodyRadius`, head and prone head nodes), add a kinematic capsule per figure, 3 s spawn delay and 1 s after standing up. |
+| M02 | Shared cars | L | Driver input sync (`carfloats`, gears, ignition, lamps, handbrake), passengers. Seated figures follow the seat of the car by save id (source `UpdPos` sitting). |
 | M03 | Shared items and world | XL | `claim`, item poses and velocity, inventory, tanks and caps, parts, usables, attachables, food, weapons. |
 | M04 | Everything else | XL | Creatures, time and sleep, weather, radio channels, sounds, voice chat. |
 
@@ -272,16 +272,17 @@ Prepare once:
 
 ### Multiplayer
 
-Use two browser tabs on one PC first, then two PCs.
+Re-export first: the export now holds `playeranimationscript.sendInterval`. Use two browser tabs on one PC first, then two PCs.
 
 1. Host from the pause menu: a 6-letter room code shows. Join from the start menu with the code and a name.
-2. The guest loads the host world and spawns next to the host.
+2. The guest loads the host world and stands where the host stood. A host in a car seat puts the guest in the same seat until M02.
 3. Each player sees the other walk, run, duck, prone, look up and down, and carry items. Names show above the heads.
 4. Sit in the Lada as driver and passenger: the figure sits in the seat.
-5. Walk into the other player: you bump. Right after join, figures do not collide for 3 s.
-6. Outfit: change the appearance on one peer. The other peer sees the change.
-7. Chat with T. Messages show on all peers. Ping shows for each player.
-8. Wrong code, wrong password and a full room each show their message. A different build shows "Different game version."
-9. A guest closes the tab: its figure goes away within 5 s. The host closes the tab: guests see "Host left." and go to the main menu.
-10. The guest cannot save. Autosave does not run on the guest.
-11. F3 with 1 and with 7 remote players. Report the frame time cost per figure.
+5. Outfit: change the appearance on one peer. The other peer sees the change.
+6. Press Enter to chat. Messages show on all peers for 10 s. The multiplayer screen shows each player and its ping.
+7. Wrong code, wrong password and a full room each show their message. A different build shows "Different game version."
+8. A guest closes the tab: its figure goes away within 5 s. The host closes the tab: guests see "Host left." and keep playing alone.
+9. The guest cannot save: Save, Load and New game hide in the pause menu. Autosave does not run on the guest.
+10. Name labels stand above the heads. Check the label height (port choice 2.1 m).
+11. Each figure keeps its own outfit colors. The local body colors do not change.
+12. F3 with 1 and with 7 remote players. Report the frame time cost per figure.
