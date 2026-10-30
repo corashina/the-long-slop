@@ -811,8 +811,6 @@ pub struct GarageRuntime {
     screens_scratch: Vec<ItemId>,
     /// World cars whose plate texts the renderer has.
     plates_sent: Vec<crate::world::GeneratedId>,
-    /// The followed car the renderer last received.
-    followed_car: Option<(crate::world::GeneratedId, u32)>,
     structure_views: structure_frame::StructureViews,
     /// The feedback the renderer last received.
     last_feedback: Option<hud::FeedbackStamp>,
@@ -1003,7 +1001,6 @@ impl GarageRuntime {
             screens_sent: None,
             screens_scratch: Vec::new(),
             plates_sent: Vec::new(),
-            followed_car: None,
             structure_views: Default::default(),
             last_feedback: None,
             render_input: Default::default(),

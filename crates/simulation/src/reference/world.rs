@@ -19,6 +19,8 @@ pub use initialization::*;
 pub use lod::*;
 mod draw_distance;
 pub use draw_distance::*;
+mod mirrors;
+pub use mirrors::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -36,6 +38,7 @@ pub struct WorldReference {
     /// mainscript.lightTurnOffValue: electronics output that powers radios and lamps.
     pub electronics_cutoff: f32,
     pub draw_distance: DrawDistanceReference,
+    pub mirrors: MirrorsReference,
     #[serde(deserialize_with = "compact_vec")]
     pub source_hashes: Vec<SourceHash>,
     pub road: WorldRoadReference,
@@ -1138,6 +1141,7 @@ impl WorldReference {
             require(records.contains(s), &field(s, "required world input"))?;
         }
         self.draw_distance.validate()?;
+        self.mirrors.validate()?;
         let r = &self.road;
         require(
             finite(&[

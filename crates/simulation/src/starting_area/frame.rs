@@ -10,7 +10,7 @@ use crate::interaction::cigarettes::EmberPhase;
 use crate::interaction::items::ItemLocation;
 use crate::reference::{ItemId, ReferenceManifest};
 use crate::vehicle::VehiclePose;
-use crate::world::{ObjectKey, WorldLayer};
+use crate::world::ObjectKey;
 
 impl GarageRuntime {
     /// Writes this tick's poses and state into `frame`. `alpha` comes from the step clock.
@@ -187,7 +187,6 @@ impl GarageRuntime {
         frame.decals.clear();
         frame.decals.extend(self.area.interaction.decals.rows());
         self.fill_conditions(reference, frame);
-        self.fill_followed_car(frame);
         self.fill_structures(reference, frame);
         self.fill_hud(reference, frame);
         self.fill_audio(reference, alpha, self.render_input, &mut frame.audio);
@@ -333,24 +332,6 @@ impl GarageRuntime {
                 .iter()
                 .map(|t| cleaning.get(t.item).unwrap().color.unwrap()),
         );
-    }
-    /// Source probe follow: the world car the player last sat in, else the start car.
-    fn fill_followed_car(&mut self, frame: &mut SimFrame) {
-        let car = match self.vehicle.as_ref() {
-            Some(key @ ObjectKey::Generated(id)) => self.vehicles.get(key).map(|v| (id, v)),
-            Some(_) => None,
-            None => self.vehicles.iter().find_map(|(key, vehicle)| match key {
-                ObjectKey::Generated(id) if id.layer == WorldLayer::Startup => Some((id, vehicle)),
-                _ => None,
-            }),
-        }
-        .map(|(id, v)| (id, v.prototype as u32));
-        if car != self.followed_car.as_ref().map(|(id, p)| (id, *p)) {
-            self.followed_car = car.map(|(id, p)| (id.clone(), p));
-            frame
-                .changes
-                .push(Change::FollowedCar(self.followed_car.clone()));
-        }
     }
 }
 

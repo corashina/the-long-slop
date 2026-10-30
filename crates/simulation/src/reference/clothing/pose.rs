@@ -174,7 +174,13 @@ impl PlayerPoseReference {
                 .all(|(a, b)| (a - b).abs() < 1e-6),
             "exact player hand rotation",
         )?;
-        require(self.animation_scalars.len() == 6, "player head inputs")?;
+        require(self.animation_scalars.len() == 7, "player head inputs")?;
+        require(
+            self.animation_scalars
+                .get("sendInterval")
+                .is_some_and(|v| v.is_finite() && *v > 0.),
+            "player send interval",
+        )?;
         for (field, value) in [
             ("headBackM", 0.1),
             ("headBackLerp", 10.),

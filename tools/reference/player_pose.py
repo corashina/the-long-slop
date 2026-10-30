@@ -22,7 +22,7 @@ IK_IDS = (69323,79008,76627,70472,76733)
 IK_BONES = ([26925,26072,30531],[38757,28290,34137],[36277,36234,27719,37236,29226],[32657,37442,37971],[34390,29634,31204])
 IK_LINKS = ((29799,36286,23301),(29799,26378,38357),(29799,25362,37866),(38049,32234,28800),(25710,32762,38405))
 SCALAR_FIELDS = ('walkLerp','walkRotLerp','walkSpeedModifier','FHeadLerp','FduckLerp','onehandLimit','pickedUpLerp')
-ANIM_SCALARS = ('headBackM','headBackLerp','headForwardLerp','maxHeadBobX','maxHeadBobY','maxHeadBobZ')
+ANIM_SCALARS = ('headBackM','headBackLerp','headForwardLerp','maxHeadBobX','maxHeadBobY','maxHeadBobZ','sendInterval')
 
 
 def resolved_transform(source, reader):
@@ -103,7 +103,11 @@ def validate_player_pose(p,manifest):
     if p['runtime_targets']!={f:None for f in NULL_FIELDS}:raise ValueError('Authored null player targets')
     if p['method_inputs']!={'VLerpSpeedHand':20.,'VLerpSpeedLeg':20.,'VMoveLockTime':.5,'handSnapDelay':.25}:raise ValueError('Player method inputs')
     if p['walk_offsets']!=[.5,0.] or p['scalars']!={'walkLerp':5.,'walkRotLerp':1.,'walkSpeedModifier':0.10000000149011612,'FHeadLerp':15.,'FduckLerp':5.,'onehandLimit':10.,'pickedUpLerp':6.}:raise ValueError('Player pose inputs')
-    if p['animation_scalars']!={'headBackM':0.10000000149011612,'headBackLerp':10.,'headForwardLerp':4.,'maxHeadBobX':0.20000000298023224,'maxHeadBobY':0.10000000149011612,'maxHeadBobZ':0.30000001192092896}:raise ValueError('Player head inputs')
+    head={f:v for f,v in p['animation_scalars'].items() if f!='sendInterval'}
+    if head!={'headBackM':0.10000000149011612,'headBackLerp':10.,'headForwardLerp':4.,'maxHeadBobX':0.20000000298023224,'maxHeadBobY':0.10000000149011612,'maxHeadBobZ':0.30000001192092896}:raise ValueError('Player head inputs')
+    # `playeranimationscript.sendInterval`: the multiplayer body send period.
+    send=p['animation_scalars'].get('sendInterval')
+    if not isinstance(send,float) or not math.isfinite(send) or send<=0:raise ValueError('Player send interval')
     if p['use_override_sit_pose'] or p['override_sit_pose_index']!=0 or len(p['character_meshes'])!=12 or any(not match(n,i) for n,i in zip(p['character_meshes'],(32922,38614,23205,27836,22144,30679,23000,31080,39486,32302,30051,29368),strict=True)):raise ValueError('Player view or sit inputs')
     if any(abs(a-b)>1e-6 for a,b in zip(p['right_hand_rotation'],convert_rotation(_rotation((0,0,-90))),strict=True)):raise ValueError('Exact player hand rotation')
     if len(p['right_hand_rotation'])!=4 or abs(sum(v*v for v in p['right_hand_rotation'])-1)>.002:raise ValueError('Player hand rotation')

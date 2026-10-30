@@ -70,6 +70,13 @@ fn frame_round_trips() {
             },
         ],
         joints: vec![row(9.)],
+        remotes: vec![RemoteRow {
+            slot: 2,
+            flags: RemoteRow::VISIBLE,
+            body_pose: row(11.),
+            body_root: row(12.),
+        }],
+        remote_joints: vec![row(13.)],
         ragdoll: vec![row(10.)],
         cigarettes: vec![CigaretteRow {
             item: 7,
@@ -222,19 +229,6 @@ fn frame_round_trips() {
                 rotation: [0., 0., 0., 1.],
                 scale_z: 0.4,
             }]),
-            Change::FollowedCar(Some((
-                crate::world::GeneratedId {
-                    layer: crate::world::WorldLayer::Startup,
-                    generator: crate::reference::SourceId {
-                        file: "level0".into(),
-                        path_id: 5,
-                    },
-                    unit: [1, -2],
-                    ordinal: 4,
-                    children: Vec::new(),
-                },
-                6,
-            ))),
             Change::Feedback(Box::new(Feedback {
                 name: "Jerry can".into(),
                 amount: 4.5,

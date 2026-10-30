@@ -377,6 +377,11 @@ impl ProbePublication {
             return Err("Source probe has a pending job or invalid token");
         }
         let valid = match job {
+            // Face 0 starts a new capture. It drops the faces of an abandoned capture.
+            ProbeJob::Face(0) => {
+                self.discard_capture();
+                true
+            }
             ProbeJob::Face(face) if face < 6 => self.faces == (1u8 << face) - 1 && self.mips == 0,
             ProbeJob::FirstMip => self.faces == 0x3f && self.mips == 1,
             ProbeJob::RemainingMipsAndPublish => self.faces == 0x3f && self.mips == 3,

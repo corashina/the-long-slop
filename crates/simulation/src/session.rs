@@ -13,6 +13,7 @@ pub struct Session {
     frame: crate::boundary::SimFrame,
     encoder: FrameEncoder,
     bytes: Vec<u8>,
+    net_out: Vec<u8>,
 }
 
 impl Session {
@@ -32,8 +33,32 @@ impl Session {
             frame: Default::default(),
             encoder: FrameEncoder::default(),
             bytes: Vec::new(),
+            net_out: Vec::new(),
         };
         Ok((session, startup))
+    }
+
+    /// Starts or ends a multiplayer session. `role`: 0 off, 1 host, 2 guest.
+    pub fn net_session(&mut self, role: u8, slot: u8) {
+        use crate::net::NetRole;
+        let role = match role {
+            1 => NetRole::Host,
+            2 => NetRole::Guest,
+            _ => NetRole::Off,
+        };
+        self.driver.net.set_session(role, slot);
+    }
+    /// Length-prefixed packets from peers, for the next tick.
+    pub fn net_receive(&mut self, packets: &[u8]) {
+        self.driver.net.receive(packets);
+    }
+    pub fn net_leave(&mut self, slot: u8) {
+        self.driver.net.leave(slot);
+    }
+    /// Length-prefixed packets of the last tick, for peers.
+    pub fn net_send(&mut self) -> &[u8] {
+        self.driver.net.take_outbox(&mut self.net_out);
+        &self.net_out
     }
 
     /// Runs one encoded command. Returns the encoded frame.

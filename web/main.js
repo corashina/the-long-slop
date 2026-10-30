@@ -20,6 +20,10 @@ import {installLampShadows} from './lamp-shadows.js';
 installLampShadows(window,()=>localStorage,document.querySelector('#lamp-shadows'));
 import {installDepthOfField} from './depth-of-field.js';
 installDepthOfField(window,()=>localStorage,document.querySelector('#depth-of-field'));
+import {installReflections} from './reflections.js';
+installReflections(window,()=>localStorage,document.querySelector('#reflections'));
+import {installMirrors} from './mirrors.js';
+const mirrors=installMirrors(window,()=>localStorage,document.querySelector('#mirrors'),document.querySelector('#mirror-draw-distance'),document.querySelector('#mirror-draw-distance-value'));
 import {createSettings,installSettingsBridge} from './settings.js';
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
@@ -76,6 +80,8 @@ import {createStartupTrace} from './startup-trace.js';
 import {createPerformance} from './performance.js';
 import {loadUiAssets} from './ui-layout.js';
 import {createSimulation,installSimulationBridge} from './simulation.js';
+import {createMultiplayer} from './multiplayer.js';
+import {ROLE} from './net.js';
 import {readSandbox,installSandbox} from './sandbox.js';
 import {installGrassBridge} from './grass.js';
 import {configureAssetCatalog,readAsset,worldBootstrapMeasurements,worldInputBytes,worldInputMetadataBytes,setAssetCpuProfile} from './world-assets.js';
@@ -120,7 +126,7 @@ window.gameMeasurements=json=>{
  for(const resolve of measurementWaiters.splice(0))resolve(snapshot);
 };
 const sandbox=readSandbox(location.search);installSandbox(window,sandbox!==null);
-let input,survival,dead=false,sleeping=false,audio,menu,feedback,failed=false,worldAdmitted=false,actions=0,frame,renderFailure;
+let input,survival,dead=false,sleeping=false,audio,menu,multiplayer,feedback,failed=false,worldAdmitted=false,actions=0,frame,renderFailure;
 const inventory={selected:0,slots:[0,0,0,0],progress:0};
 window.gameInventory=(selected,a,b,c,d,progress)=>{
  inventory.selected=selected;inventory.slots[0]=a;inventory.slots[1]=b;inventory.slots[2]=c;inventory.slots[3]=d;inventory.progress=progress;
@@ -168,7 +174,8 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, surfaces, colliders, a
   state.autosaveSafe = autosaveSafe; state.seated = seated;
   menu?.sync(started,paused,travelM);
   const playing=menu?.model.state==='playing';
-  if(autosave.tick(now/1000,playing,autosaveSafe,seated,toggles)&&!autosaving&&!saveSession.pending)runAutosave();
+  // Source guests have no save.
+  if(autosave.tick(now/1000,playing,autosaveSafe,seated,toggles)&&!autosaving&&!saveSession.pending&&multiplayer?.role!==ROLE.GUEST)runAutosave();
   feedback?.setVisible(started&&!paused&&!dead&&!sleeping&&mode===0&&menu?.model.state==='playing');
   survival?.setVisible(started&&!paused&&!sleeping&&menu?.model.state==='playing');
 };
@@ -231,6 +238,7 @@ async function load(){
  const outfit=installOutfit(window,()=>localStorage,manifest.clothing.characters);
  const range=manifest.world.draw_distance;
  slider=installDrawDistance(()=>localStorage,document.querySelector('#draw-distance'),document.querySelector('#draw-distance-value'),{minimum:range.minimum.drawDistance,maximum:range.maximum.drawDistance,fallback:range.default});
+ mirrors.range(manifest.world.mirrors.draw_distance);
  // The simulation parses its own manifest copy while this thread loads the interface.
  worldDrawDistance=slider.value();
  const simulationStarted=simulation.start(bytes.slice(),manifestHash,worldDrawDistance,window.gameBiome(),window.gameStartCar(),window.gameSeed(),gameOptions.bits());
@@ -241,7 +249,7 @@ async function load(){
  startup.end('manifest');startup.begin('interface');
  drivingSettings=installDrivingSettings(()=>localStorage,[document.querySelector('#mouse-drive-x'),document.querySelector('#mouse-drive-y')],[document.querySelector('#mouse-drive-x-value'),document.querySelector('#mouse-drive-y-value')],manifest.driving);
  steeringWheel=installSteeringWheel(document.querySelector('#steering-wheel'),drivingSettings,manifest.driving.steering_wheel,gamepad,callback=>requestAnimationFrame(callback));
- input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas,manifest.driving.bindings,cpuProfile);
+ input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas && !multiplayer?.typing(),manifest.driving.bindings,cpuProfile);
  bootstrap.manifestUtf16PayloadBytes=text.length*2;
  status.textContent='Loading interface assets...';
  loading.stage(status.textContent);
@@ -257,8 +265,10 @@ async function load(){
  const choose=(node,property,value,event)=>{if(node.disabled)return;node[property]=value;node.dispatchEvent(new Event(event));};
  const select=id=>document.querySelector(id);
  const resets={graphics:[()=>choose(sunglasses,'checked',true,'change'),()=>choose(sceneResolution,'value','100','change'),()=>choose(select('#shadow-quality'),'value','0','change'),
-  ()=>choose(select('#grass-quality'),'value','0','change'),()=>choose(select('#motion-blur'),'checked',true,'change'),()=>choose(select('#depth-of-field'),'checked',false,'change'),()=>choose(select('#lamp-shadows'),'checked',true,'change'),()=>choose(select('#antialiasing'),'checked',true,'change'),()=>choose(select('#ambient-occlusion'),'checked',true,'change'),()=>slider.reset()],controls:[()=>drivingSettings.resetMouse()]};
- menu=createMenu({canvas,appearance,figure,settings,resets,defaultAssists:manifest.driving.default_assists,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,slider,audio,onNewGame:()=>seed.reroll(),onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+  ()=>choose(select('#grass-quality'),'value','0','change'),()=>choose(select('#motion-blur'),'checked',true,'change'),()=>choose(select('#depth-of-field'),'checked',false,'change'),()=>choose(select('#lamp-shadows'),'checked',true,'change'),()=>choose(select('#antialiasing'),'checked',true,'change'),()=>choose(select('#ambient-occlusion'),'checked',true,'change'),()=>choose(select('#reflections'),'checked',true,'change'),()=>mirrors.reset(),()=>slider.reset()],controls:[()=>drivingSettings.resetMouse()]};
+ menu=createMenu({canvas,appearance,figure,settings,resets,defaultAssists:manifest.driving.default_assists,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,guest:()=>multiplayer?.role===ROLE.GUEST,slider,audio,onNewGame:()=>seed.reroll(),onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+ multiplayer=createMultiplayer({document,target:window,Peer:window.peerjs.Peer,buildId:manifest.build_id,exportHash:manifestHash,simulation,saveSession,menu,outfit,storage:()=>localStorage});
+ {const changed=outfit.changed;outfit.changed=()=>{changed();multiplayer.look(outfit.outfit);};}
  feedback=createFeedback(manifest.ui,manifest,settings);
  startup.end('interface');
  if(failed)return;status.textContent='Loading the garage...';loading.stage(status.textContent);
