@@ -1,7 +1,7 @@
 // TMP Surface programs 4 and 20, installed build 11140890.
 #import bevy_pbr::{mesh_functions, mesh_view_bindings::view}
 #import "shaders/source_lighting.wgsl"::{lamp_lighting, receiver, cookie_uv_gradient, attenuation, attenuation_sampler, default_cookie, default_sampler, cookies, cookie_sampler}
-#import source_view_lighting::{lighting, diffuse_sh, direct_attenuation, fog_factor, sun_cookie, sun_cookie_sampler}
+#import source_view_lighting::{lighting, diffuse_sh, direct_attenuation, lamp_shadow, fog_factor, sun_cookie, sun_cookie_sampler}
 struct PlateUniform { face:vec4<f32>, outline:vec4<f32>, sdf:vec4<f32>, scale:vec4<f32>, bevel:vec4<f32>, bump:vec4<f32>, specular:vec4<f32> }
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> plate:PlateUniform;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var atlas:texture_2d<f32>;
@@ -76,6 +76,7 @@ struct Out { @builtin(position) position:vec4<f32>, @location(0) world:vec4<f32>
             let delta=lamp.position_range.xyz-i.world.xyz;let d2=dot(delta,delta);let range2=lamp.position_range.w*lamp.position_range.w;
             if d2>=range2 {continue;}
             direction=delta*inverseSqrt(max(d2,.000001));weight=textureSampleLevel(attenuation,attenuation_sampler,vec2(d2/range2,.5),0.).r;
+            weight*=lamp_shadow(lamp.mask.z,lamp.position_range.xyz,i.world.xyz,normal,depth,true);
         }
         if lamp.cookie_rect.x>0. {
             var uv=vec2(0.);

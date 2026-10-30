@@ -54,6 +54,8 @@ pub struct ShadowScene {
     casters_ready: bool,
     views: [ShadowViewCache; VIEW_COUNT],
     mask_revisions: [u64; VIEW_COUNT],
+    /// Changes when a lamp bit of the world view masks changes.
+    lamp_revision: u64,
 }
 impl ShadowScene {
     pub(crate) fn view_revision(
@@ -99,6 +101,7 @@ pub(super) fn prepare_scene(
     camera: Res<super::renderer_visibility::CameraVisibility>,
     meshes: Query<ShadowMesh, (With<ViewVisibility>, Without<SourceMaterialWarmup>)>,
     mut instances: ResMut<SourceInstances>,
+    lamps: Res<super::lamp_shadows::LampShadows>,
 ) {
     scene.frame = 0;
     scene.fits = [None; VIEW_COUNT];
@@ -259,6 +262,17 @@ pub(super) fn prepare_scene(
         }
         scene.mask_revisions[index] = scene.views[index].revision();
     }
+    // Lamp slots draw only in the world view atlas. Both revisions only grow, so their sum changes with either.
+    if frame.views[0].is_some()
+        && crate::reference::lamp_shadows::write_lamp_bits(
+            &scene.caster_data.casters,
+            &lamps.spheres,
+            &mut scene.masks[0],
+        )
+    {
+        scene.lamp_revision += 1;
+    }
+    scene.mask_revisions[0] = scene.views[0].revision() + scene.lamp_revision;
     drop(changes);
     let mut visibility = updates.p1();
     scene.shadow_only = 0;

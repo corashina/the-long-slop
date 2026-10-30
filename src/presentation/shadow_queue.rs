@@ -59,7 +59,8 @@ pub struct ShadowQueues {
     idle_probe_phases: [Option<BinnedRenderPhase<SourceShadow>>; 6],
     epoch: Option<(u64, u32)>,
     revision: u64,
-    pub instances: [[u32; 4]; VIEW_COUNT],
+    /// Queued instances of each caster mask bit: 4 cascades, then 4 lamp slots.
+    pub instances: [[u32; 8]; VIEW_COUNT],
     pub ready: [bool; VIEW_COUNT],
     pub frame: u32,
 }
@@ -73,7 +74,7 @@ impl FromWorld for ShadowQueues {
             idle_probe_phases: std::array::from_fn(|_| None),
             epoch: None,
             revision: 0,
-            instances: [[0; 4]; VIEW_COUNT],
+            instances: [[0; 8]; VIEW_COUNT],
             ready: [false; VIEW_COUNT],
             frame: 0,
         }
@@ -188,7 +189,7 @@ fn base_pipeline(
 pub fn queue(world: &mut World) {
     world.resource_scope(|world, mut state: Mut<ShadowQueues>| {
         state.ready = [false; VIEW_COUNT];
-        state.instances = [[0; 4]; VIEW_COUNT];
+        state.instances = [[0; 8]; VIEW_COUNT];
         state.revision += 1;
         let revision = state.revision;
         state.frame = 0;
@@ -375,9 +376,8 @@ pub fn queue(world: &mut World) {
                             } else {
                                 state.queued[index].insert(main, next);
                             }
-                            for cascade in 0..4 {
-                                state.instances[index][cascade] +=
-                                    u32::from(mask & (1 << cascade) != 0);
+                            for bit in 0..8 {
+                                state.instances[index][bit] += u32::from(mask & (1 << bit) != 0);
                             }
                         }
                         state.queued[index].retain(|main, queued| {
