@@ -158,11 +158,13 @@ pub(super) fn bind(
                         | (item.0 as u128 + 1);
                     collider.set_active_events(super::stream::content_bindings::hit_events(hit));
                 });
+                // Keep the cap binding: source looks at the cap collider on the part.
+                let use_owner = interaction.use_owner(*handle);
                 interaction.bind_surface(
                     *handle,
                     ActionBinding {
                         collider: id,
-                        use_owner: None,
+                        use_owner,
                         pickup_owner: Some(item),
                         removal_owner: Some(item),
                         push_owner: None,

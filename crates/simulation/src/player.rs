@@ -601,6 +601,7 @@ impl PlayerState {
             self.controller_offset(),
             self.reference.max_depenetration_velocity * dt,
         );
+        self.controller.autostep = self.sweep.autostep();
         let shape = &self.sweep;
         let rapier = physics.rapier();
         let movement = self.controller.move_shape(

@@ -65,7 +65,8 @@ Prepare once:
 8. Binoculars: pick up the garage binoculars and hold LMB. The view zooms through the lens with the black two-circle mask, the binoculars and the crosshair hide, and look speed drops. Scroll changes the zoom between 3 and 4 degrees. Release LMB to return. Try it with the binoculars equipped too.
 9. Tune icons: look at the radio volume and tune knobs, the compass and clock knobs, and a tuneable sink tap. Each shows its own mouse wheel image. A tuneable cap without an image shows the cap image.
 10. Garage rest: the garage barrel and the wire brush stay still. Drive the Lada and check that parked cars and dropped items still settle and sleep.
-11. Press B many times on foot and in the Lada until a turd spawns. The game does not stop. Cut a food with the knife: the piece shows.
+11. Stairs: walk up stairs without a jump. Duck and walk up again. Prone does not step up.
+12. Press B many times on foot and in the Lada until a turd spawns. The game does not stop. Cut a food with the knife: the piece shows.
 
 ### Car parts and repair
 
@@ -88,6 +89,7 @@ Prepare once:
 17. Save and load. Loot tool paint left, color and wear stay. Drive away and back: they stay.
 18. Start a new game. The Lada body is Used to Old, not 100%, and rust shows. Every new game draws the same state: the startup random is fixed.
 19. Pick two other start cars in the game mode menu. Each starts worn the same way.
+20. Look at the Lada oil cap and coolant cap. Each shows its name and level, like the fuel cap. E opens and closes it.
 
 ### World and terrain
 
