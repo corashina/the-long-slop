@@ -58,6 +58,7 @@ pub mod plates;
 pub mod postprocessing;
 pub mod probes;
 pub mod prop_draws;
+pub mod render_bundles;
 pub mod render_targets;
 pub mod renderer_visibility;
 pub mod renderers;

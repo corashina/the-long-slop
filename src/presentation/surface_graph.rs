@@ -173,8 +173,13 @@ fn opaque(
         status.fail(format!("Source opaque draw: {error:?}"));
         return;
     }
-    let (attempted, issued) =
-        super::prop_draws::draw_camera(world, &mut pass, entity, source.index);
+    let (attempted, issued) = super::prop_draws::draw_camera(
+        world,
+        &mut pass,
+        entity,
+        source.index,
+        targets.colors.samples,
+    );
     if attempted != issued {
         status.fail(format!(
             "Source GPU prop draw skipped in view {entity:?}: {issued}/{attempted}"
