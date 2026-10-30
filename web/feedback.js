@@ -114,7 +114,7 @@ export function createFeedback(ui,manifest) {
  const translationHelp='[RMB]+[Mouse]: Move\n[Scroll]: Distance\n[Q]+[Scroll]: Posture';
  const rotationHelp='[RMB]+[Mouse]: Move\n[MMB]+[Mouse]: Rotate\n[RMB]+[MMB]+[Mouse]: Roll\n[Scroll]: Distance\n[Q]+[Scroll]: Posture';
  const counts=new Uint8Array(4);
- const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',eat:'use',smoke:'use',takeOne:'use',putOn:'pickup',drink:'use',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',scroll:'use',heldSwitch:'use',wash:'use',scrub:'use',equip:'pickup',recenter:'pickup',releaseEquipment:'pickup',releaseEquipmentSeated:'pickup',crank:'use',hoseAttach:'mount',coilUp:'use',drain:'use',reload:'use',unload:'use',computerTurnOn:'use',computerTurnOff:'use',computerUse:'use',computerConnect:'use',computerDisconnect:'use'};
+ const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',eat:'use',smoke:'use',takeOne:'use',putOn:'pickup',drink:'use',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',scroll:'use',heldSwitch:'use',wash:'use',scrub:'use',equip:'pickup',recenter:'pickup',releaseEquipment:'pickup',releaseEquipmentSeated:'pickup',crank:'use',hoseAttach:'mount',coilUp:'use',drain:'use',reload:'use',unload:'use',binocularsUse:'use',binocularsFocus:'use',computerTurnOn:'use',computerTurnOff:'use',computerUse:'use',computerConnect:'use',computerDisconnect:'use'};
  const families={use:0,pickup:1,mount:2,fill:3};
  function placeRows(){
   counts.fill(0);
