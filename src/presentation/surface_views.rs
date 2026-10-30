@@ -114,6 +114,7 @@ pub(crate) fn prepare_views(
     cache: Res<PipelineCache>,
     status: Res<RendererStateHandle>,
     antialiasing: Res<super::antialiasing::Antialiasing>,
+    lamps: Res<super::lamp_shadows::LampShadows>,
 ) {
     if status.failure().is_some() {
         return;
@@ -222,6 +223,11 @@ pub(crate) fn prepare_views(
             source.clip_from_world,
             Vec4::new(source.near, source.far, player_dist(source.index), 0.),
             sun_shadow.map_or_else(Default::default, |collector| collector.value),
+            if source.index < WORLD_VIEWS {
+                lamps.uniforms
+            } else {
+                Default::default()
+            },
         );
         let glass_value = match GlassViewUniform::new(
             source.clip_from_world,
@@ -285,6 +291,7 @@ pub(crate) fn prepare_views(
                     target.atlas.sampled.as_ref().unwrap(),
                     &resources.shadow_compare,
                 ),
+                resources.targets.lamp_atlas.sampled.as_ref().unwrap(),
             ),
             SourceTransparentPasses::new(capacity),
         ));

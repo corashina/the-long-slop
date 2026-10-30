@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {SaveScreenState,readAutosaveToggles} from '../../web/save-screen.js';
+import {SaveScreenState} from '../../web/save-screen.js';
 
 const entry=name=>({name,date:'2026.10.26. 12:00',seed:1,drivenKm:0,version:'b',thumbnail:null});
 function screen(count,flags={}){const s=new SaveScreenState();s.set({saves:Array.from({length:count},(_,i)=>entry('s'+String(i).padStart(2,'0'))),autosave:entry('autosave'),last:null},true);Object.assign(s,{inMenu:false,name:'new'},flags);return s;}
@@ -54,10 +54,4 @@ test('cant_save_text_follows_the_source',()=>{
  assert.equal(texts[0],"Don't sit\nand sleep");
  assert.equal(texts[1],'Keep trying');
  for(let i=1;i<texts.length;i++)assert.notEqual(texts[i],texts[i-1]);
-});
-
-test('autosave_toggles_default_and_survive_blocked_storage',()=>{
- assert.deepEqual(readAutosaveToggles(undefined),{autosave:true,inCar:true,autoLoad:false});
- const items=new Map([['the-long-slop.autosave','0'],['the-long-slop.autosave-in-car','0'],['the-long-slop.auto-load','1']]);
- assert.deepEqual(readAutosaveToggles({getItem:key=>items.get(key)??null}),{autosave:false,inCar:false,autoLoad:true});
 });

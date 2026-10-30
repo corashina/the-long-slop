@@ -29,6 +29,7 @@ struct HeldState {
 
 pub struct CarryState {
     reference: PlayerReference,
+    pub(super) settings: crate::reference::PlayerSettings,
     rules: HashMap<ItemId, PickupReference>,
     held: Option<HeldState>,
     anchor: Option<RigidBodyHandle>,
@@ -137,6 +138,7 @@ impl CarryState {
         }
         Ok(Self {
             reference: player.clone(),
+            settings: crate::reference::PlayerSettings::defaults(&reference.settings),
             rules: reference
                 .items
                 .iter()
@@ -529,14 +531,13 @@ impl CarryState {
                 };
                 held.offset += direction
                     * input.wheel
-                    * self.reference.scroll_sensitivity
+                    * self.settings.player_scroll()
                     * dt
-                    * self.reference.obj_move_sensitivity;
+                    * self.settings.object()[0];
             }
             if input.mouse.iter().all(|delta| delta.is_finite()) {
                 if rotating {
-                    let sensitivity =
-                        dt * 10.0 * self.reference.obj_rotation_sensitivity * rotation_gain;
+                    let sensitivity = dt * 10.0 * self.settings.object()[1] * rotation_gain;
                     let x = input.mouse[0] * sensitivity;
                     let y = input.mouse[1] * sensitivity;
                     let rotation = if moving {
@@ -558,7 +559,7 @@ impl CarryState {
                     };
                 } else if moving && !rotating {
                     if rule.move_with_rotation {
-                        let sensitivity = dt * 20.0 * self.reference.obj_move_sensitivity;
+                        let sensitivity = dt * 20.0 * self.settings.object()[0];
                         let rotation =
                             Rotation::from_rotation_y((-input.mouse[0] * sensitivity).to_radians())
                                 * Rotation::from_rotation_x(
@@ -572,7 +573,7 @@ impl CarryState {
                         held.offset += Vector::new(input.mouse[0], -input.mouse[1], 0.0)
                             * dt
                             * 0.25
-                            * self.reference.obj_move_sensitivity;
+                            * self.settings.object()[0];
                     }
                 }
             }

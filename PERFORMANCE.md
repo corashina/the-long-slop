@@ -17,7 +17,8 @@ Add only items that increase render FPS or remove hitches. Remove an item when i
 - The worker sends only changed pose rows. The renderer interpolates poses.
 - Physics steps at 50 Hz, at most 2 steps per frame (`STEP_BUDGET` in `crates/simulation/src/simulation.rs`).
 - Terrain tiles and grass meshes are built in their own workers.
-- WebGPU is the only renderer. MSAA is 4x. The "Antialiasing" setting turns it off after a reload (`src/presentation/antialiasing.rs`). No TAA, motion blur or camera-depth pass.
+- WebGPU is the only renderer. MSAA is 4x. The "Antialiasing" setting turns it off after a reload (`src/presentation/antialiasing.rs`). TAA runs with it. No camera-depth pass.
+- Motion vectors run when antialiasing or "Motion blur" is on. Motion blur adds 7 fullscreen draws (`postprocessing/motion_blur.rs`); off removes the pass.
 - Display settings for weak GPUs, default at full quality: scene resolution 100% to 50% (`render_scale.rs`), "Shadows" high, medium, low (world view atlas side halved per step, `shadow_quality.rs`), "Ambient occlusion" on or off (`ambient_occlusion.rs`), "Grass" high, medium, low (blade spacing and fade distance, after a reload, `materials/grass/settings.rs`).
 - World props draw through the own GPU path: compute cull and indirect draws (`src/presentation/prop_draws.rs`). Each view pass runs its prop draws as one render bundle.
 - Static draws use render bundles (`src/presentation/render_bundles.rs`). A bundle records again only when its commands change. In the camera pass, unskinned meshes without morph targets run as one bundle per view (`static_draws.rs`); skinned meshes draw directly. The prop draws of each pass and cascade run as bundles.

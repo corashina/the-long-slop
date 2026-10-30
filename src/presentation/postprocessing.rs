@@ -11,6 +11,7 @@ pub mod exposure;
 pub mod heat_haze;
 pub mod lut;
 pub mod lut_ldr;
+pub mod motion_blur;
 pub mod taa;
 pub mod uber;
 

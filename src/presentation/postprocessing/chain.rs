@@ -11,6 +11,7 @@ use super::{
     heat_haze::HeatHazePass,
     lut::{CURVE_BYTES, LUT_BYTES, LutPass},
     lut_ldr::{LDR_CURVE_BYTES, LutLdrPass, STRIP_BYTES},
+    motion_blur::MotionBlurPass,
     taa::TaaPass,
     uber::{MainInputs, UberPass},
 };
@@ -41,13 +42,26 @@ pub struct PostShaders {
     pub ao_upsample: Handle<Shader>,
     pub ao_composite: Handle<Shader>,
     pub taa: Handle<Shader>,
+    pub motion_blur: Handle<Shader>,
 }
-/// TAA inputs. Present only when antialiasing is on.
-pub struct TaaInputs<'a> {
-    pub settings: crate::reference::postprocessing::TaaSettings,
+/// Passes that read the main motion target. Present when antialiasing or motion blur is on.
+pub struct MotionInputs<'a> {
+    pub taa: Option<crate::reference::postprocessing::TaaSettings>,
+    pub blur: Option<crate::reference::postprocessing::MotionBlurSettings>,
     /// Resolved camera depth.
     pub depth: &'a TextureView,
     pub motion: &'a TextureView,
+}
+/// Main view motion of one frame.
+#[derive(Clone, Copy)]
+pub struct FrameMotion {
+    pub jitter: Vec2,
+    /// No valid motion history.
+    pub reset: bool,
+    pub near: f32,
+    pub far: f32,
+    /// Shutter angle in degrees. None skips the blur for this frame.
+    pub shutter: Option<f32>,
 }
 pub struct PostTextures<'a> {
     pub noise: [&'a TextureView; 64],
@@ -82,8 +96,8 @@ pub struct PostFrame {
     pub heat_haze: Option<f32>,
     /// Shader `_Time.y`.
     pub time: f32,
-    /// TAA jitter and history reset. None when antialiasing is off.
-    pub motion: Option<(Vec2, bool)>,
+    /// None when antialiasing and motion blur are off.
+    pub motion: Option<FrameMotion>,
 }
 struct ColorTarget {
     _texture: Texture,
@@ -143,6 +157,7 @@ pub struct SourcePostChain {
     initial: ColorTarget,
     copy: CopyPass,
     taa: Option<TaaPass>,
+    blur: Option<MotionBlurPass>,
     uber: UberPass,
     haze: HeatHazePass,
     main: MainChain,
@@ -165,7 +180,7 @@ impl SourcePostChain {
         dead: &DeadProfile,
         glasses: &[GlassesProfile],
         stop_nan: bool,
-        taa: Option<TaaInputs<'_>>,
+        motion: Option<MotionInputs<'_>>,
         previous: Option<Self>,
     ) -> Result<Self, String> {
         if extent.contains(&0)
@@ -177,12 +192,13 @@ impl SourcePostChain {
         let resize_count = previous.as_ref().map_or(0, |old| old.resize_count + 1);
         let completed = previous.as_ref().map_or(0, |old| old.completed);
         let initial = ColorTarget::new(device, extent);
-        let (mut copy, old_main, old_uber, old_taa, old_haze) = match previous {
+        let (mut copy, old_main, old_uber, old_taa, old_blur, old_haze) = match previous {
             Some(old) => (
                 old.copy,
                 Some(old.main),
                 Some(old.uber),
                 old.taa,
+                old.blur,
                 Some(old.haze),
             ),
             None => (
@@ -191,11 +207,14 @@ impl SourcePostChain {
                 None,
                 None,
                 None,
+                None,
             ),
         };
         copy.rebind(device, cache, source);
-        let taa = taa
-            .map(|inputs| {
+        let taa = motion
+            .as_ref()
+            .and_then(|inputs| Some((inputs, inputs.taa?)))
+            .map(|(inputs, settings)| {
                 TaaPass::new(
                     device,
                     queue,
@@ -205,12 +224,31 @@ impl SourcePostChain {
                     inputs.depth,
                     inputs.motion,
                     extent,
-                    inputs.settings,
+                    settings,
                     old_taa,
                 )
             })
             .transpose()?;
         let scene = taa.as_ref().map_or(&initial.view, |taa| taa.output());
+        let blur = motion
+            .as_ref()
+            .and_then(|inputs| Some((inputs, inputs.blur?)))
+            .map(|(inputs, settings)| {
+                MotionBlurPass::new(
+                    device,
+                    queue,
+                    cache,
+                    shaders.motion_blur.clone(),
+                    scene,
+                    inputs.depth,
+                    inputs.motion,
+                    extent,
+                    &settings,
+                    old_blur,
+                )
+            })
+            .transpose()?;
+        let scene = blur.as_ref().map_or(scene, |blur| blur.output());
         let main = {
             let (old_histogram, old_exposure, old_bloom, old_lut, lut_baked, old_ldr, grading) =
                 match old_main {
@@ -381,7 +419,8 @@ impl SourcePostChain {
             + CURVE_BYTES
             + STRIP_BYTES
             + LDR_CURVE_BYTES
-            + taa.as_ref().map_or(0, |taa| taa.logical_bytes);
+            + taa.as_ref().map_or(0, |taa| taa.logical_bytes)
+            + blur.as_ref().map_or(0, |blur| blur.layout.logical_bytes());
         Ok(Self {
             extent,
             logical_bytes,
@@ -390,6 +429,7 @@ impl SourcePostChain {
             initial,
             copy,
             taa,
+            blur,
             uber,
             haze,
             main,
@@ -404,9 +444,13 @@ impl SourcePostChain {
     pub fn pending_token(&self) -> Option<u32> {
         self.pending
     }
+    pub fn has_blur(&self) -> bool {
+        self.blur.is_some()
+    }
     pub fn ready(&self, cache: &PipelineCache) -> bool {
         self.copy.ready(cache)
             && self.taa.as_ref().is_none_or(|taa| taa.ready(cache))
+            && self.blur.as_ref().is_none_or(|blur| blur.ready(cache))
             && self.uber.ready(cache)
             && self.main.histogram.ready(cache)
             && self.main.exposure.ready(cache)
@@ -419,6 +463,7 @@ impl SourcePostChain {
         self.copy
             .failure(cache)
             .or_else(|| self.taa.as_ref().and_then(|taa| taa.failure(cache)))
+            .or_else(|| self.blur.as_ref().and_then(|blur| blur.failure(cache)))
             .or_else(|| self.uber.failure(cache))
             .or_else(|| self.main.histogram.failure(cache))
             .or_else(|| self.main.exposure.failure(cache))
@@ -474,12 +519,16 @@ impl SourcePostChain {
         }
         self.copy
             .encode(encoder, cache, &self.initial.view, self.stop_nan);
-        match (self.taa.as_mut(), frame.motion) {
-            (Some(taa), Some((jitter, reset))) => {
-                taa.encode(encoder, device, queue, cache, jitter, reset)?
-            }
-            (None, None) => {}
-            _ => return Err("Source TAA state differs from the view".into()),
+        if let Some(taa) = self.taa.as_mut() {
+            let motion = frame.motion.ok_or("Source TAA has no view motion")?;
+            taa.encode(encoder, device, queue, cache, motion.jitter, motion.reset)?;
+        }
+        if let Some(blur) = self.blur.as_mut() {
+            // Without motion this frame, the blur copies its source.
+            let (near, far, shutter) = frame.motion.map_or((1., 2., None), |m| {
+                (m.near, m.far, m.shutter.filter(|_| !m.reset))
+            });
+            blur.encode(encoder, device, queue, cache, near, far, shutter);
         }
         self.main.histogram.encode(encoder, cache);
         self.main

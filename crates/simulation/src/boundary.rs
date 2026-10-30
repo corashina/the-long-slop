@@ -515,8 +515,8 @@ pub struct HudBlock {
     pub assists: u32,
     /// Steer, throttle, brake, clutch, handbrake.
     pub controls: [f32; 5],
-    /// Keeps the block free of padding.
-    pub pad: u32,
+    /// Source `postprocesscontrol.h.root` body speed: the seat owner, else the player.
+    pub view_speed_kmh: f32,
 }
 
 impl HudBlock {
@@ -1044,6 +1044,7 @@ pub struct SimCommand {
     pub settings: Option<DrivingSettings>,
     /// Changed game options. They apply at once, also while paused.
     pub options: Option<crate::world::GameOptions>,
+    pub player_settings: Option<crate::reference::PlayerSettings>,
     /// Local month and day.
     pub calendar: [u8; 2],
     /// The browser asks for a world measurement.
@@ -1158,6 +1159,7 @@ impl SimCommand {
         self.assists = next.assists.or(self.assists);
         self.settings = next.settings.or(self.settings);
         self.options = next.options.or(self.options);
+        self.player_settings = next.player_settings.or(self.player_settings);
         self.calendar = next.calendar;
         self.measure |= next.measure;
         self.world.merge(next.world);
