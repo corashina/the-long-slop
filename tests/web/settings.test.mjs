@@ -41,3 +41,11 @@ test('slider_changes_clamp_and_round_like_the_source',()=>{
  assert.equal(sliderSetting(s,150,false),1);
  assert.equal(sliderSetting({...s,round:false,round_typed:false},55.6,true),.556);
 });
+
+test('the_fps_limit_starts_off_because_the_browser_runs_on_the_display_refresh',()=>{
+ const limited={sliders:{},toggles:{BEnableFpsLimit:{tab:'graphics',default:true,children:[]}}};
+ const settings=createSettings(memory(new Map()),limited);
+ assert.equal(settings.values.BEnableFpsLimit,false);
+ settings.set('BEnableFpsLimit',true);settings.reset('graphics',true);
+ assert.equal(settings.values.BEnableFpsLimit,false);
+});
