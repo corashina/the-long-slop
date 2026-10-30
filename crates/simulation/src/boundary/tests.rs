@@ -462,3 +462,47 @@ fn mouse_look_matches_the_frame_after_consume() {
     assert!(Quat::from_array(before.rotation).abs_diff_eq(Quat::from_array(after.rotation), 1e-5));
     assert_eq!(look.camera(&look_frame(16., 1., 1)), after);
 }
+
+/// A stream that leaves out unchanged pose rows decodes to the same frames.
+#[test]
+fn pose_stream_sends_changed_rows_only() {
+    let row = |x: f32| PoseRow {
+        position: [x, 0., 0.],
+        flags: PoseRow::VISIBLE,
+        rotation: [0., 0., 0., 1.],
+    };
+    let mut frame = SimFrame {
+        previous: vec![row(1.), row(2.), row(3.)],
+        current: vec![row(1.), row(2.), row(3.)],
+        items: vec![ItemRow::default(); 3],
+        ..Default::default()
+    };
+    let (mut encoder, mut bytes, mut decoded) =
+        (FrameEncoder::default(), Vec::new(), SimFrame::default());
+    encoder.encode(&frame, &mut bytes);
+    decode(&bytes, &mut decoded).unwrap();
+    assert_eq!(decoded, frame);
+    let whole = bytes.len();
+
+    frame.current[1] = row(-0.);
+    frame.items[2].bite = 1;
+    frame.previous.push(row(4.));
+    frame.current.push(row(4.));
+    frame.items.push(ItemRow::default());
+    frame.candidate = Some(Box::new(SimFrame {
+        previous: vec![row(5.)],
+        current: vec![row(5.)],
+        items: vec![ItemRow::default()],
+        ..Default::default()
+    }));
+    encoder.encode(&frame, &mut bytes);
+    decode(&bytes, &mut decoded).unwrap();
+    assert_eq!(decoded, frame);
+    assert_eq!(decoded.current[1].position[0].to_bits(), (-0f32).to_bits());
+
+    frame.candidate = None;
+    encoder.encode(&frame, &mut bytes);
+    assert!(bytes.len() < whole, "an unchanged frame sends no pose rows");
+    decode(&bytes, &mut decoded).unwrap();
+    assert_eq!(decoded, frame);
+}

@@ -1,5 +1,5 @@
 //! One simulation behind encoded commands and frames. The worker module runs it.
-use crate::boundary::{DecodeError, SimInit, SimStartup, decode_command, encode};
+use crate::boundary::{DecodeError, FrameEncoder, SimInit, SimStartup, decode_command};
 use crate::driver::SimDriver;
 use crate::reference::{ReferenceError, ReferenceManifest};
 use crate::save::SourceStamp;
@@ -11,6 +11,7 @@ pub struct Session {
     driver: SimDriver,
     /// The frame of the last tick. The next tick fills it again.
     frame: crate::boundary::SimFrame,
+    encoder: FrameEncoder,
     bytes: Vec<u8>,
 }
 
@@ -28,6 +29,7 @@ impl Session {
             reference,
             driver,
             frame: Default::default(),
+            encoder: FrameEncoder::default(),
             bytes: Vec::new(),
         };
         Ok((session, startup))
@@ -37,7 +39,7 @@ impl Session {
     pub fn tick(&mut self, command: &[u8]) -> Result<&[u8], DecodeError> {
         let command = decode_command(command)?;
         self.driver.tick(&self.reference, command, &mut self.frame);
-        encode(&self.frame, &mut self.bytes);
+        self.encoder.encode(&self.frame, &mut self.bytes);
         Ok(&self.bytes)
     }
 }
