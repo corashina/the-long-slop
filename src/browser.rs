@@ -258,6 +258,12 @@ extern "C" {
     /// "Antialiasing" setting at page load.
     #[wasm_bindgen(js_namespace = window, js_name = gameAntialiasing)]
     pub fn game_antialiasing() -> bool;
+    /// "Grass" setting at page load: 0 high, 1 medium, 2 low.
+    #[wasm_bindgen(js_namespace = window, js_name = gameGrassQuality)]
+    pub fn game_grass_quality() -> u32;
+    /// Pending "Ambient occlusion" setting, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameAmbientOcclusion)]
+    pub fn game_ambient_occlusion() -> Option<bool>;
     /// Pending "Sunglasses effects" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameSunglassesEffects)]
     pub fn game_sunglasses_effects() -> Option<bool>;
