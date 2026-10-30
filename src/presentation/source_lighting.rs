@@ -60,7 +60,7 @@ pub fn surface_lighting_layout() -> BindGroupLayoutDescriptor {
                 uniform_buffer::<LightingUniform>(false),
                 texture_2d(TextureSampleType::Float { filterable: true }),
                 sampler(SamplerBindingType::Filtering),
-                texture_cube(TextureSampleType::Float { filterable: true }),
+                texture_cube_array(TextureSampleType::Float { filterable: true }),
                 sampler(SamplerBindingType::Filtering),
                 texture_depth_2d(),
                 sampler(SamplerBindingType::Comparison),
@@ -85,7 +85,7 @@ impl SourceViewLighting {
         cache: &PipelineCache,
         value: LightingUniform,
         cookie: (&TextureView, &Sampler),
-        probe: ([&TextureView; super::lighting_scene::PROBE_COUNT], &Sampler),
+        probe: (&TextureView, &Sampler),
         shadow: (&TextureView, &Sampler),
     ) -> Self {
         let mut uniform = UniformBuffer::from(value);
@@ -98,7 +98,7 @@ impl SourceViewLighting {
                 uniform.binding().expect("allocated source view uniform"),
                 cookie.0,
                 cookie.1,
-                probe.0[0],
+                probe.0,
                 probe.1,
                 shadow.0,
                 shadow.1,

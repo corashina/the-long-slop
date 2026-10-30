@@ -2,7 +2,8 @@
 use crate::render_scale::SceneScale;
 use std::sync::Arc;
 
-pub const PROBE_COUNT: usize = 1;
+/// Fixed live probe slots. The nearest enabled probes take them.
+pub const PROBE_COUNT: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ContentKey {

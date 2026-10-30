@@ -29,7 +29,7 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. |
 | X06a | Live mirrors | L | Car mirror cameras render to textures. Only the 5 nearest run. FOV and far plane follow distance. Mirrors toggle and Mirror draw distance slider. |
 | X06b | Lamp shadows | L | Point and spot lights with a shadow mode cast shadows. |
-| X06c | Live reflection probes | M | Only 1 probe is live. Make every building and car probe live, with the 5 s disable distance check and the Reflections toggle. |
+| X06c | Building reflection probes | S | Car probes are live. Check the original building prefabs for realtime `ReflectionProbe`s. Export any as prototype probes. The live probe slots then take them. |
 | X06d | Motion vectors and TAA | L | Velocity buffer and TAA with the source jitter, blend and sharpness. The Antialiasing toggle switches 4x MSAA and TAA together. Off is 1 sample and no TAA. WebGPU has no 8x. |
 | X06e | Motion blur | M | Needs X06d motion vectors. Shutter angle follows car speed. Off where the source turns it off. |
 | X06f | Depth of field and binocular lens | M | Main DoF with focus ray, night clamp and Dof toggle. Binocular DoF, lens distortion and chromatic aberration. |
@@ -264,3 +264,10 @@ Prepare once:
 2. Eat each food. Crumbs, meat, turd and chocolate bits fall from the food. Smoke a cigarette: ash falls now and then.
 3. Stay up at night for a few nights. The horror sound plays for 5 to 15 s on the first night, then every 1 to 5 nights. It stops at day.
 4. New game between 15 October and 15 November: the start pumpkin glows and flickers at night. Hold it and wear it: the light follows.
+
+### Advanced rendering
+
+1. Park three cars near the garage. Each car body reflects its own surroundings, and the reflections update as the cars and the sun move.
+2. Walk more than 50 m from a car: within 5 s its reflection probe turns off. Walk back: it turns on again within 5 s.
+3. Turn Reflections off: car reflections go away at once. Turn it on: they return. Reload the page: the setting stays.
+4. Check F3 near four cars with Reflections on and off. Live probes render one 64 px cube face each frame.

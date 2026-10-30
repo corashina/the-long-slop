@@ -3,7 +3,12 @@ use super::{
     lighting_assets::LightingAssets, readiness::RendererStateHandle, reference::ReferenceVisuals,
     source_lighting::LightingUniform,
 };
-use crate::{app::RuntimeReference, reference::reflections::probe_influence_bounds};
+use crate::{
+    app::RuntimeReference,
+    reference::reflections::{
+        PROBE_DISABLE_DISTANCE_SQUARED, assign_probe_slots, probe_influence_bounds,
+    },
+};
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::{ecs as bevy_ecs, render as bevy_render};
@@ -11,28 +16,94 @@ use simulation::boundary::SimFrame;
 
 pub const PROBE_COUNT: usize = crate::render_readiness::PROBE_COUNT;
 
+/// One car probe in a slot: probe node entity, box size and box offset.
+#[derive(Clone, Copy, PartialEq)]
+pub struct ProbeSource {
+    entity: Entity,
+    size: [f32; 3],
+    offset: [f32; 3],
+}
 #[derive(Resource)]
 pub struct ProbeActivation {
     pub enabled: [bool; PROBE_COUNT],
     pub checks: u32,
     pub distance_squared: [f32; PROBE_COUNT],
+    slots: [Option<ProbeSource>; PROBE_COUNT],
+    position: [Vec3; PROBE_COUNT],
+    /// Distance check candidates, nearest first. Kept to reuse the allocation.
+    candidates: Vec<(f32, ProbeSource)>,
+    keys: Vec<ProbeSource>,
     scene: u32,
-    /// A car carries the probe. Without one the probe is off.
-    followed: bool,
+    instances: u64,
     elapsed: f32,
     last_check: f32,
 }
 impl Default for ProbeActivation {
     fn default() -> Self {
         Self {
-            enabled: [true; PROBE_COUNT],
+            enabled: [false; PROBE_COUNT],
             checks: 0,
             distance_squared: [0.; PROBE_COUNT],
+            slots: [None; PROBE_COUNT],
+            position: [Vec3::ZERO; PROBE_COUNT],
+            candidates: Vec::new(),
+            keys: Vec::new(),
             scene: 0,
-            followed: false,
+            instances: 0,
             elapsed: 0.,
             last_check: 0.,
         }
+    }
+}
+impl ProbeActivation {
+    /// ReflectionDisableDistance: the nearest car probes within 50 m take the slots.
+    fn check(
+        &mut self,
+        on: bool,
+        player: Vec3,
+        clock: &mut super::view_frame::SourceViewClock,
+        reference: &RuntimeReference,
+        instances: Option<&super::world::instances::SourceInstances>,
+        transforms: &Query<&GlobalTransform>,
+    ) {
+        self.candidates.clear();
+        if on && let Some(instances) = instances {
+            for (_, _, prototype, nodes) in instances.shown() {
+                let prototype = &reference.0.world.prototypes[prototype];
+                let Some(probe) = prototype.vehicle.as_ref().and_then(|v| v.probe.as_ref()) else {
+                    continue;
+                };
+                let node = prototype.nodes[probe.node as usize].gltf_node as usize;
+                let Some(entity) = nodes.get(node).copied().flatten() else {
+                    continue;
+                };
+                let Ok(transform) = transforms.get(entity) else {
+                    continue;
+                };
+                let distance = player.distance_squared(transform.translation());
+                if distance < PROBE_DISABLE_DISTANCE_SQUARED {
+                    self.candidates.push((
+                        distance,
+                        ProbeSource {
+                            entity,
+                            size: probe.bounds_size,
+                            offset: probe.bounds_offset,
+                        },
+                    ));
+                }
+            }
+        }
+        self.candidates.sort_by(|a, b| a.0.total_cmp(&b.0));
+        self.keys.clear();
+        self.keys
+            .extend(self.candidates.iter().map(|(_, source)| *source));
+        let changed = assign_probe_slots(&mut self.slots, &self.keys, clock.probe_index());
+        for index in 0..PROBE_COUNT {
+            if changed & (1 << index) != 0 {
+                clock.reset_probe(index);
+            }
+        }
+        self.checks += 1;
     }
 }
 #[derive(Resource, Default)]
@@ -89,8 +160,10 @@ pub(crate) fn sync_lighting(
     master: Option<Res<super::lighting::SourceLighting>>,
     sim: Option<Res<super::sim_frame::SimFrameResource>>,
     reference: Option<Res<RuntimeReference>>,
+    reflections: Res<super::reflections::Reflections>,
     mut origin: ResMut<SourceWorldOrigin>,
     mut activation: ResMut<ProbeActivation>,
+    mut clock: ResMut<super::view_frame::SourceViewClock>,
     epoch: Res<super::view_frame::SourceSceneEpoch>,
     transforms: Query<&GlobalTransform>,
     mut scene: ResMut<SourceSceneLighting>,
@@ -109,38 +182,54 @@ pub(crate) fn sync_lighting(
     if !assets.loaded || !visuals.bound || !master.bound {
         return;
     }
-    let car = instances
-        .as_deref()
-        .and_then(|instances| followed_probe(&sim, &reference, instances));
     let sim = &sim.frame;
     origin.0 = sim.state.origin;
     let player = Vec3::from_array(sim.state.body_pose.position);
-    match scene_value(&assets, &master, sim, &reference, &transforms, player, car) {
+    let activation = &mut *activation;
+    let revision = instances.as_deref().map_or(0, |i| i.revision());
+    let empty = activation.slots.iter().all(Option::is_none);
+    if activation.scene != epoch.0 {
+        activation.scene = epoch.0;
+        activation.slots = [None; PROBE_COUNT];
+        activation.elapsed = 0.;
+        activation.checks = 0;
+    }
+    activation.elapsed += sim.state.perf.frame_seconds();
+    // Checks run every five seconds. Scene start, the setting, and new cars with no probe in a
+    // slot check at once.
+    if activation.checks == 0
+        || reflections.is_changed()
+        || activation.elapsed - activation.last_check >= 5.
+        || (empty && revision != activation.instances)
+    {
+        activation.last_check = activation.elapsed;
+        activation.instances = revision;
+        activation.check(
+            reflections.0,
+            player,
+            &mut clock,
+            &reference,
+            instances.as_deref(),
+            &transforms,
+        );
+    }
+    // The probes follow their cars. A probe without its car turns off until the next check.
+    for index in 0..PROBE_COUNT {
+        let position = activation.slots[index]
+            .and_then(|source| transforms.get(source.entity).ok())
+            .map(GlobalTransform::translation);
+        if let Some(position) = position {
+            activation.position[index] = position;
+        }
+        activation.enabled[index] = reflections.0 && position.is_some();
+        activation.distance_squared[index] = player.distance_squared(activation.position[index]);
+    }
+    match scene_value(&assets, &master, sim, &reference, &transforms, activation) {
         Ok(mut value) => {
-            if activation.scene != epoch.0 || activation.followed != car.is_some() {
-                activation.scene = epoch.0;
-                activation.followed = car.is_some();
-                activation.enabled = [car.is_some(); PROBE_COUNT];
-                activation.elapsed = 0.;
-                activation.last_check = 0.;
-                activation.checks = 0;
-            }
-            activation.elapsed += sim.state.perf.frame_seconds();
             for index in 0..PROBE_COUNT {
-                activation.distance_squared[index] =
-                    player.distance_squared(value.probe_position[index]);
-            }
-            // ReflectionDisableDistance checks registered probes every five seconds.
-            if activation.elapsed - activation.last_check >= 5. {
-                activation.last_check = activation.elapsed;
-                let followed = activation.followed;
-                activation.enabled = activation
-                    .distance_squared
-                    .map(|distance| followed && distance < 2500.);
-                activation.checks += 1;
-            }
-            for index in 0..PROBE_COUNT {
-                value.probe_extents[index].w = f32::from(activation.enabled[index]);
+                // The shader samples a slot only after its probe publishes.
+                value.probe_extents[index].w =
+                    f32::from(activation.enabled[index] && clock.probe_published(index));
             }
             scene.0 = Some(value);
         }
@@ -149,56 +238,30 @@ pub(crate) fn sync_lighting(
         }
     }
 }
-/// The probe node entity and influence box of the world car the player last sat in.
-/// Without one, the start Lada copy.
-fn followed_probe(
-    sim: &super::sim_frame::SimFrameResource,
-    reference: &RuntimeReference,
-    instances: &super::world::instances::SourceInstances,
-) -> Option<(Entity, [f32; 3], [f32; 3])> {
-    let (id, prototype) = sim.followed_car.as_ref()?;
-    let prototype = &reference.0.world.prototypes[*prototype as usize];
-    let probe = prototype.vehicle.as_ref()?.probe.as_ref()?;
-    let node = prototype.nodes[probe.node as usize].gltf_node as usize;
-    let entity = (*instances.nodes_of(id)?.get(node)?)?;
-    Some((entity, probe.bounds_size, probe.bounds_offset))
-}
 fn scene_value(
     assets: &LightingAssets,
     master: &super::lighting::SourceLighting,
     sim: &SimFrame,
     reference: &RuntimeReference,
     transforms: &Query<&GlobalTransform>,
-    player: Vec3,
-    car: Option<(Entity, [f32; 3], [f32; 3])>,
+    activation: &ProbeActivation,
 ) -> Result<SceneLighting, String> {
     if !sim.state.origin.iter().all(|value| value.is_finite()) {
         return Err("Nonfinite world origin".into());
     }
-    if assets.record.probes.len() != PROBE_COUNT {
-        return Err("Selected vehicle reflection probe count is invalid".into());
+    if assets.record.probes.len() != 1 {
+        return Err("Shared car reflection probe record is missing".into());
     }
-    let mut positions = [Vec3::ZERO; PROBE_COUNT];
     let mut centers = [Vec4::ZERO; PROBE_COUNT];
     let mut sizes = [Vec4::ZERO; PROBE_COUNT];
-    for (index, probe) in assets.record.probes.iter().enumerate() {
-        // The probe follows the car the player last sat in. Without a car it waits at the player.
-        let (position, size, offset) = match car {
-            Some((entity, size, offset)) => (
-                transforms
-                    .get(entity)
-                    .map_err(|_| "Missing probe world transform")?
-                    .translation(),
-                size,
-                offset,
-            ),
-            None => (player, probe.bounds_size, probe.bounds_offset),
-        };
+    for (index, source) in activation.slots.iter().enumerate() {
+        let Some(source) = source else { continue };
+        let position = activation.position[index];
         if !position.is_finite() {
             return Err("Nonfinite probe world position".into());
         }
-        let (center, extents) = probe_influence_bounds(position.to_array(), size, offset);
-        positions[index] = position;
+        let (center, extents) =
+            probe_influence_bounds(position.to_array(), source.size, source.offset);
         centers[index] = Vec3::from_array(center).extend(0.);
         sizes[index] = Vec3::from_array(extents).extend(0.);
     }
@@ -253,7 +316,7 @@ fn scene_value(
             .fog
             .truncate()
             .extend(master.uniform.ambient.w),
-        probe_position: positions,
+        probe_position: activation.position,
         probe_center: centers,
         probe_extents: sizes,
         source_time: Vec4::new(time * 0.05, time, time * 2., time * 3.),

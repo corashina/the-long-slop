@@ -16,8 +16,9 @@ struct LightingUniform {
     fog_color_density: vec4<f32>,
     shadow_fade: vec4<f32>,
     shadow_fade_center: vec4<f32>,
-    probe_center: array<vec4<f32>, 1>,
-    probe_extents: array<vec4<f32>, 1>,
+    // One entry for each probe slot. extents.w=1 when the slot is enabled and published.
+    probe_center: array<vec4<f32>, 4>,
+    probe_extents: array<vec4<f32>, 4>,
     source_time: vec4<f32>,
     clip_from_world: mat4x4<f32>,
     // x=near, y=far, z=player_model `_Dist` of this view
@@ -27,23 +28,42 @@ struct LightingUniform {
 @group(1) @binding(0) var<uniform> lighting: LightingUniform;
 @group(1) @binding(1) var sun_cookie: texture_2d<f32>;
 @group(1) @binding(2) var sun_cookie_sampler: sampler;
-@group(1) @binding(3) var local_probe: texture_cube<f32>;
+@group(1) @binding(3) var local_probe: texture_cube_array<f32>;
 @group(1) @binding(4) var local_probe_sampler: sampler;
 @group(1) @binding(5) var shadow_atlas: texture_depth_2d;
 @group(1) @binding(6) var shadow_compare: sampler_comparison;
 
-// The selected Lada has one probe. Positive intersection gives it full weight.
+// Unity BlendProbes with equal importance: the two slots with the largest box overlap.
+// One probe takes full weight. Two share it by overlap volume.
+// Returns x=first weight, z=first slot, w=second slot or -1. x=0 without a probe.
 // Renderer extents retain the recovered native Vector3f::epsilon clamp.
-fn probe_weight(model: mat4x4<f32>, center_usage: vec4<f32>, extents_flags: vec4<f32>) -> f32 {
-    if center_usage.w == 0.0 || lighting.probe_extents[0].w == 0.0 { return 0.0; }
+fn probe_blend(model: mat4x4<f32>, center_usage: vec4<f32>, extents_flags: vec4<f32>) -> vec4<f32> {
+    if center_usage.w == 0.0 { return vec4(0.0, 0.0, 0.0, -1.0); }
     let center = (model * vec4(center_usage.xyz,1.0)).xyz;
     let extents = max(abs(model[0].xyz)*extents_flags.x
         + abs(model[1].xyz)*extents_flags.y + abs(model[2].xyz)*extents_flags.z,
         vec3(9.999999747378752e-06));
-    let minimum = max(center-extents, lighting.probe_center[0].xyz-lighting.probe_extents[0].xyz);
-    let maximum = min(center+extents, lighting.probe_center[0].xyz+lighting.probe_extents[0].xyz);
-    let size = max(maximum-minimum, vec3(0.0));
-    return select(0.0, 1.0, size.x*size.y*size.z > 0.0);
+    var volumes = vec2(0.0);
+    var slots = vec2(-1.0);
+    for (var slot = 0; slot < 4; slot++) {
+        let probe_center = lighting.probe_center[slot];
+        let probe_extents = lighting.probe_extents[slot];
+        if probe_extents.w == 0.0 { continue; }
+        let minimum = max(center-extents, probe_center.xyz-probe_extents.xyz);
+        let maximum = min(center+extents, probe_center.xyz+probe_extents.xyz);
+        let size = max(maximum-minimum, vec3(0.0));
+        let volume = size.x*size.y*size.z;
+        if volume > volumes.x {
+            volumes = vec2(volume, volumes.x);
+            slots = vec2(f32(slot), slots.x);
+        } else if volume > volumes.y {
+            volumes.y = volume;
+            slots.y = f32(slot);
+        }
+    }
+    if slots.x < 0.0 { return vec4(0.0, 0.0, 0.0, -1.0); }
+    let weight = select(volumes.x/(volumes.x+volumes.y), 1.0, slots.y < 0.0);
+    return vec4(weight, 0.0, slots);
 }
 fn diffuse_sh(normal: vec3<f32>) -> vec3<f32> {
     // ShadeSH9 in source world axes. Flat startup SH has only the constant term.
@@ -54,7 +74,7 @@ fn diffuse_sh(normal: vec3<f32>) -> vec3<f32> {
     return max(vec3(0.0),linear+quadratic+lighting.ambient_sh[6].xyz*(n.x*n.x-n.y*n.y));
 }
 fn indirect_specular(specular: vec3<f32>,one_minus_reflectivity: f32,smoothness: f32,
-    normal: vec3<f32>,view: vec3<f32>,occlusion: f32,weight: f32) -> vec3<f32> {
+    normal: vec3<f32>,view: vec3<f32>,occlusion: f32,probes: vec4<f32>) -> vec3<f32> {
     let reflected=reflect(-view,normal);
     // Native face storage retains source axes; target world coordinates reflect Z.
     let source_ray=vec3(reflected.x,reflected.y,-reflected.z);
@@ -62,7 +82,14 @@ fn indirect_specular(specular: vec3<f32>,one_minus_reflectivity: f32,smoothness:
     let level=(perceptual*(1.7-0.7*perceptual))*6.0;
     // RGBA16F carries linear radiance directly, equivalent to native FP decode.
     // During capture this binding uses the proven black local-probe override.
-    let radiance=textureSampleLevel(local_probe,local_probe_sampler,source_ray,level).rgb*weight*occlusion;
+    var radiance=vec3(0.0);
+    if probes.x > 0.0 {
+        radiance=textureSampleLevel(local_probe,local_probe_sampler,source_ray,i32(probes.z),level).rgb*probes.x;
+    }
+    if probes.w >= 0.0 {
+        radiance+=textureSampleLevel(local_probe,local_probe_sampler,source_ray,i32(probes.w),level).rgb*(1.0-probes.x);
+    }
+    radiance*=occlusion;
     let roughness=max(perceptual*perceptual,0.002);
     let reduction=1.0/(roughness*roughness+1.0);
     let grazing=clamp(smoothness+(1.0-one_minus_reflectivity),0.0,1.0);

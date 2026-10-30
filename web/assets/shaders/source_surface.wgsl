@@ -109,7 +109,7 @@ fn fragment(
 #ifdef VERTEX_TANGENTS
     @location(8) world_bitangent: vec3<f32>,
 #endif
-    @location(9) @interpolate(flat) source_renderer: vec2<f32>,
+    @location(9) @interpolate(flat) source_renderer: vec4<f32>,
     @location(10) source_fog: f32,
 #ifdef SOURCE_LAMPS
     @location(12) @interpolate(flat) source_lights: vec2<u32>,
@@ -226,7 +226,7 @@ fn fragment(
     // ForwardBase stays before the lamp loop, so its implicit derivatives remain in uniform control flow.
     var light = diffuse * diffuse_sh(pbr.N) * occlusion;
     if !source_flag(7u) {
-        light += indirect_specular(specular,one_minus_reflectivity,smoothness,pbr.N,pbr.V,occlusion,source_renderer.x);
+        light += indirect_specular(specular,one_minus_reflectivity,smoothness,pbr.N,pbr.V,occlusion,source_renderer);
     }
     // Glossy-off unity_IndirectSpecColor is RGB0 in the fixed source profile.
     if source_flag(3u) { light += sample_source(4u, uv, detail_uv, offset).rgb * source.emission.rgb; }

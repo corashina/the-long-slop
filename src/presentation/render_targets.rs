@@ -1,4 +1,5 @@
 //! Persistent source render targets. Allocation is restricted to startup or resize.
+use super::lighting_scene::PROBE_COUNT;
 use super::surface_views::{VIEW_COUNT, WORLD_VIEWS};
 
 use bevy::render::{
@@ -281,13 +282,13 @@ pub struct ScratchCube {
     pub levels: [TextureView; 7],
     pub cube: TextureView,
 }
-fn probe_texture(device: &RenderDevice, label: &'static str) -> Texture {
+fn probe_texture(device: &RenderDevice, label: &'static str, layers: u32) -> Texture {
     device.create_texture(&TextureDescriptor {
         label: Some(label),
         size: Extent3d {
             width: 64,
             height: 64,
-            depth_or_array_layers: 6,
+            depth_or_array_layers: layers,
         },
         mip_level_count: 7,
         sample_count: 1,
@@ -310,8 +311,8 @@ fn cube_view(texture: &Texture, level: u32, count: u32) -> TextureView {
 }
 impl ScratchCube {
     fn new(device: &RenderDevice, label: &'static str) -> Self {
-        let texture = probe_texture(device, label);
-        let faces = face_views(&texture);
+        let texture = probe_texture(device, label, 6);
+        let faces = face_views(&texture, 0);
         let levels = std::array::from_fn(|mip| cube_view(&texture, mip as u32, 1));
         let cube = cube_view(&texture, 0, 7);
         Self {
@@ -322,47 +323,42 @@ impl ScratchCube {
         }
     }
 }
-fn face_views(texture: &Texture) -> [[TextureView; 6]; 7] {
+fn face_views(texture: &Texture, first_layer: u32) -> [[TextureView; 6]; 7] {
     std::array::from_fn(|mip| {
         std::array::from_fn(|face| {
             texture.create_view(&TextureViewDescriptor {
                 dimension: Some(TextureViewDimension::D2),
                 base_mip_level: mip as u32,
                 mip_level_count: Some(1),
-                base_array_layer: face as u32,
+                base_array_layer: first_layer + face as u32,
                 array_layer_count: Some(1),
                 ..Default::default()
             })
         })
     })
 }
-/// Capture and filtering never write into the cube sampled by scene materials.
-/// Fixed textures and views are allocated once. Publication copies all seven HDR levels.
-pub struct ProbeTargets {
-    pub base: ScratchCube,
-    pub auxiliary: ScratchCube,
-    pub published: Texture,
-    pub published_view: TextureView,
-    pub published_faces: [[TextureView; 6]; 7],
-    pub capture_sample: Texture,
-    pub capture_sample_view: TextureView,
+/// The published cubes of every probe slot in one cube array. Scene materials sample it.
+/// Fixed textures and views are allocated once.
+pub struct PublishedProbes {
+    texture: Texture,
+    pub view: TextureView,
+    _capture: Texture,
+    /// Source reflectionBounces=1 keeps candidate selection, but substitutes
+    /// the builtin black cube for every registered cube probe during capture.
+    /// Its pixels have zero color and alpha; decode is (1,1,0,0).
+    pub capture_view: TextureView,
 }
-impl ProbeTargets {
+impl PublishedProbes {
     pub fn new(device: &RenderDevice, queue: &RenderQueue) -> Self {
-        let base = ScratchCube::new(device, "source_probe_base");
-        let auxiliary = ScratchCube::new(device, "source_probe_auxiliary");
-        let published = probe_texture(device, "source_probe_published");
-        let published_view = cube_view(&published, 0, 7);
-        let published_faces = face_views(&published);
-        // Source reflectionBounces=1 keeps candidate selection, but substitutes
-        // the builtin black cube for every registered cube probe during capture.
-        // Its six pixels have zero color and alpha; decode is (1,1,0,0).
-        let capture_sample = device.create_texture(&TextureDescriptor {
+        let layers = 6 * PROBE_COUNT as u32;
+        let texture = probe_texture(device, "source_probe_published", layers);
+        let view = cube_array_view(&texture, 7);
+        let capture = device.create_texture(&TextureDescriptor {
             label: Some("source_capture_black_cube"),
             size: Extent3d {
                 width: 1,
                 height: 1,
-                depth_or_array_layers: 6,
+                depth_or_array_layers: layers,
             },
             mip_level_count: 1,
             sample_count: 1,
@@ -373,12 +369,12 @@ impl ProbeTargets {
         });
         queue.write_texture(
             TexelCopyTextureInfo {
-                texture: &capture_sample,
+                texture: &capture,
                 mip_level: 0,
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
             },
-            &[0; 24],
+            &[0; 4 * 6 * PROBE_COUNT],
             TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4),
@@ -387,18 +383,43 @@ impl ProbeTargets {
             Extent3d {
                 width: 1,
                 height: 1,
-                depth_or_array_layers: 6,
+                depth_or_array_layers: layers,
             },
         );
-        let capture_sample_view = cube_view(&capture_sample, 0, 1);
+        let capture_view = cube_array_view(&capture, 1);
         Self {
-            base,
-            auxiliary,
-            published,
-            published_view,
-            published_faces,
-            capture_sample,
-            capture_sample_view,
+            texture,
+            view,
+            _capture: capture,
+            capture_view,
+        }
+    }
+}
+fn cube_array_view(texture: &Texture, mips: u32) -> TextureView {
+    texture.create_view(&TextureViewDescriptor {
+        dimension: Some(TextureViewDimension::CubeArray),
+        mip_level_count: Some(mips),
+        ..Default::default()
+    })
+}
+/// Capture and filtering never write into the cube sampled by scene materials.
+/// Publication copies all seven HDR levels into the slot's layers of the published array.
+pub struct ProbeTargets {
+    pub base: ScratchCube,
+    pub auxiliary: ScratchCube,
+    published: Texture,
+    first_layer: u32,
+    pub published_faces: [[TextureView; 6]; 7],
+}
+impl ProbeTargets {
+    pub fn new(device: &RenderDevice, published: &PublishedProbes, slot: usize) -> Self {
+        let first_layer = 6 * slot as u32;
+        Self {
+            base: ScratchCube::new(device, "source_probe_base"),
+            auxiliary: ScratchCube::new(device, "source_probe_auxiliary"),
+            published: published.texture.clone(),
+            first_layer,
+            published_faces: face_views(&published.texture, first_layer),
         }
     }
     /// Scene recreation invalidates the retained publication before any new scene samples it.
@@ -414,7 +435,7 @@ impl ProbeTargets {
                         origin: Origin3d {
                             x: 0,
                             y: 0,
-                            z: face,
+                            z: self.first_layer + face,
                         },
                         aspect: TextureAspect::All,
                     },
