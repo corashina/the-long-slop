@@ -503,5 +503,46 @@ fn garage_start_car_drives_in_automatic() {
     let moved = hold(&mut run, &reference, 0, player_keys::GAS, 0, 10., |run| {
         horizontal(absolute(run, &key).0, start) > 5.
     });
+    if !moved {
+        let world = run.physics.rapier();
+        let chassis = run.physics.chassis_handle(&key);
+        let body = &world.bodies[chassis];
+        eprintln!(
+            "chassis: type {:?} sleeping {} mass {} locked {:?} enabled {} inactive {} y {}",
+            body.body_type(),
+            body.is_sleeping(),
+            body.mass(),
+            body.locked_axes(),
+            body.is_enabled(),
+            !run.physics.body_active(chassis),
+            body.translation().y,
+        );
+        for pair in world.narrow_phase.contact_pairs() {
+            let parent = |c: rapier3d::prelude::ColliderHandle| world.colliders[c].parent();
+            let other = if parent(pair.collider1) == Some(chassis) {
+                pair.collider2
+            } else if parent(pair.collider2) == Some(chassis) {
+                pair.collider1
+            } else {
+                continue;
+            };
+            if !pair.has_any_active_contact() {
+                continue;
+            }
+            let collider = &world.colliders[other];
+            let depth = pair
+                .manifolds()
+                .iter()
+                .flat_map(|m| m.points.iter().map(|p| p.dist))
+                .fold(f32::MAX, f32::min);
+            eprintln!(
+                "contact: {other:?} parent {:?} type {:?} user {:#x} at {:?} depth {depth}",
+                collider.parent(),
+                collider.parent().map(|b| world.bodies[b].body_type()),
+                collider.user_data,
+                collider.translation(),
+            );
+        }
+    }
     assert!(moved, "drives 5 m: {}", state(&run));
 }
