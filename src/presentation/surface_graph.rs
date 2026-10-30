@@ -166,9 +166,30 @@ fn opaque(
         }),
         ..default()
     });
-    let result = opaque
-        .render(&mut pass, world, entity)
-        .and_then(|_| masked.render(&mut pass, world, entity));
+    // Static draws run as one bundle, the others directly.
+    let draws = super::static_draws::StaticDraws::new(world);
+    let target = super::render_bundles::BundleTarget {
+        color: Some(super::render_targets::HDR_FORMAT),
+        depth: super::render_targets::DEPTH_FORMAT,
+        samples: targets.colors.samples,
+    };
+    let result = world.resource::<super::static_draws::StaticBundles>().0[source.index]
+        .lock()
+        .unwrap()
+        .draw(world.resource(), target, &mut pass, |pass| {
+            opaque
+                .render_filtered(pass, world, entity, |e| draws.contains(e))
+                .and_then(|_| masked.render_filtered(pass, world, entity, |e| draws.contains(e)))
+        });
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            status.fail(format!("Source static opaque bundle: {error}"));
+            return;
+        }
+    }
+    .and_then(|_| opaque.render_filtered(&mut pass, world, entity, |e| !draws.contains(e)))
+    .and_then(|_| masked.render_filtered(&mut pass, world, entity, |e| !draws.contains(e)));
     if let Err(error) = result {
         status.fail(format!("Source opaque draw: {error:?}"));
         return;

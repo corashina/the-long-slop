@@ -32,6 +32,7 @@ pub mod shadow_splits;
 pub mod shadows;
 pub mod sky;
 pub mod sorting;
+pub mod temporal;
 pub mod texture_batch;
 pub mod view_math;
 pub use rendering::*;
