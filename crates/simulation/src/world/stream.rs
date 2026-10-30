@@ -1415,6 +1415,25 @@ impl WorldStream {
             "recipe": self.recipes.contains_key(source),
         })
     }
+    /// The progress of each sandbox world spawn.
+    pub fn added_placement_audit(&self) -> Vec<(&Placement, serde_json::Value)> {
+        let base = (self.reference.startup.len() + self.startup_items.len()) as u32;
+        self.startup_placements
+            .iter()
+            .filter(|p| p.id.ordinal >= base)
+            .map(|p| {
+                let mut audit = self.structure_audit(p);
+                audit["wanted"] = self.wanted_structures.iter().any(|w| w.id == p.id).into();
+                audit["published"] = self
+                    .structures
+                    .iter()
+                    .any(|s| s.placement.id == p.id)
+                    .into();
+                audit["content"] = self.contents.contains(&p.id).into();
+                (p, audit)
+            })
+            .collect()
+    }
     pub fn startup_job_audit(&self) -> serde_json::Value {
         serde_json::json!({
             "required": {

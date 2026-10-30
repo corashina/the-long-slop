@@ -698,7 +698,8 @@ impl SourceInstances {
                         let mut owned_bindings = Vec::with_capacity(primitives);
                         let mut owned_rows = Vec::new();
                         let props = &mut self.props;
-                        let construction = (|| -> Result<Instance, ReferenceError> {
+                        // None: a material texture is not ready. The placement waits and tries again.
+                        let construction = (|| -> Result<Option<Instance>, ReferenceError> {
                             let source_root = Mat4::from_scale_rotation_translation(
                                 Vec3::from_array(placement.scale),
                                 Quat::from_array(placement.pose.rotation),
@@ -926,7 +927,7 @@ impl SourceInstances {
                                         row,
                                     )?
                                     else {
-                                        continue;
+                                        return Ok(None);
                                     };
                                     let material_source = selected.cloned();
                                     if binding.gpu_props() {
@@ -1057,33 +1058,27 @@ impl SourceInstances {
                                         let initial = super::instance_materials::source_primary(
                                             reference, prototype, &source,
                                         );
-                                        let mut variant = materials
-                                            .bind(
-                                                stream.frame().request.session,
-                                                prototype,
-                                                primitive,
-                                                extras.source_renderer.as_ref().ok_or_else(
-                                                    || {
-                                                        ReferenceError(
-                                                            "Missing source renderer record".into(),
-                                                        )
-                                                    },
-                                                )?,
-                                                initial,
-                                                Some(&source),
-                                                source_node.layer,
-                                                receive,
-                                                world.determinant() < 0.,
-                                                source_position,
-                                                view,
-                                                false,
-                                            )?
-                                            .ok_or_else(|| {
+                                        let Some(mut variant) = materials.bind(
+                                            stream.frame().request.session,
+                                            prototype,
+                                            primitive,
+                                            extras.source_renderer.as_ref().ok_or_else(|| {
                                                 ReferenceError(
-                                                    "Generated lamp variant material missing"
-                                                        .into(),
+                                                    "Missing source renderer record".into(),
                                                 )
-                                            })?;
+                                            })?,
+                                            initial,
+                                            Some(&source),
+                                            source_node.layer,
+                                            receive,
+                                            world.determinant() < 0.,
+                                            source_position,
+                                            view,
+                                            false,
+                                        )?
+                                        else {
+                                            return Ok(None);
+                                        };
                                         if has_lod {
                                             materials.make_private(&mut variant);
                                         }
@@ -1215,7 +1210,7 @@ impl SourceInstances {
                                     });
                                 }
                             }
-                            Ok(Instance {
+                            Ok(Some(Instance {
                                 retirement: Default::default(),
                                 continuation: None,
                                 upload: None,
@@ -1252,10 +1247,10 @@ impl SourceInstances {
                                 visible: false,
                                 hidden: 0,
                                 origin: stream.origin.offset,
-                            })
+                            }))
                         })();
                         match construction {
-                            Ok(mut instance) => {
+                            Ok(Some(mut instance)) => {
                                 let upload = fixed.watch_meshes(
                                     instance.renderers.iter().map(|r| r.mesh.clone()),
                                 );
@@ -1268,8 +1263,9 @@ impl SourceInstances {
                                 self.bindings_dirty = true;
                                 self.writers_dirty = true;
                                 self.revision = self.revision.wrapping_add(1);
+                                self.pending = None;
                             }
-                            Err(error) => {
+                            result => {
                                 commands.entity(root).despawn();
                                 for slot in owned_rows {
                                     props.free(slot);
@@ -1291,10 +1287,9 @@ impl SourceInstances {
                                 a.objects = a.objects.saturating_sub(objects);
                                 ledger.set_allocation(a)?;
                                 ledger.release_claim(&mut continuation)?;
-                                return Err(error);
+                                result?;
                             }
                         }
-                        self.pending = None;
                     }
                 }
             }
@@ -1657,10 +1652,9 @@ impl SourceInstances {
                             initial,
                             selected,
                         )?;
-                        material_pending |= !admitted;
                         let row = matches!(renderer.target, Target::Row { .. });
-                        if admitted
-                            && let Some(mut binding) = materials.bind(
+                        let binding = if admitted {
+                            materials.bind(
                                 instance.session,
                                 prototype,
                                 &rebind.primitive,
@@ -1674,7 +1668,11 @@ impl SourceInstances {
                                 Default::default(),
                                 row,
                             )?
-                        {
+                        } else {
+                            None
+                        };
+                        material_pending |= binding.is_none();
+                        if let Some(mut binding) = binding {
                             if rebind.has_lod && !row {
                                 materials.make_private(&mut binding);
                             }

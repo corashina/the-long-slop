@@ -34,6 +34,8 @@ try {
             }
             $file
         })
+        & npm run --silent lint
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         & node --test @webFiles
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         if ($WebTest) { exit 0 }

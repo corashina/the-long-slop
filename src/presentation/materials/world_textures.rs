@@ -721,12 +721,13 @@ impl WorldTextures {
             self.arrays[binding.array].as_ref()?.image.as_ref()?,
         ))
     }
+    /// Every slot of the material has a complete array image, so `binding` resolves.
     pub fn ready(&self, material: &SourceId) -> bool {
         self.materials.get(material).is_some_and(|m| {
-            m.arrays.iter().all(|&i| {
-                self.arrays[i]
-                    .as_ref()
-                    .is_some_and(|a| a.next_layer == a.layers.len())
+            m.slots.values().all(|b| {
+                self.arrays[b.array].as_ref().is_some_and(|a| {
+                    !a.failed && a.image.is_some() && a.next_layer == a.layers.len()
+                })
             })
         })
     }

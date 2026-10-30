@@ -434,6 +434,25 @@ fn state(runtime: &GarageRuntime, reference: &ReferenceManifest, radius: f32) ->
             runtime.stream.presentation_used().prototype_cpu,
             runtime.stream.presentation_credit().prototype_cpu,
         ],
+        // Sandbox world spawns and where each one waits.
+        "world_spawns": runtime
+            .stream
+            .added_placement_audit()
+            .into_iter()
+            .map(|(p, progress)| {
+                json!({
+                    "name": reference
+                        .world
+                        .prototypes
+                        .iter()
+                        .find(|w| w.source == p.prototype)
+                        .map_or("", prototype_name),
+                    "position": p.pose.position,
+                    "radius": p.bounds.max[0] - p.pose.position[0],
+                    "progress": progress,
+                })
+            })
+            .collect::<Vec<_>>(),
         "player_gap": gap(runtime.area.player.focus_position(&runtime.physics)),
         "seated": runtime.area.player.seated(),
         "cycle": runtime.lighting.cycle.capture_save().cycle_seconds,
