@@ -71,8 +71,8 @@ pub struct CameraInput {
     pressed: u32,
     released: u32,
     held: u32,
-    player_pressed: u8,
-    player_held: u8,
+    player_pressed: u16,
+    player_held: u16,
     /// Head-look scaled mouse: x is `LOOKX`, y is `-LOOKY`.
     mouse: [f32; 2],
     wheel: f32,

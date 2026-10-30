@@ -2,7 +2,7 @@
 use super::*;
 use crate::player::SeatOwner;
 use crate::simulation::input::{DrivingInput, DrivingSettings};
-use crate::simulation::{FIXED_DT, keys};
+use crate::simulation::{FIXED_DT, player_keys};
 use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::{ColliderBuilder, ColliderHandle, RigidBodyHandle};
 
@@ -13,12 +13,12 @@ fn flat_forward(run: &GarageRuntime, body: RigidBodyHandle) -> Vector {
 }
 
 /// One game step of the sled: keyboard input, `step_sleds`, physics.
-fn step_sled(run: &mut GarageRuntime, driving: &mut DrivingInput, held: u32) {
+fn step_sled(run: &mut GarageRuntime, driving: &mut DrivingInput, player_held: u16) {
     let controls = driving
         .step(
             run.area.player.item_seat_body(),
             &crate::simulation::FrameInput {
-                held,
+                player_held,
                 ..Default::default()
             },
             None,
@@ -139,7 +139,7 @@ fn sled_slides_steers_and_keeps_its_seat() {
     let start = run.physics.rapier().bodies[body].translation();
     let forward = flat_forward(&run, body);
     for _ in 0..(2.0 / FIXED_DT) as usize {
-        step_sled(&mut run, &mut driving, keys::FORWARD);
+        step_sled(&mut run, &mut driving, player_keys::GAS);
     }
     assert!(sled_in_use(&run), "seated sled is in use");
     for &c in &cols {
@@ -154,7 +154,11 @@ fn sled_slides_steers_and_keeps_its_seat() {
     // LEFT for 1 s turns the forward toward the left.
     let before = flat_forward(&run, body);
     for _ in 0..(1.0 / FIXED_DT) as usize {
-        step_sled(&mut run, &mut driving, keys::FORWARD | keys::LEFT);
+        step_sled(
+            &mut run,
+            &mut driving,
+            player_keys::GAS | player_keys::STEER_LEFT,
+        );
     }
     let after = flat_forward(&run, body);
     let yaw = before.cross(after).y.asin();

@@ -124,6 +124,19 @@ impl ViewState {
         self.lean = self.neutral_head(posture);
         self.head = self.lean;
     }
+    /// Source `GetLook` `BkeyLook`: seated, not leaning and with key look held, the move keys look.
+    pub(super) fn key_look(&self, input: &FrameInput, seated: bool) -> Option<[f32; 2]> {
+        if !seated || self.seated_lean || input.player_held & player_keys::KEY_LOOK == 0 {
+            return None;
+        }
+        let key = |bit: u32| (input.held & bit != 0) as u8 as f32;
+        let scale = self.settings.key_look;
+        // Browser +Y is down. Source LOOKY is positive up.
+        Some([
+            (key(keys::RIGHT) - key(keys::LEFT)) * scale,
+            (key(keys::BACK) - key(keys::FORWARD)) * scale,
+        ])
+    }
     /// Returns the ordinary look multiplier when this mouse sample is available.
     pub(super) fn step(
         &mut self,

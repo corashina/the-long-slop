@@ -4,7 +4,7 @@ use super::drive_out::{frame, frame_with, settle};
 use super::*;
 use crate::player::SeatOwner;
 use crate::reference::{DrivingAssists, WorldVehicleReference};
-use crate::simulation::{FIXED_DT, FrameInput, keys};
+use crate::simulation::{FIXED_DT, FrameInput, player_keys};
 use crate::world::ObjectKey;
 use crate::world::stream::content_seats::WorldSeatReference;
 use rapier3d::math::Vector;
@@ -120,10 +120,10 @@ fn running(run: &GarageRuntime, key: &ObjectKey) -> bool {
     run.engine_output(key).running
 }
 
-/// One game frame with `held` keys.
-fn step(run: &mut GarageRuntime, reference: &ReferenceManifest, held: u32) {
+/// One game frame with `player_held` keys.
+fn step(run: &mut GarageRuntime, reference: &ReferenceManifest, player_held: u16) {
     let input = FrameInput {
-        held,
+        player_held,
         ..Default::default()
     };
     frame_with(run, reference, input);
@@ -144,7 +144,7 @@ fn bike01_kick_starts_and_rides_upright() {
         body.set_linvel(forward * 10., true);
     });
     let started = (0..(3. / FIXED_DT) as usize).any(|_| {
-        step(&mut run, &reference, keys::FORWARD);
+        step(&mut run, &reference, player_keys::GAS);
         running(&run, &key)
     });
     assert!(started, "kick start runs the engine");
@@ -153,11 +153,11 @@ fn bike01_kick_starts_and_rides_upright() {
     let start = run.physics.snapshot(&key).pose.position;
     for i in 0..(10. / FIXED_DT) as usize {
         let steer = if i * 2 < (10. / FIXED_DT) as usize {
-            keys::LEFT
+            player_keys::STEER_LEFT
         } else {
-            keys::RIGHT
+            player_keys::STEER_RIGHT
         };
-        step(&mut run, &reference, keys::FORWARD | steer);
+        step(&mut run, &reference, player_keys::GAS | steer);
         let roll = roll(&run, &key);
         assert!(
             roll > balance.min_angle && roll < balance.max_angle,
@@ -185,7 +185,7 @@ fn bike03_pedals_then_kick_starts() {
     let start = run.physics.snapshot(&key).pose.position;
     let mut torque = false;
     for _ in 0..(3. / FIXED_DT) as usize {
-        step(&mut run, &reference, keys::FORWARD);
+        step(&mut run, &reference, player_keys::GAS);
         torque |= run.vehicles[&key].pedals.output > 0.;
         if running(&run, &key) {
             break;
@@ -197,7 +197,7 @@ fn bike03_pedals_then_kick_starts() {
 
     // Keep pedaling: the wheel rpm passes shutdown rpm and the kick start runs the engine.
     let started = (0..(30. / FIXED_DT) as usize).any(|_| {
-        step(&mut run, &reference, keys::FORWARD);
+        step(&mut run, &reference, player_keys::GAS);
         running(&run, &key)
     });
     let moved = distance(start, run.physics.snapshot(&key).pose.position);
@@ -205,7 +205,7 @@ fn bike03_pedals_then_kick_starts() {
 
     // The pedals give no torque while the engine runs.
     for i in 0..(2. / FIXED_DT) as usize {
-        step(&mut run, &reference, keys::FORWARD);
+        step(&mut run, &reference, player_keys::GAS);
         let pedals = run.vehicles[&key].pedals;
         assert_eq!(pedals.output, 0., "step {i}: pedal torque");
     }

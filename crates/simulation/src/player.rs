@@ -414,6 +414,10 @@ impl PlayerState {
             return;
         }
         let seated = self.occupancy.is_some();
+        let mut input = input;
+        if let Some(mouse) = self.view_state.key_look(&input, seated) {
+            input.mouse = mouse;
+        }
         let look_mode = self
             .occupancy
             .as_ref()

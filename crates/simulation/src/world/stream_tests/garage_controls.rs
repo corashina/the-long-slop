@@ -47,7 +47,7 @@ fn x04b_autosave_safe_state() {
     assert!(run.autosave_safe(false));
     assert!(!run.autosave_safe(true));
 
-    press(&mut run, &reference, keys::SPACE);
+    press(&mut run, &reference, keys::JUMP);
     for _ in 0..30 {
         if !run.area.player.grounded() {
             break;

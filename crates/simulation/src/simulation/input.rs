@@ -1,5 +1,5 @@
 use crate::reference::DrivingReference;
-use crate::simulation::{FIXED_DT, FrameInput, GamepadFrame, keys};
+use crate::simulation::{FIXED_DT, FrameInput, GamepadFrame, keys, player_keys};
 use rapier3d::prelude::RigidBodyHandle;
 use serde::{Deserialize, Serialize};
 
@@ -354,15 +354,18 @@ impl DrivingInput {
         } else {
             self.steering_increment
         };
-        let steer =
-            ((held & keys::LEFT != 0) as u8 as f32) - ((held & keys::RIGHT != 0) as u8 as f32);
+        let player = |bit: u16| (input.player_held & bit != 0) as u8 as f32;
+        let steer = player(player_keys::STEER_LEFT) - player(player_keys::STEER_RIGHT);
         ramp(&mut self.keyboard.steer, steer, steering_increment);
-        for (value, bit) in [
-            (&mut self.keyboard.throttle, keys::FORWARD),
-            (&mut self.keyboard.brake, keys::BACK),
-            (&mut self.keyboard.clutch, keys::CLUTCH),
+        for (value, pressed) in [
+            (&mut self.keyboard.throttle, player(player_keys::GAS)),
+            (&mut self.keyboard.brake, player(player_keys::BRAKE)),
+            (
+                &mut self.keyboard.clutch,
+                (held & keys::CLUTCH != 0) as u8 as f32,
+            ),
         ] {
-            ramp(value, (held & bit != 0) as u8 as f32, self.pedal_increment);
+            ramp(value, pressed, self.pedal_increment);
         }
         let mut controls = self.keyboard;
         self.add_axes(&mut controls, gamepad);
@@ -436,9 +439,9 @@ mod tests {
         )
     }
 
-    fn held(held: u32, mouse: [f32; 2]) -> FrameInput {
+    fn held(player_held: u16, mouse: [f32; 2]) -> FrameInput {
         FrameInput {
-            held,
+            player_held,
             drive_mouse: mouse,
             ..FrameInput::default()
         }
@@ -509,10 +512,15 @@ mod tests {
     #[test]
     fn keyboard_steer_uses_car_multiplier() {
         let mut driving = input();
-        let base = step(&mut driving, held(keys::LEFT, [0.; 2])).steer;
+        let base = step(&mut driving, held(player_keys::STEER_LEFT, [0.; 2])).steer;
         assert!(close(base, 2. * FIXED_DT));
         driving.clear();
-        let scaled = driving.step(seat(), &held(keys::LEFT, [0.; 2]), Some(3.), false);
+        let scaled = driving.step(
+            seat(),
+            &held(player_keys::STEER_LEFT, [0.; 2]),
+            Some(3.),
+            false,
+        );
         assert!(close(scaled.controls.steer, 6. * FIXED_DT));
     }
 
@@ -573,7 +581,7 @@ mod tests {
         driving.settings.axes = [bound(0), bound(1), bound(1), bound(1), bound(1)];
         let mut frame = pad_axis(0, -0.5);
         frame.gamepad.axes[GamepadFrame::AXES + 1] = 0.;
-        frame.held = keys::LEFT | keys::FORWARD;
+        frame.player_held = player_keys::STEER_LEFT | player_keys::GAS;
         let mut controls = DrivingControls::default();
         for _ in 0..200 {
             controls = step(&mut driving, frame);
@@ -582,7 +590,7 @@ mod tests {
         assert_eq!(controls.steer, 1.);
         assert_eq!(controls.throttle, 1.);
         assert!(close(controls.brake, 0.5) && close(controls.handbrake, 0.5));
-        frame.held = keys::RIGHT;
+        frame.player_held = player_keys::STEER_RIGHT;
         let mut controls = DrivingControls::default();
         for _ in 0..200 {
             controls = step(&mut driving, frame);
@@ -603,7 +611,7 @@ mod tests {
             ..AXIS
         };
         let mut frame = pad_axis(2, 1.);
-        frame.held = keys::FORWARD;
+        frame.player_held = player_keys::GAS;
         let controls = step(&mut driving, frame);
         assert!(close(controls.throttle, 5. * FIXED_DT));
         assert_eq!(controls.handbrake, 0.);

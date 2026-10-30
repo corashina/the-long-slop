@@ -5,12 +5,24 @@ from .source import key, source_id
 
 ASSEMBLY_SHA256 = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e'
 DECOMPILED_SHA256 = '22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee'
-ACTIONS = {'clutch':'clutch', 'shift_up':'shiftup', 'shift_down':'shiftdown', 'reverse':'gearr',
-    'neutral':'gearn', **{f'gear{i}':f'gear{i}' for i in range(1,7)}, 'mouse_drive':'togglemousedrive', 'point':'pointrubwave'}
-KEY_CODES = {'LeftControl':'ControlLeft', 'RightControl':'ControlRight', 'UpArrow':'ArrowUp',
-    'DownArrow':'ArrowDown', 'KeypadPlus':'NumpadAdd', 'KeypadMinus':'NumpadSubtract',
-    'R':'KeyR', 'LeftAlt':'AltLeft', 'N':'KeyN', 'U':'KeyU', **{f'Alpha{i}':f'Digit{i}' for i in range(7)},
-    **{f'Keypad{i}':f'Numpad{i}' for i in range(7)}}
+# inputscript.IN actions the port leaves out: 3D screenshots, VR, multiplayer and voice chat.
+LEFT_OUT = {'screenshot3D', 'screenshot360', 'camera360', 'vrrecenter', 'multiplayerchat', 'voicechat'}
+KEY_NAMES = {'LeftControl':'ControlLeft', 'RightControl':'ControlRight', 'LeftShift':'ShiftLeft', 'RightShift':'ShiftRight',
+    'LeftAlt':'AltLeft', 'RightAlt':'AltRight', 'UpArrow':'ArrowUp', 'DownArrow':'ArrowDown', 'LeftArrow':'ArrowLeft',
+    'RightArrow':'ArrowRight', 'KeypadPlus':'NumpadAdd', 'KeypadMinus':'NumpadSubtract', 'Space':'Space', 'Tab':'Tab',
+    'CapsLock':'CapsLock', 'Backspace':'Backspace'}
+# oneKey.Set(axis, invert) mouse axes, named like oneKey.GetName.
+MOUSE_AXES = ('Mouse X', 'Mouse Y', 'Mouse ScrollWheel')
+
+
+def key_code(name):
+    """Unity KeyCode name to the browser KeyboardEvent.code (mouse buttons stay Mouse0-2)."""
+    if re.fullmatch(r'[A-Z]',name):return 'Key'+name
+    if match:=re.fullmatch(r'Alpha(\d)',name):return 'Digit'+match[1]
+    if match:=re.fullmatch(r'Keypad(\d)',name):return 'Numpad'+match[1]
+    if re.fullmatch(r'F\d{1,2}|Mouse[0-2]',name):return name
+    if name in KEY_NAMES:return KEY_NAMES[name]
+    raise ValueError(f'Unmapped input key: {name}')
 
 
 def method(text, declaration):
@@ -171,17 +183,28 @@ def recover_steering_wheel(source, settings_reader, settings, refresh):
 
 
 def recover_bindings(text, defaults):
-    """inputscript.IN default keys from InitDefault, by enum index."""
+    """inputscript.IN actions and their three InitDefault keys, in enum order. None is null."""
     enum = re.search(r'public enum IN\s*\{([^}]+)\}',text)
-    if enum is None:raise ValueError('Missing driving input enum')
+    if enum is None:raise ValueError('Missing input enum')
     names=[name.strip() for name in enum[1].split(',') if name.strip()]
+    if '= new oneKey[3];' not in defaults.replace('inputscript.',''):raise ValueError('Input key count differs')
+    keys={(int(i),int(k)):argument for i,k,argument in re.findall(
+        r'defaultInput\[(\d+)\]\.keys\[(\d)\]\.Set\((KeyCode\.\w+|"[^"]+", _invertAxis: (?:true|false))\);',defaults)}
+    if len(keys)!=defaults.count('.Set('):raise ValueError('Unparsed input default')
     bindings=[];evidence=[]
-    for action,name in ACTIONS.items():
-        index=names.index(name)
-        keys=re.findall(rf'defaultInput\[{index}\]\.keys\[\d+\]\.Set\(KeyCode\.(\w+)\);',defaults)
-        if not keys:raise ValueError(f'Unresolved driving input: {name}')
-        bindings.append({'action':action,'codes':[KEY_CODES[value] for value in keys]})
-        evidence.append({'action':action,'source_input':name,'index':index,'keys':keys})
+    for index,name in enumerate(names):
+        slots=[]
+        for k in range(3):
+            argument=keys.pop((index,k),None)
+            if argument is None:slots.append(None)
+            elif argument.startswith('KeyCode.'):slots.append(key_code(argument[8:]))
+            else:
+                axis,invert=re.fullmatch(r'"([^"]+)", _invertAxis: (true|false)',argument).groups()
+                if axis not in MOUSE_AXES:raise ValueError(f'Unmapped input axis: {axis}')
+                slots.append(('-' if invert=='true' else '')+axis)
+        evidence.append({'source_input':name,'index':index,'keys':slots})
+        if name not in LEFT_OUT:bindings.append({'action':name,'keys':slots})
+    if keys:raise ValueError('Input default outside the enum')
     return bindings, evidence
 
 

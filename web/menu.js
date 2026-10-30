@@ -1,6 +1,7 @@
 import {applyLayout,layoutBox,rgba} from './ui-layout.js';
 import {createSaveScreen} from './save-screen.js';
 import {createSettingsScreen} from './settings-screen.js';
+import {createControlsScreen} from './controls-screen.js';
 import {canLoadLast} from './save-session.js';
 export const ACTIONS={PAUSE:2,CONTINUE:4,RECOVER:16};
 const pendingText={save:'Saving...',load:'Loading...',loadLast:'Loading...',remove:'Deleting...',newGame:'Starting a new game...'};
@@ -45,7 +46,7 @@ export class MenuState {
  }
 }
 export async function captureWithAudio(model,action,request,audio){const success=await model.capture(action,request,()=>audio?.unlock());if(!success)audio?.pause();return success;}
-export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId,thumbnail=()=>null,sleeping=()=>false,seated=()=>false,slider,audio,drivingBindings,defaultAssists,onPause,onNewGame,appearance,settings,resets}) {
+export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId,thumbnail=()=>null,sleeping=()=>false,seated=()=>false,slider,audio,bindings,defaultAssists,onPause,onNewGame,appearance,settings,resets}) {
  const model=new MenuState(),menu=document.querySelector('#menu'),settingsNode=document.querySelector('#settings-screen'),gameMode=document.querySelector('#game-mode-screen'),savesNode=document.querySelector('#save-screen'),appearanceNode=document.querySelector('#appearance-screen'),startLast=document.querySelector('#start-load-last');
  const initial=document.querySelector('#start-actions'),paused=document.querySelector('#pause-actions'),error=document.querySelector('#capture-error'),status=document.querySelector('#status');
  const art=document.querySelector('#menu-art'),frame=document.querySelector('#menu-frame'),hud=document.querySelector('#hud');
@@ -67,10 +68,7 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId
  const assistReset=()=>{clutch.checked=defaultAssists.automatic_clutch;gears.checked=defaultAssists.automatic_gears;requestDriving();};
  settings.listen(()=>{if(model.state==='saves')paint();});
  const settingsScreen=createSettingsScreen(settingsNode,settings,()=>!model.started,{...resets,controls:[assistReset,...resets.controls??[]]});
- {
-  const names={ControlLeft:'Left Ctrl',ControlRight:'Right Ctrl',Numpad0:'Numpad 0',ArrowUp:'Up arrow',ArrowDown:'Down arrow',KeyR:'R',KeyN:'N',KeyU:'U',AltLeft:'Left Alt',NumpadAdd:'Numpad +',NumpadSubtract:'Numpad -'};
-  for(const {action,codes} of drivingBindings){const node=document.querySelector('[data-driving-binding="'+action+'"]');node.textContent=codes.map(code=>names[code]??code.replace('Digit','').replace('Numpad','Numpad ')).join(' / ');}
- }
+ const controlsScreen=createControlsScreen(document.querySelector('#key-bindings'),document.querySelector('#key-bindings-reset'),settings,bindings);
  function resize(){
   const narrow=innerWidth<800;menu.classList.toggle('narrow',narrow);
   for(const [selector,role] of nodes){const n=document.querySelector(selector);applyLayout(n,ui.layouts[role],ui.urls);if(ui.layoutUrls[role]){n.style.backgroundImage='url("'+ui.layoutUrls[role]+'")';n.style.backgroundColor='transparent';}if(narrow&&!backNodes.includes(selector)){Object.assign(n.style,{left:'auto',top:'auto',width:'100%',height:'44px',fontSize:'18px'});}}
@@ -88,7 +86,7 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId
   if(hud&&state!=='playing')hud.hidden=true;
   clutch.disabled=model.pending;gears.disabled=model.pending||!clutch.checked;
   slider.lock(model.pending||model.started||!(state==='start-menu'||state==='settings'&&model.origin==='start-menu'));
-  if(state==='settings')settingsScreen.paint();
+  if(state==='settings')settingsScreen.paint();else controlsScreen.cancel();
   for(const [selector] of actionNodes)document.querySelector(selector).disabled=!model.readyFlag||model.pending;
   document.querySelector('#recover').disabled ||= model.dead;
   document.querySelector('#resume').disabled ||= model.deathComplete;

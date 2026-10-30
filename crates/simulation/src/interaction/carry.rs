@@ -138,7 +138,7 @@ impl CarryState {
         }
         Ok(Self {
             reference: player.clone(),
-            settings: crate::reference::PlayerSettings::defaults(&reference.settings),
+            settings: crate::reference::PlayerSettings::defaults(reference),
             rules: reference
                 .items
                 .iter()

@@ -3,7 +3,7 @@ use super::drive_out::{enter, frame, frame_with, ground, settle};
 use super::*;
 use crate::fluids::FluidEntry;
 use crate::reference::{DrivingAssists, ItemId};
-use crate::simulation::{FrameInput, keys};
+use crate::simulation::{FrameInput, keys, player_keys};
 use crate::world::{GameMode, ObjectKey, StartCar, StartCarChoice};
 
 /// The start cars of V02 PR 1 and PR 2, and the Lada.
@@ -112,11 +112,13 @@ fn running(run: &GarageRuntime, key: &ObjectKey) -> bool {
     run.engine_output(key).running
 }
 
-/// Steps frames with `held` keys until `done` or `seconds` pass. `pressed` acts on the first frame.
+/// Steps frames with `held` and `player_held` keys until `done` or `seconds` pass. `pressed` acts
+/// on the first frame.
 fn hold(
     run: &mut GarageRuntime,
     reference: &ReferenceManifest,
     held: u32,
+    player_held: u16,
     pressed: u32,
     seconds: f32,
     done: impl Fn(&GarageRuntime) -> bool,
@@ -124,6 +126,7 @@ fn hold(
     for step in 0..(seconds / crate::simulation::FIXED_DT) as usize {
         let input = FrameInput {
             held,
+            player_held,
             pressed: if step == 0 { pressed } else { 0 },
             ..FrameInput::default()
         };
@@ -202,6 +205,7 @@ fn start_car_drives_saves_and_loads(reference: &ReferenceManifest, field: &str) 
         &mut run,
         reference,
         keys::IGNITION,
+        0,
         keys::IGNITION,
         20.,
         |run| running(run, &key),
@@ -219,7 +223,7 @@ fn start_car_drives_saves_and_loads(reference: &ReferenceManifest, field: &str) 
     assert!(running(&run, &key), "{field}: engine idles");
 
     // First gear, then throttle for about 10 m.
-    hold(&mut run, reference, 0, keys::GEAR_1, 0.2, |_| false);
+    hold(&mut run, reference, 0, 0, keys::GEAR_1, 0.2, |_| false);
     let first = run.vehicles[&key].drivetrain.gear();
     let neutral = crate::starting_area::world_vehicle(reference, run.vehicles[&key].prototype)
         .gear_ratios
@@ -228,12 +232,12 @@ fn start_car_drives_saves_and_loads(reference: &ReferenceManifest, field: &str) 
         .unwrap();
     assert_eq!(first, neutral + 1, "{field}: first gear");
     let start = absolute(&run, &key).0;
-    let moved = hold(&mut run, reference, keys::FORWARD, 0, 30., |run| {
+    let moved = hold(&mut run, reference, 0, player_keys::GAS, 0, 30., |run| {
         horizontal(absolute(run, &key).0, start) > 10.
     });
     assert!(moved, "{field}: drives 10 m");
     assert_eq!(run.vehicles[&key].drivetrain.gear(), first, "{field}");
-    hold(&mut run, reference, keys::BACK, 0, 4., |_| false);
+    hold(&mut run, reference, 0, player_keys::BRAKE, 0, 4., |_| false);
     assert!(running(&run, &key), "{field}: engine runs after the drive");
 
     let saved = (
@@ -403,6 +407,7 @@ fn car07_drives_in_forced_automatic() {
         &mut run,
         &reference,
         keys::IGNITION,
+        0,
         keys::IGNITION,
         20.,
         |run| running(run, &key),
@@ -420,11 +425,11 @@ fn car07_drives_in_forced_automatic() {
         &crate::starting_area::world_vehicle(&reference, run.vehicles[&key].prototype).gear_ratios;
     let neutral = ratios.iter().position(|r| *r == 0.).unwrap();
     let start = absolute(&run, &key).0;
-    let shifted = hold(&mut run, &reference, keys::FORWARD, 0, 30., |run| {
+    let shifted = hold(&mut run, &reference, 0, player_keys::GAS, 0, 30., |run| {
         run.vehicles[&key].drivetrain.gear() > neutral + 1
     });
     assert!(shifted, "Car07 shifts up");
-    let moved = hold(&mut run, &reference, keys::FORWARD, 0, 30., |run| {
+    let moved = hold(&mut run, &reference, 0, player_keys::GAS, 0, 30., |run| {
         horizontal(absolute(run, &key).0, start) > 20.
     });
     assert!(moved, "Car07 drives 20 m");

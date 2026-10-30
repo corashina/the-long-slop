@@ -189,7 +189,7 @@ pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
             listener: None,
             ready: false,
             look: MouseLook::default(),
-            look_scale: simulation::reference::PlayerSettings::defaults(&reference.settings).look(),
+            look_scale: simulation::reference::PlayerSettings::defaults(&reference).look(),
             view_offset: [0.; 3],
             last_inventory: None,
             last_crosshair: None,
@@ -602,9 +602,9 @@ fn read_input(
     let player = game_player_keys();
     let mut input = FrameInput {
         held,
-        player_held: player as u8,
-        player_pressed: (player >> 8) as u8,
-        player_released: (player >> 16) as u8,
+        player_held: player as u16,
+        player_pressed: (player >> 16) as u16,
+        player_released: game_player_released() as u16,
         pressed: game_pressed(),
         released: game_released(),
         inventory_held: game_inventory_keys() as u8 & 15,
@@ -613,7 +613,7 @@ fn read_input(
             game_mouse_x() * drive.look_scale[0],
             game_mouse_y() * drive.look_scale[1],
         ],
-        drive_mouse: [game_mouse_x(), -game_mouse_y()],
+        drive_mouse: [game_drive_mouse_x(), -game_drive_mouse_y()],
         wheel: game_wheel(),
         carry: crate::simulation::CarryDeltas::default(),
         typing: if hud.flags & HudBlock::TYPING != 0 {
