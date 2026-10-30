@@ -242,12 +242,12 @@ async function load(){
  // Rust copies only the shell fields, so JS does not parse the world records.
  const text=manifest_shell(bytes),manifest=JSON.parse(text);
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
- const bindings=manifest.driving.bindings,actions=actionIndex(bindings);
+ const bindings=manifest.driving.bindings,actionIds=actionIndex(bindings);
  settings=createSettings(()=>localStorage,manifest.settings,{...gameFields(manifest.world.start_cars.length),inputs:inputsField(bindings)});
  installGameMode(window,document.querySelector('#biome'),settings);
  installStartCar(window,document.querySelector('#start-car'),manifest.world.start_cars,settings);
  const gameOptions=installGameOptions(window,{peaceful:document.querySelector('#peaceful'),survival:document.querySelector('#survival-mode'),homesick:document.querySelector('#homesick')},settings,options=>survival?.setSurvival(options.survival));
- installSettingsBridge(window,settings,()=>menu?.model.state==='playing',actions);
+ installSettingsBridge(window,settings,()=>menu?.model.state==='playing',actionIds);
  installFramePacer(f=>requestAnimationFrame(f),()=>frameLimit(settings.values,menu?.model.state==='playing'),wake_frame);
  const autosaveToggles=v=>{toggles.autosave=v.BAutoSave;toggles.inCar=!v.BDisableAutoSaveInCar;};
  autosaveToggles(settings.values);settings.listen(autosaveToggles);
@@ -304,7 +304,7 @@ async function load(){
  multiplayer=createMultiplayer({document,target:window,Peer:window.peerjs.Peer,buildId:manifest.build_id,exportHash:manifestHash,simulation,saveSession,menu,outfit,storage:()=>localStorage,
   room:joinRoom,joined:(save,error)=>joined({save,error,operation:'join'}),reloadJoin:room=>reloadWith(JOIN_KEY,JSON.stringify(room))});
  {const changed=outfit.changed;outfit.changed=()=>{changed();multiplayer.look(outfit.outfit);};}
- feedback=createFeedback(manifest.ui,manifest,settings,actions);
+ feedback=createFeedback(manifest.ui,manifest,settings,actionIds);
  startup.end('interface');
  if(failed)return;status.textContent='Loading the garage...';loading.stage(status.textContent);
  startup.begin('generation');startup.begin('decodeUpload');startup.begin('pipeline');
