@@ -29,7 +29,7 @@ Impact is an estimate from the code. No item has F3 numbers yet. Use F3 "GPU ms"
 | --- | --- | --- | --- | --- |
 | 1 | Render bundles for static draws | M-L | Medium-high if CPU bound | Buildings, roads, terrain and parked cars encode the same draws each frame. |
 | 2 | GPU grass | L | Medium-high in grass areas | Grass blades are built on the CPU and uploaded each change. |
-| 3 | Send only changed poses | M | Low-medium | `FramePoses::fill` sends `previous` and `current` rows for every handle each frame, also sleeping ones. With a change list, the renderer can also skip sleeping item visuals. |
+| 3 | Skip unchanged item visuals | S | Low | The worker sends only changed pose slots now. The renderer still does a pose lookup and interpolation for every item visual each frame (`src/presentation/reference.rs`, `spawned.rs`). Use the changed slots to skip the rest. |
 | 4 | Cache static shadow casters per cascade | M | Medium if shadow bound | Redraw a cascade only when it moves or the sun turns past one texel. |
 | 5 | Warm prop row pipelines before use | M | Removes hitches | A compiling row pipeline makes the whole view wait (`prop_draws.rs`). |
 | 6 | Drop own QueryBounds BVH | M | Low on render FPS | Worker side (`crates/simulation/src/vehicle/query_bounds.rs`). Check why it exists first. |
@@ -54,6 +54,7 @@ Not measured in a browser unless the row says so.
 
 | Change | PR |
 | --- | --- |
+| Worker sends only changed pose rows (`FrameEncoder`) | #277 |
 | F3 shows GPU ms per world view stage | #276 |
 | Body descendant node lists are built once per prototype, not per moved body per frame | #273 |
 | Release build uses fat LTO | #273 |

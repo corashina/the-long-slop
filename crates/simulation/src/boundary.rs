@@ -1172,19 +1172,142 @@ impl SimCommand {
 #[derive(Debug, PartialEq)]
 pub struct DecodeError(pub String);
 
-/// Writes the frame into `out`. `out` keeps its capacity between frames.
+/// Writes the whole frame into `out`. `out` keeps its capacity between frames.
 pub fn encode(frame: &SimFrame, out: &mut Vec<u8>) {
     out.clear();
-    write(frame, out);
+    write(frame, out, None);
 }
 
-fn write(frame: &SimFrame, out: &mut Vec<u8>) {
+/// Encodes the frames of one stream. Pose rows that did not change since the last frame are left out.
+/// The decoder must read every frame of the stream, in order, into the same `SimFrame`.
+#[derive(Default)]
+pub struct FrameEncoder {
+    previous: Vec<PoseRow>,
+    current: Vec<PoseRow>,
+    items: Vec<ItemRow>,
+    changed: Vec<u32>,
+    started: bool,
+}
+
+impl FrameEncoder {
+    pub fn encode(&mut self, frame: &SimFrame, out: &mut Vec<u8>) {
+        out.clear();
+        write(frame, out, Some(self));
+    }
+}
+
+/// Marks a whole pose section. Otherwise the count of changed slots follows the row count.
+const ALL_POSES: u32 = u32::MAX;
+
+/// Writes `previous`, `current` and `items`. They have one row per handle slot.
+fn put_poses(out: &mut Vec<u8>, frame: &SimFrame, encoder: Option<&mut FrameEncoder>) {
+    let rows = frame.current.len();
+    debug_assert!(frame.previous.len() == rows && frame.items.len() == rows);
+    out.extend_from_slice(&(rows as u32).to_le_bytes());
+    let sent = match encoder {
+        Some(sent) if sent.started => sent,
+        encoder => {
+            out.extend_from_slice(&ALL_POSES.to_le_bytes());
+            out.extend_from_slice(bytemuck::cast_slice(&frame.previous));
+            out.extend_from_slice(bytemuck::cast_slice(&frame.current));
+            out.extend_from_slice(bytemuck::cast_slice(&frame.items));
+            if let Some(encoder) = encoder {
+                encoder.started = true;
+                encoder.previous.clone_from(&frame.previous);
+                encoder.current.clone_from(&frame.current);
+                encoder.items.clone_from(&frame.items);
+            }
+            return;
+        }
+    };
+    // Bytes compare exactly, so a -0.0 or NaN change is sent too.
+    fn same<T: Pod>(a: &T, b: &T) -> bool {
+        bytemuck::bytes_of(a) == bytemuck::bytes_of(b)
+    }
+    sent.previous.resize(rows, PoseRow::default());
+    sent.current.resize(rows, PoseRow::default());
+    sent.items.resize(rows, ItemRow::default());
+    sent.changed.clear();
+    for slot in 0..rows {
+        if !same(&frame.previous[slot], &sent.previous[slot])
+            || !same(&frame.current[slot], &sent.current[slot])
+            || !same(&frame.items[slot], &sent.items[slot])
+        {
+            sent.previous[slot] = frame.previous[slot];
+            sent.current[slot] = frame.current[slot];
+            sent.items[slot] = frame.items[slot];
+            sent.changed.push(slot as u32);
+        }
+    }
+    out.extend_from_slice(&(sent.changed.len() as u32).to_le_bytes());
+    out.extend_from_slice(bytemuck::cast_slice(&sent.changed));
+    for &slot in &sent.changed {
+        out.extend_from_slice(bytemuck::bytes_of(&frame.previous[slot as usize]));
+    }
+    for &slot in &sent.changed {
+        out.extend_from_slice(bytemuck::bytes_of(&frame.current[slot as usize]));
+    }
+    for &slot in &sent.changed {
+        out.extend_from_slice(bytemuck::bytes_of(&frame.items[slot as usize]));
+    }
+}
+
+fn take_poses(rest: &mut &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
+    let count = |rest: &mut &[u8]| -> Result<usize, DecodeError> {
+        Ok(u32::from_le_bytes(take(rest, 4)?.try_into().expect("4 bytes")) as usize)
+    };
+    let rows = count(rest)?;
+    let changed = count(rest)?;
+    if changed == ALL_POSES as usize {
+        for target in [&mut frame.previous, &mut frame.current] {
+            let bytes = take(rest, rows * size_of::<PoseRow>())?;
+            target.clear();
+            target.extend(
+                bytes
+                    .chunks_exact(size_of::<PoseRow>())
+                    .map(bytemuck::pod_read_unaligned::<PoseRow>),
+            );
+        }
+        let bytes = take(rest, rows * size_of::<ItemRow>())?;
+        frame.items.clear();
+        frame.items.extend(
+            bytes
+                .chunks_exact(size_of::<ItemRow>())
+                .map(bytemuck::pod_read_unaligned::<ItemRow>),
+        );
+        return Ok(());
+    }
+    frame.previous.resize(rows, PoseRow::default());
+    frame.current.resize(rows, PoseRow::default());
+    frame.items.resize(rows, ItemRow::default());
+    let slots = take(rest, changed * 4)?;
+    let previous = take(rest, changed * size_of::<PoseRow>())?;
+    let current = take(rest, changed * size_of::<PoseRow>())?;
+    let items = take(rest, changed * size_of::<ItemRow>())?;
+    fn rows_of(bytes: &[u8], size: usize) -> std::slice::ChunksExact<'_, u8> {
+        bytes.chunks_exact(size)
+    }
+    for (((slot, previous), current), item) in rows_of(slots, 4)
+        .zip(rows_of(previous, size_of::<PoseRow>()))
+        .zip(rows_of(current, size_of::<PoseRow>()))
+        .zip(rows_of(items, size_of::<ItemRow>()))
+    {
+        let slot = u32::from_le_bytes(slot.try_into().expect("4 bytes")) as usize;
+        if slot >= rows {
+            return Err(DecodeError("pose slot out of range".into()));
+        }
+        frame.previous[slot] = bytemuck::pod_read_unaligned(previous);
+        frame.current[slot] = bytemuck::pod_read_unaligned(current);
+        frame.items[slot] = bytemuck::pod_read_unaligned(item);
+    }
+    Ok(())
+}
+
+fn write(frame: &SimFrame, out: &mut Vec<u8>, encoder: Option<&mut FrameEncoder>) {
     out.extend_from_slice(&frame.seq_consumed.to_le_bytes());
     out.extend_from_slice(bytemuck::bytes_of(&frame.state));
     out.extend_from_slice(bytemuck::bytes_of(&frame.hud));
-    put_rows(out, &frame.previous);
-    put_rows(out, &frame.current);
-    put_rows(out, &frame.items);
+    put_poses(out, frame, encoder);
     put_rows(out, &frame.valves);
     put_rows(out, &frame.joints);
     put_rows(out, &frame.ragdoll);
@@ -1214,9 +1337,10 @@ fn write(frame: &SimFrame, out: &mut Vec<u8>) {
     put(out, &frame.changes);
     put(out, &frame.world);
     match &frame.candidate {
+        // The renderer moves each decoded candidate frame away, so the candidate stream is whole.
         Some(candidate) => {
             out.push(1);
-            write(candidate, out);
+            write(candidate, out, None);
         }
         None => out.push(0),
     }
@@ -1236,9 +1360,7 @@ fn read(rest: &mut &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     frame.seq_consumed = u64::from_le_bytes(take(rest, 8)?.try_into().expect("8 bytes"));
     frame.state = bytemuck::pod_read_unaligned(take(rest, size_of::<StateBlock>())?);
     frame.hud = bytemuck::pod_read_unaligned(take(rest, size_of::<HudBlock>())?);
-    take_rows(rest, &mut frame.previous)?;
-    take_rows(rest, &mut frame.current)?;
-    take_rows(rest, &mut frame.items)?;
+    take_poses(rest, frame)?;
     take_rows(rest, &mut frame.valves)?;
     take_rows(rest, &mut frame.joints)?;
     take_rows(rest, &mut frame.ragdoll)?;
