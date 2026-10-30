@@ -260,7 +260,11 @@ pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
                 save::dispatch,
                 sync_imported,
                 presentation::reference::sync_home_cable,
-                presentation::consumables::sync,
+                (
+                    presentation::consumables::warm_up,
+                    presentation::consumables::sync,
+                )
+                    .chain(),
                 (
                     presentation::spawned::sync,
                     presentation::cigarettes::sync,
