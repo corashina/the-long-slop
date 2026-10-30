@@ -29,7 +29,7 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binocular lens distortion and chromatic aberration, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. |
 
-Not planned: multiplayer, VR, stereo 3D, mod events, Steam features, developer tools.
+Not planned: multiplayer, VR, stereo 3D, mod events, Steam features.
 
 ## Test pass
 
@@ -52,6 +52,7 @@ Prepare once:
 2. Paste the acquisition hash that the export prints into `CONTRACT_SHA256` if it changed.
 3. Run all ignored tests: `cargo test --release --lib -- --ignored --nocapture`.
 4. In that output, note the `w02_` bytes per km and the 5,000 km estimate. Above 200 MB, compact spawn boundaries.
+5. Claude runs the steps in Chrome with the test sandbox: see `tests/sandbox/README.md`. First check the sandbox itself: `cars=Bus02Full` stands clear in front of the garage car (one extra car only: more exceed the prototype budget), and `teleport`, `building`, `spawn`, `hand`, `fill` and `cycle` work. Use `tests/sandbox/buses.js` for More cars steps 16-20.
 
 ### Starting area
 

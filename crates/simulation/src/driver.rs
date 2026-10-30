@@ -63,6 +63,8 @@ pub struct SimDriver {
     pub(crate) sent: crate::world::RendererWorld,
     /// Camera position of the last rendered frame.
     listener: Option<[f32; 3]>,
+    /// Sandbox replies that the next frame sends.
+    sandbox: Vec<String>,
 }
 
 impl SimDriver {
@@ -107,6 +109,7 @@ impl SimDriver {
             save: crate::save_requests::SaveState::new(source),
             candidate: None,
             listener: None,
+            sandbox: Vec::new(),
         };
         driver.reset_look();
         driver
@@ -159,6 +162,11 @@ impl SimDriver {
         self.accepted_seq = command.seq;
         self.measure |= command.measure;
         self.world.accept(command.world);
+        if let Some(json) = &command.sandbox
+            && !command.hold
+        {
+            crate::sandbox::run(&mut self.runtime, reference, json, &mut self.sandbox);
+        }
         if command.hold {
             clear_profile_input();
             self.drop_frame_input();
@@ -386,6 +394,9 @@ impl SimDriver {
         if let Some(grant) = self.grant.take() {
             frame.changes.push(Change::Grant(grant));
         }
+        frame
+            .changes
+            .extend(self.sandbox.drain(..).map(Change::Sandbox));
         if std::mem::take(&mut self.measure) {
             frame.changes.push(Change::Measurements(
                 self.runtime.measurements(reference).to_string(),

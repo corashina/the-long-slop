@@ -59,6 +59,7 @@ import {createStartupTrace} from './startup-trace.js';
 import {createPerformance} from './performance.js';
 import {loadUiAssets} from './ui-layout.js';
 import {createSimulation,installSimulationBridge} from './simulation.js';
+import {readSandbox,installSandbox} from './sandbox.js';
 import {installGrassBridge} from './grass.js';
 import {configureAssetCatalog,readAsset,worldBootstrapMeasurements,worldInputBytes,worldInputMetadataBytes,setAssetCpuProfile} from './world-assets.js';
 setAssetCpuProfile(cpuProfile);
@@ -101,6 +102,7 @@ window.gameMeasurements=json=>{
   initialStartReadyMs:initialReadyMs,peakFrameIntervalMs:peakFrameMs,bootstrap};
  for(const resolve of measurementWaiters.splice(0))resolve(snapshot);
 };
+const sandbox=readSandbox(location.search);installSandbox(window,sandbox!==null);
 let input,survival,dead=false,sleeping=false,audio,menu,feedback,failed=false,worldAdmitted=false,actions=0,frame,renderFailure;
 const inventory={selected:0,slots:[0,0,0,0],progress:0};
 window.gameInventory=(selected,a,b,c,d,progress)=>{
@@ -209,7 +211,7 @@ async function load(){
  slider=installDrawDistance(()=>localStorage,document.querySelector('#draw-distance'),document.querySelector('#draw-distance-value'),{minimum:range.minimum.drawDistance,maximum:range.maximum.drawDistance,fallback:range.default});
  // The simulation parses its own manifest copy while this thread loads the interface.
  worldDrawDistance=slider.value();
- const simulationStarted=simulation.start(bytes.slice(),manifestHash,worldDrawDistance,window.gameBiome(),window.gameStartCar());
+ const simulationStarted=simulation.start(bytes.slice(),manifestHash,worldDrawDistance,window.gameBiome(),window.gameStartCar(),sandbox?.cars??[]);
  simulationStarted.catch(()=>{});
  fetched({path:'assets/reference/manifest.json',requiredBytes:bytes.byteLength,receivedBytes:bytes.byteLength});
  startup.build({sourceBuildId:manifest.build_id,manifestSha256:manifestHash,wasm:'release'});
@@ -224,6 +226,7 @@ async function load(){
  await loadUiAssets(manifest.ui);
  survival=createSurvival(manifest.ui,manifest.sleep.cooldown_seconds);
  audio=createAudio(manifest.audio);installAudioBridge(window,audio);
+ if(sandbox?.calendar)window.gameAudioCalendar=()=>sandbox.calendar;
  window.addEventListener('pagehide',()=>audio.dispose());
  const appearance=createAppearance({target:window,document,canvas,edit:outfit,characters:manifest.clothing.characters});
  menu=createMenu({canvas,appearance,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,slider,audio,onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
