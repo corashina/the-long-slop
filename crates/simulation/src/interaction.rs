@@ -15,6 +15,7 @@ pub mod fluid_contact;
 mod fluid_receipts;
 pub mod genie_lamp;
 pub mod guns;
+pub mod help_texts;
 pub mod hitch;
 pub mod holes;
 mod hose;
@@ -253,6 +254,7 @@ pub struct InteractionState {
     pub mechanisms: mechanisms::MechanismState,
     pub parts: parts::PartAttachments,
     pub hitch: hitch::Hitches,
+    pub help_texts: help_texts::HelpTexts,
     mechanism_bodies: HashMap<ItemId, BodyId>,
     openings: Vec<OpeningState>,
     hoses: hose::HoseState,
@@ -608,6 +610,7 @@ impl InteractionState {
             mechanisms,
             parts,
             hitch: hitch::Hitches::default(),
+            help_texts: help_texts::HelpTexts::default(),
             mechanism_bodies: reference.items.iter().map(|i| (i.id, i.body)).collect(),
             receipt_tanks: fluid_receipts::tank_nodes(reference),
             callback_nodes: Vec::with_capacity(
@@ -1336,7 +1339,7 @@ impl InteractionState {
                 number(cap_record, "hasName")? != 0.0,
                 number(cap_record, "nameText")?,
                 number(cap_record, "noText")? != 0.0,
-                &reference.fluid_rules.words,
+                reference.language.names.len(),
             )?,
         };
         let tank_rules = TankRules {
@@ -2298,20 +2301,16 @@ fn generated_presentation(
     has_name: bool,
     name_text: f32,
     no_text: bool,
-    words: &[String],
+    words: usize,
 ) -> Result<FluidPresentation, ReferenceError> {
-    let name = if has_name {
-        words
-            .get(name_text as usize)
-            .filter(|_| name_text >= 0.0)
-            .ok_or_else(|| ReferenceError("Cap name word outside language table".into()))?
-            .clone()
-    } else {
-        String::new()
-    };
+    if has_name && !(name_text >= 0.0 && (name_text as usize) < words) {
+        return Err(ReferenceError(
+            "Cap name word outside language table".into(),
+        ));
+    }
     Ok(FluidPresentation {
         has_name,
-        name,
+        word: if has_name { name_text as u32 } else { 0 },
         no_text,
     })
 }

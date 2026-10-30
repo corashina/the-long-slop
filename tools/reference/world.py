@@ -771,6 +771,20 @@ def skin_record(source, exporter, component, node, bone_id):
         'triangles':exporter.geometry(mesh)[2]}
 
 
+def recover_help_texts(source,hierarchy,mapping):
+    """Source `helptextscript` nodes. fpscontroller shows the set of the box that the use ray hits."""
+    result=[]
+    for n in hierarchy:
+        for c in n['components']:
+            if c.type.name!='MonoBehaviour' or source.class_name(c)!='helptextscript':continue
+            d=source.read(c)
+            # isFix boxes do not join mainscript.helpTexts and keep an empty text.
+            if d['isFix'] or not d['m_Enabled']:raise ValueError(f'{key(c)}: fixed or disabled help text is not ported')
+            result.append({'source':source_id(c),'node':mapping[key(n['reader'])],'force_auto':bool(d['ForceAuto']),
+                'motorcycle':bool(d['isMotorcycle']),'bike':bool(d['isBike']),'always':bool(d['showifmenudisabledtoo'])})
+    return result
+
+
 def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cache,first_asset):
     prototypes=[]
     for index,(identity,root) in enumerate(roots.items(),first_asset):
@@ -852,7 +866,7 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
             'deferred_materials':report['deferred_materials'],'excluded_actions':scope_cache.get(identity,('',[]))[1],'skins':skins,'bodies':bodies,'colliders':colliders,'prefab_pose':converted_transform(source.read(root)),
             'asset_record':{'id':index,'mesh_count':report['mesh_count'],'material_count':report['material_count'],'usage':'world_prototype','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(root),'dependencies':report['dependencies']},
             'materials':[dict(material,asset=index) for material in report['materials']],'sled':sled,'pushes':pushes,
-            'trailer':trailer,'hitches':recover_hitches(source,hierarchy,mapping,colliders)}
+            'trailer':trailer,'hitches':recover_hitches(source,hierarchy,mapping,colliders),'help_texts':recover_help_texts(source,hierarchy,mapping)}
         from .vehicles import vehicle_record, part_records
         vehicle=vehicle_record(source,hierarchy,bodies,colliders,index,report['material_indices'],output)
         if vehicle:prototype['vehicle']=vehicle

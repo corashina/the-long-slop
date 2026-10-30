@@ -8,12 +8,13 @@ const ROWS={
  misc:[['FSound'],['FFieldOfViewFoot'],['FFieldOfViewCar'],['FCrosshairScale'],['BWalkHeadBob'],['BDriveHeadBob'],['BHelp'],['BCrosshair'],['BOldCrosshair'],
   ['BAlwaysShowHP'],['BAlwaysShowFood'],['BAlwaysShowWater'],['BAlwaysShowPiss'],['BAlwaysShowShit']],
 };
-const LABELS={BEnableFpsLimit:'FPS limit',FFPSLimit:'FPS limit',FMouseSensXY:'Mouse sensitivity',FMouseSensX:'Mouse sensitivity X',FMouseSensY:'Mouse sensitivity Y',
- FMouseSensZ:'Scroll sensitivity',FMouseMove:'Item move sensitivity',FMouseRot:'Item rotate sensitivity',FKeyLookSens:'Key look sensitivity',FKeySteerSens:'Key steer sensitivity',
- BInvertMouseSensX:'Invert',BInvertMouseSensY:'Invert',BInvertMouseSensZ:'Invert',BInvertMouseMove:'Invert',BInvertMouseRot:'Invert',
- FSound:'Sound volume',FFieldOfViewFoot:'Field of view on foot',FFieldOfViewCar:'Field of view in a car',FCrosshairScale:'Crosshair scale',
- BWalkHeadBob:'Walk head bob',BDriveHeadBob:'Drive head bob',BHelp:'Help',BCrosshair:'Crosshair',BOldCrosshair:'Old crosshair',
- BAlwaysShowHP:'Always show health',BAlwaysShowFood:'Always show food',BAlwaysShowWater:'Always show water',BAlwaysShowPiss:'Always show bladder',BAlwaysShowShit:'Always show bowel'};
+// Source `ls.w` word of each row.
+const LABELS={BEnableFpsLimit:'fpslimit',FFPSLimit:'fpslimit',FMouseSensXY:'mousesensitivity',FMouseSensX:'horizontalx',FMouseSensY:'verticaly',
+ FMouseSensZ:'scrollwheelsensitivity',FMouseMove:'objectmovesensitivity',FMouseRot:'objectrotatesensitivity',FKeyLookSens:'keyboardlooksensitivity',FKeySteerSens:'keysteersens',
+ BInvertMouseSensX:'swinvert',BInvertMouseSensY:'swinvert',BInvertMouseSensZ:'swinvert',BInvertMouseMove:'swinvert',BInvertMouseRot:'swinvert',
+ FSound:'msound',FFieldOfViewFoot:'fieldofviewonfoot',FFieldOfViewCar:'fieldofviewincar',FCrosshairScale:'crosshairscale',
+ BWalkHeadBob:'walkheadbob',BDriveHeadBob:'driveheadbob',BHelp:'controlshelp',BCrosshair:'crosshair',BOldCrosshair:'oldcrosshair',
+ BAlwaysShowHP:'alwaysshowhp',BAlwaysShowFood:'alwaysshowfood',BAlwaysShowWater:'alwaysshowwater',BAlwaysShowPiss:'alwaysshowpiss',BAlwaysShowShit:'alwaysshowshit'};
 export const TABS=['graphics','controls','steering','misc'];
 // A toggle input that follows the store. A child locks while a parent is off.
 export function bindToggle(input,settings,name){
@@ -21,21 +22,23 @@ export function bindToggle(input,settings,name){
  input.addEventListener('change',()=>settings.set(name,input.checked));
  return ()=>{input.checked=settings.values[name];input.disabled=parents.some(p=>!settings.values[p]);};
 }
-// `root` is the settings screen. `inMenu` is true before a game starts.
+// `root` is the settings screen. `inMenu` is true before a game starts. `language` is the word table (`createLanguage`).
 // `resets` adds the reset of the controls each tab holds outside the store.
-export function createSettingsScreen(root,settings,inMenu,resets={}){
+export function createSettingsScreen(root,settings,language,inMenu,resets={}){
  const doc=root.ownerDocument,paints=[];
  const el=(tag,props,...children)=>{const node=Object.assign(doc.createElement(tag),props);node.append(...children);return node;};
  function toggle(name){
   const input=el('input',{type:'checkbox',id:'setting-'+name});
   paints.push(bindToggle(input,settings,name));
-  return el('label',{className:'setting-toggle'},input,LABELS[name]);
+  return el('label',{className:'setting-toggle'},input,language.text(el('span'),LABELS[name]));
  }
  function slider(name){
   const s=settings.reference.sliders[name],id='setting-'+name;
   const range=el('input',{type:'range',id,min:String(s.slider[0]),max:String(s.slider[1]),step:s.whole?'1':'any'});
-  const number=el('input',{type:'number',min:String(s.minimum),max:String(s.maximum),step:'any',ariaLabel:LABELS[name]});
-  const reset=el('button',{type:'button',textContent:'Reset',ariaLabel:'Reset '+LABELS[name]});
+  const label=language.text(el('label',{htmlFor:id,id:id+'-label'}),LABELS[name]);
+  const number=el('input',{type:'number',min:String(s.minimum),max:String(s.maximum),step:'any'});
+  const reset=language.text(el('button',{type:'button'}),'mreset');
+  number.setAttribute('aria-labelledby',label.id);reset.setAttribute('aria-describedby',label.id);
   range.addEventListener('input',()=>settings.set(name,sliderSetting(s,Number(range.value),true)));
   number.addEventListener('change',()=>{const value=Number(number.value);if(number.value!==''&&Number.isFinite(value))settings.set(name,sliderSetting(s,value,false));paint();});
   reset.addEventListener('click',()=>settings.set(name,s.default*s.multiplier));
@@ -44,7 +47,7 @@ export function createSettingsScreen(root,settings,inMenu,resets={}){
    range.value=String(value);if(doc.activeElement!==number)number.value=String(value);
    range.disabled=number.disabled=reset.disabled=locked;
   });
-  return el('div',{className:'setting-slider'},el('label',{htmlFor:id,textContent:LABELS[name]}),range,number,reset);
+  return el('div',{className:'setting-slider'},label,range,number,reset);
  }
  for(const [tab,rows] of Object.entries(ROWS)){
   const list=root.querySelector('[data-settings="'+tab+'"]');

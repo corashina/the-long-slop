@@ -12,6 +12,8 @@ pub mod driving;
 pub use driving::*;
 pub mod settings;
 pub use settings::*;
+pub mod language;
+pub use language::*;
 
 pub mod audio;
 pub use audio::*;
@@ -653,8 +655,6 @@ pub struct FluidRulesReference {
     pub max_tube_vertical_height: f32,
     /// Source `mainscript.fluids[i].burnColor`, indexed by fluid type.
     pub burn_colors: [[f32; 4]; 6],
-    /// Source `ls.FillDefWW` default English text, indexed by `ls.w`.
-    pub words: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -920,6 +920,7 @@ pub struct ReferenceManifest {
     pub conditions: ConditionRecord,
     pub driving: DrivingReference,
     pub settings: SettingsReference,
+    pub language: LanguageReference,
     pub clothing: ClothingReference,
     pub item_prototypes: Vec<ItemPrototype>,
     pub inventory: InventoryReference,
@@ -1165,6 +1166,14 @@ impl ReferenceManifest {
 
         self.driving.validate()?;
         self.settings.validate()?;
+        self.language.validate()?;
+        require(
+            self.openings.iter().all(|o| {
+                !o.presentation.has_name
+                    || (o.presentation.word as usize) < self.language.names.len()
+            }),
+            "cap name word",
+        )?;
         require(
             self.assets
                 .iter()
@@ -1791,7 +1800,6 @@ impl ReferenceManifest {
             ]) && self.fluid_rules.pour_speed > 0.0
                 && self.fluid_rules.min_tube_vertical_height
                     < self.fluid_rules.max_tube_vertical_height
-                && !self.fluid_rules.words.is_empty()
                 && self.fluid_rules.burn_colors.iter().all(|c| finite(c)),
             "fluid rules",
         )?;

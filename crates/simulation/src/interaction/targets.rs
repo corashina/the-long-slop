@@ -44,6 +44,8 @@ pub struct ResolvedAim {
     pub focus_target: Option<AimTarget>,
     pub grab_block: Option<InteractionBlock>,
     pub installation_block: Option<InteractionBlock>,
+    /// `help_texts` bits of the help box that the use ray hits first.
+    pub help: u8,
 }
 
 impl ResolvedAim {
@@ -61,6 +63,7 @@ impl ResolvedAim {
             && identity(self.focus_target) == identity(other.focus_target)
             && self.grab_block == other.grab_block
             && self.installation_block == other.installation_block
+            && self.help == other.help
     }
     pub fn rebase(&mut self, shift: [f32; 3]) {
         if let Some(target) = &mut self.light_target {
@@ -172,6 +175,7 @@ impl InteractionState {
             filling_target: self.query_action(physics, &ray, items, QueryAction::Fill),
             push_target: self.query_action(physics, &ray, items, QueryAction::Push),
             focus_target: self.query_action(physics, &ray, items, QueryAction::Focus),
+            help: self.query_help(physics, &ray),
             ..ResolvedAim::default()
         };
         if let Some(removal) = self.query_action(physics, &ray, items, QueryAction::Removal)
@@ -330,6 +334,25 @@ impl InteractionState {
             distance: hit.time_of_impact,
             point: ray.point_at(hit.time_of_impact).to_array(),
         })
+    }
+
+    /// fpscontroller: the use ray hit with `useLayer`, and its parent `helptextscript`.
+    fn query_help(&self, physics: &PhysicsWorld, ray: &Ray) -> u8 {
+        let held_body = self.carry.body();
+        let surfaces = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
+            collider.is_enabled()
+                && !collider.is_sensor()
+                && (held_body.is_none() || collider.parent() != held_body)
+                && (self.player_body.is_none() || collider.parent() != self.player_body)
+                && collider.collision_groups().memberships.bits() & self.action_masks.use_mask != 0
+                && !collider
+                    .shape()
+                    .contains_point(collider.position(), ray.origin)
+        };
+        physics
+            .queries(QueryFilter::default().predicate(&surfaces))
+            .cast_ray_and_get_normal(ray, self.reach, true)
+            .map_or(0, |(handle, _)| self.help_texts.get(handle))
     }
 
     fn tire_slot_owner(&self, handle: ColliderHandle, physics: &PhysicsWorld) -> Option<ItemId> {

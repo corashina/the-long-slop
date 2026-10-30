@@ -4,7 +4,7 @@ from .source import key, source_id, vector
 from .gltf import GltfExporter, convert_rotation, transform_point
 from .collision import world_pose, quaternion_product, bake_points, geometry, step_surface, collider_tag
 from .actions import recover_masks, recover_bindings, recover_pickup, recover_pushables
-from .caps import cap_flow, default_words, opening_metadata
+from .caps import cap_flow, opening_metadata
 from .mechanisms import recover_mechanisms, bind_mechanisms
 from .visibility import recover_camera_visibility
 from .parts import recover_part_slots
@@ -326,7 +326,7 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
     spawn={'translation':position,'rotation':list(quaternion_product(car_pose['rotation'],[0.,-math.sqrt(.5),0.,math.sqrt(.5)])),'scale':[1.,1.,1.]}
     result={'driving':driving['global'],'settings':recover_settings(source),'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'mechanisms':mechanisms,'wheel_parts':wheel_parts,'parts':[],'part_slots':part_slots,'part_scan':{'source':source_id(main_reader),'mask':main['scanLayer']['m_Bits'],'radius':main['defScanRadius']},'items':items,'openings':openings,'tanks':tanks,
         'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed'],'burn_colors':burn_colors(main),
-            'min_tube_vertical_height':main['minTubeVerticalHeight'],'max_tube_vertical_height':main['maxTubeVerticalHeight'],'words':default_words(source)},'player':player_record,
+            'min_tube_vertical_height':main['minTubeVerticalHeight'],'max_tube_vertical_height':main['maxTubeVerticalHeight']},'player':player_record,
         'area':{'source':source_id(source.get('level1',64896)),'home_root':home_root,'home_pose':home_pose,'home_bounds':bounds,'player_spawn':spawn}}
     result['rendering'] = {'materials': [dict(record, asset=asset_id)
         for asset_id, name in enumerate(roots, 1) for record in reports[name]['materials']]}

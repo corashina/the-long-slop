@@ -2,7 +2,7 @@
 import math
 from .source import key, source_id, vector
 from .collision import bake_points, quaternion_product, world_pose
-from .caps import cap_flow, opening_metadata, word
+from .caps import cap_flow, opening_metadata
 from .particles import cap_particles
 from .survival import finite_record
 
@@ -10,11 +10,6 @@ SEGMENTS = 6
 LINEAR = ('m_XMotion', 'm_YMotion', 'm_ZMotion')
 ANGULAR = ('m_AngularXMotion', 'm_AngularYMotion', 'm_AngularZMotion')
 LOCKED, FREE = 0, 2  # ConfigurableJointMotion
-
-
-def hose_prompts(source) -> dict:
-    """fpscontroller texts: mount key on a cap (stickin), R (coilup), LMB (drain)."""
-    return {'attach': word(source, 'stickin'), 'drain': word(source, 'drain'), 'coilup': word(source, 'coilup')}
 
 
 def check_joint(fields):

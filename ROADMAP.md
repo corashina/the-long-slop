@@ -26,7 +26,6 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X03 | Creatures | XL | Ground UFO, EMP and green-eyed evil rabbits, human monster (attacks hurt the player), breakablescript `DamageFrom` for AI. Rabbits do not yet sense the player hum. |
-| X04d | Languages and help text | M | 10 language files, language dropdown, word table for all menu and HUD text. Help text follows the assists. |
 | X06c | Building reflection probes | S | Car probes are live. Check the original building prefabs for realtime `ReflectionProbe`s. Export any as prototype probes. The live probe slots then take them. |
 | X06g | Heat haze and LUT options | M | Heat haze pass weighted by temperature, old particle heat haze, LUT option (Default, C64, Sepia), grayscale. |
 
@@ -217,6 +216,17 @@ Prepare once:
 19. Seated, hold J (key look) and press WASD: the view turns. Key look sensitivity changes the speed. While leaning, J does nothing.
 20. HUD hints show the bound keys: rebind Use to G, then aim at a door. Hide HUD follows its binding.
 21. Seated with the clutch held, the inventory keys select nothing while Inventory Slot 1 and Shift To 1 share a key name. Rebind one: they select again.
+
+### Languages and help text
+
+1. Re-export first: the export now holds the word table, the 9 language files and the car help boxes.
+2. Settings > Misc lists English, then the 9 file languages. Pick Deutsch: menus, tabs, settings rows, the key list and save screen texts change at once. Reload: Deutsch stays.
+3. Pick Русский, 日本語 and 中国人: the text shows without empty boxes. Note any glyph that the browser cannot show.
+4. In game with Deutsch: action hints, tank texts (name, Liter, voll, percents and fluids), radio volume and AM/FM, and the session distance use the German words.
+5. Look at the dashboard of a world car: the help box shows the car set with the bound keys. Toggle Auto clutch, then Auto shift: the set changes.
+6. A bus shows the auto shift set whatever the assists are. A motorcycle shows the motorcycle auto shift set.
+7. Help off hides the help box. Rebind Ignition: the help box shows the new key.
+8. Compare the help box place and the line breaks with the original.
 
 ### Start menu figure
 

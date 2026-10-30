@@ -36,16 +36,10 @@ def default_words(source) -> list[str]:
     return source.default_words
 
 
-def word(source, name: str) -> str:
-    """Default English text of ls.w.<name>."""
-    names=parse_word_names(managed_code(source));words=default_words(source)
-    if len(names)!=len(words):raise ValueError('Language enum and default table differ')
-    return words[names.index(name)]
-
-
 def cap_presentation(fields, words):
-    """GetCapString shows ls.l.g(nameText). The serialized nameString is not read."""
-    return {'has_name':bool(fields['hasName']),'name':words[fields['nameText']] if fields['hasName'] else '','no_text':bool(fields['noText'])}
+    """GetCapString shows ls.l.g(nameText): `word` is the ls.w index. The serialized nameString is not read."""
+    if fields['hasName'] and not 0<=fields['nameText']<len(words):raise ValueError('Cap name word outside language table')
+    return {'has_name':bool(fields['hasName']),'word':fields['nameText'] if fields['hasName'] else 0,'no_text':bool(fields['noText'])}
 
 
 def opening_metadata(source, reader, node_ids, fluid_tune_speed):

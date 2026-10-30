@@ -30,6 +30,7 @@ pub(super) struct FeedbackStamp {
     engine_flags: [bool; 5],
     crosshair: u32,
     weight: u32,
+    help: u8,
 }
 
 impl GarageRuntime {
@@ -141,16 +142,16 @@ impl GarageRuntime {
             .area
             .interaction
             .feedback(&available, &self.area.items, reference);
-        let (mut amount, mut capacity, quantities, order, fluid_name, has_name, mut no_text) = info
+        let (mut amount, mut capacity, quantities, order, fluid_word, has_name, mut no_text) = info
             .fluid
             .as_ref()
-            .map_or((0., 0., [0.; 6], 0, info.name, false, true), |f| {
+            .map_or((0., 0., [0.; 6], 0, 0, false, true), |f| {
                 (
                     f.amount,
                     f.capacity,
                     f.quantities,
                     f.order,
-                    f.presentation.name.as_str(),
+                    f.presentation.word,
                     f.presentation.has_name,
                     f.presentation.no_text,
                 )
@@ -195,6 +196,7 @@ impl GarageRuntime {
             engine_flags: [ignition, engine.running, engine.starter, seated, handbrake],
             crosshair,
             weight: weight[0].to_bits(),
+            help: self.aim.help,
             actions: info.actions.0
                 | if needs.dead || self.sleeping() {
                     0
@@ -253,7 +255,7 @@ impl GarageRuntime {
             capacity,
             has_name,
             no_text,
-            fluid_name: fluid_name.into(),
+            fluid_word,
             held_name: held
                 .map(|id| display_name(reference, &self.area.items, id))
                 .unwrap_or("")
@@ -274,6 +276,7 @@ impl GarageRuntime {
             computer: stamp.computer,
             crosshair,
             weight: weight[0],
+            help: stamp.help,
         })));
     }
 }

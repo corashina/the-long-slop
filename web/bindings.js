@@ -12,14 +12,6 @@ const PLAYER_BITS={looklean:1,zoom:2,smoke:4,removeSunglasses:8,togglemousedrive
 const INVENTORY_BITS={inventory1:1,inventory2:2,inventory3:4,inventory4:8};
 // Source `GetAxis` actions, in `InputState` order: look X, look Y and scroll.
 export const ANALOG=['lookright','lookleft','lookup','lookdown','scrollup','scrolldown'];
-// Source `controls_*` words (English).
-export const LABELS={forward:'Move Forward',back:'Move Back',left:'Move Left',right:'Move Right',lookup:'Look Up',lookdown:'Look Down',lookleft:'Look Left',lookright:'Look Right',
- lmb:'Fire, Primary Action',rmb:'Secondary Action',mmb:'Rotate',run:'Run',jump:'Jump',duck:'Crouch',use:'Use, Interact',pickup:'Pickup',reload:'Reload',mountdismount:'Mount/Dismount',push:'Push',
- equiprecenter:'Equip, Recenter',looklean:'Lean',piss:'Piss',burpfart:'Burp/Fart',target:'Target',map:'Map view',glue:'Attach',sleep:'Sleep',pointrubwave:'Wave/Rub',hum:'Hum',smoke:'Smoke',
- removeSunglasses:'Remove Accessories',inventory1:'Inventory Slot 1',inventory2:'Inventory Slot 2',inventory3:'Inventory Slot 3',inventory4:'Inventory Slot 4',scrollup:'Scroll Up',scrolldown:'Scroll Down',
- camera:'Change Camera',zoom:'Zoom',hidehud:'Hide HUD',smalldropcam:'Place Drop Camera',keylook:'Look around with Move Keys',togglemousedrive:'Toggle Mouse Driving',gas:'Throttle',brake:'Brake',
- steerleft:'Steer Left',steerright:'Steer Right',clutch:'Clutch',handbrake:'Toggle Handbrake',shiftup:'Shift Up',shiftdown:'Shift Down',gearr:'Shift To Reverse',gearn:'Shift To Neutral',
- gear1:'Shift To 1',gear2:'Shift To 2',gear3:'Shift To 3',gear4:'Shift To 4',gear5:'Shift To 5',gear6:'Shift To 6',ignition:'Ignition',horn:'Horn',lights:'Lights'};
 const copy=inputs=>inputs.map(keys=>keys.slice());
 // The settings store field. Stored keys from another action list fall back to the defaults.
 export function inputsField(defaults){

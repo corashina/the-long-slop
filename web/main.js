@@ -25,6 +25,7 @@ installReflections(window,()=>localStorage,document.querySelector('#reflections'
 import {installMirrors} from './mirrors.js';
 const mirrors=installMirrors(window,()=>localStorage,document.querySelector('#mirrors'),document.querySelector('#mirror-draw-distance'),document.querySelector('#mirror-draw-distance-value'));
 import {createSettings,installSettingsBridge} from './settings.js';
+import {createLanguage,installLanguageSelect,languageField} from './language.js';
 import {actionIndex,compileBindings,inputsField} from './bindings.js';
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
@@ -134,7 +135,7 @@ window.gameInventory=(selected,a,b,c,d,progress)=>{
  window.gameState.inventory=inventory;feedback?.inventory(inventory);
 };
 window.gameWeaponCrosshair=(icon,color)=>feedback?.weapon(icon,color);
-const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',held:'',throwCharge:0,throwActive:false,radioVolume:undefined,radioFrequency:undefined,radioAm:false,quantities:[0,0,0,0,0,0],fluidOrder:0,hose:0,computer:0,crosshair:0,weight:1};
+const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidWord:0,help:0,held:'',throwCharge:0,throwActive:false,radioVolume:undefined,radioFrequency:undefined,radioAm:false,quantities:[0,0,0,0,0,0],fluidOrder:0,hose:0,computer:0,crosshair:0,weight:1};
 const settleSave=window.gameSaveResult;
 window.gameSaveResult=(id,kind,payload,error)=>{
  if(kind==='Commit'&&!error){input.clear();actions=0;}
@@ -152,7 +153,7 @@ window.gameDrivingSettings=()=>drivingSettings?.take();
 // Rust passes its `GamepadFrame` arrays once per frame.
 window.gameGamepad=(axes,buttons)=>{gamepad.poll();axes.set(gamepad.axes);buttons.set(gamepad.buttons);};
 // `steer` to `handbrake` are the last Rust `DrivingControls`, shown only on the Controls screen.
-window.gameDrivingState=(gear,assists,seated,steer,throttle,brake,clutch,handbrake)=>{window.gameState.gear=gear;window.gameState.drivingAssists=assists;menu?.drivingState(assists);feedback?.drivingState(gear,seated);if(menu?.model.state==='settings')steeringWheel?.live(steer,throttle,brake,clutch,handbrake);};
+window.gameDrivingState=(gear,assists,seated,steer,throttle,brake,clutch,handbrake)=>{window.gameState.gear=gear;window.gameState.drivingAssists=assists;menu?.drivingState(assists);feedback?.drivingState(gear,seated,assists);if(menu?.model.state==='settings')steeringWheel?.live(steer,throttle,brake,clutch,handbrake);};
 window.gameActions=()=>{const a=actions;actions=0;return a;};
 const CAMERA_VIEWS=['First person','Outside','Drop cam','Map'];
 window.gameState = { speedKmh: 0, camera: 'First person', x: 0, y: 0, z: 0, contacts: 0,
@@ -181,8 +182,8 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, surfaces, colliders, a
   survival?.setVisible(started&&!paused&&!sleeping&&menu?.model.state==='playing');
 };
 window.gameRadioFeedback=(volume,frequency,am)=>{record.radioVolume=volume;record.radioFrequency=frequency;record.radioAm=am;if(record.context===11||record.context===12)feedback?.update(record);};
-window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,noText,fluidName,held,charge,throwing,rpm,ignition,running,starter,seated,handbrake,gas,oil,alcohol,water,blood,diesel,fluidOrder,control,lmbUse,prompts,computer,crosshair,weight)=>{
- record.actions=mask;record.prompts=prompts;record.computer=computer;record.crosshair=crosshair;record.weight=weight;input?.state.setTyping((computer&32)!==0);record.context=context;record.lmbUse=lmbUse;record.name=name;record.notice=notice;record.carrying=carrying;record.amount=amount;record.capacity=capacity;record.hasName=hasName;record.noText=noText;record.fluidName=fluidName;
+window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,noText,fluidWord,held,charge,throwing,rpm,ignition,running,starter,seated,handbrake,gas,oil,alcohol,water,blood,diesel,fluidOrder,control,lmbUse,prompts,computer,crosshair,weight,help)=>{
+ record.actions=mask;record.prompts=prompts;record.computer=computer;record.crosshair=crosshair;record.weight=weight;input?.state.setTyping((computer&32)!==0);record.context=context;record.lmbUse=lmbUse;record.name=name;record.notice=notice;record.carrying=carrying;record.amount=amount;record.capacity=capacity;record.hasName=hasName;record.noText=noText;record.fluidWord=fluidWord;record.help=help;
  record.held=held;record.throwCharge=charge;record.throwActive=throwing;
  const q=record.quantities;q[0]=gas;q[1]=oil;q[2]=alcohol;q[3]=water;q[4]=blood;q[5]=diesel;record.fluidOrder=fluidOrder;
  const state=window.gameState;
@@ -230,7 +231,9 @@ async function load(){
  const text=manifest_shell(bytes),manifest=JSON.parse(text);
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
  const bindings=manifest.driving.bindings,actions=actionIndex(bindings);
- settings=createSettings(()=>localStorage,manifest.settings,{...gameFields(manifest.world.start_cars.length),inputs:inputsField(bindings)});
+ settings=createSettings(()=>localStorage,manifest.settings,{...gameFields(manifest.world.start_cars.length),inputs:inputsField(bindings),language:languageField(manifest.language)});
+ const language=createLanguage(manifest.language,settings,document);
+ installLanguageSelect(document.querySelector('#language'),settings,language.names);
  installGameMode(window,document.querySelector('#biome'),settings);
  installStartCar(window,document.querySelector('#start-car'),manifest.world.start_cars,settings);
  const gameOptions=installGameOptions(window,{peaceful:document.querySelector('#peaceful'),survival:document.querySelector('#survival-mode'),homesick:document.querySelector('#homesick')},settings,options=>survival?.setSurvival(options.survival));
@@ -258,22 +261,22 @@ async function load(){
  status.textContent='Loading interface assets...';
  loading.stage(status.textContent);
  await loadUiAssets(manifest.ui);
-  survival=createSurvival(manifest.ui,manifest.sleep.cooldown_seconds,settings);survival.setSurvival(settings.values.survival);
+  survival=createSurvival(manifest.ui,manifest.sleep.cooldown_seconds,settings,language,actions);survival.setSurvival(settings.values.survival);
  audio=createAudio(manifest.audio);installAudioBridge(window,audio);
  const volume=v=>audio.volume(v.FSound);volume(settings.values);settings.listen(volume);
  if(sandbox?.calendar)window.gameAudioCalendar=()=>sandbox.calendar;
  window.addEventListener('pagehide',()=>audio.dispose());
- const appearance=createAppearance({target:window,document,canvas,edit:outfit,characters:manifest.clothing.characters});
+ const appearance=createAppearance({target:window,document,canvas,edit:outfit,characters:manifest.clothing.characters,language});
  const figure=createMenuFigure({target:window,canvas});
  // Source tab resets of the controls that keep their own storage.
  const choose=(node,property,value,event)=>{if(node.disabled)return;node[property]=value;node.dispatchEvent(new Event(event));};
  const select=id=>document.querySelector(id);
  const resets={graphics:[()=>choose(sunglasses,'checked',true,'change'),()=>choose(sceneResolution,'value','100','change'),()=>choose(select('#shadow-quality'),'value','0','change'),
   ()=>choose(select('#grass-quality'),'value','0','change'),()=>choose(select('#motion-blur'),'checked',true,'change'),()=>choose(select('#depth-of-field'),'checked',false,'change'),()=>choose(select('#lamp-shadows'),'checked',true,'change'),()=>choose(select('#antialiasing'),'checked',true,'change'),()=>choose(select('#ambient-occlusion'),'checked',true,'change'),()=>choose(select('#reflections'),'checked',true,'change'),()=>mirrors.reset(),()=>slider.reset()],controls:[()=>drivingSettings.resetMouse()]};
- menu=createMenu({canvas,appearance,figure,settings,resets,defaultAssists:manifest.driving.default_assists,ui:manifest.ui,bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,guest:()=>multiplayer?.role===ROLE.GUEST,slider,audio,onNewGame:()=>seed.reroll(),onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+ menu=createMenu({canvas,language,appearance,figure,settings,resets,defaultAssists:manifest.driving.default_assists,ui:manifest.ui,bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,guest:()=>multiplayer?.role===ROLE.GUEST,slider,audio,onNewGame:()=>seed.reroll(),onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  multiplayer=createMultiplayer({document,target:window,Peer:window.peerjs.Peer,buildId:manifest.build_id,exportHash:manifestHash,simulation,saveSession,menu,outfit,storage:()=>localStorage});
  {const changed=outfit.changed;outfit.changed=()=>{changed();multiplayer.look(outfit.outfit);};}
- feedback=createFeedback(manifest.ui,manifest,settings,actions);
+ feedback=createFeedback(manifest.ui,manifest,settings,actions,language);
  startup.end('interface');
  if(failed)return;status.textContent='Loading the garage...';loading.stage(status.textContent);
  startup.begin('generation');startup.begin('decodeUpload');startup.begin('pipeline');

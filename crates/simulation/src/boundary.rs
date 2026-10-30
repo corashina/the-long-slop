@@ -568,7 +568,8 @@ pub struct Feedback {
     pub capacity: f32,
     pub has_name: bool,
     pub no_text: bool,
-    pub fluid_name: String,
+    /// The `ls.w` index of the tank name. Valid when `has_name` is set.
+    pub fluid_word: u32,
     pub held_name: String,
     pub throw_charge: f32,
     pub throw_active: bool,
@@ -588,6 +589,8 @@ pub struct Feedback {
     pub crosshair: u32,
     /// Source `weightM` of the carried item. It fades the pickup layer children.
     pub weight: f32,
+    /// `interaction::help_texts` bits of the help box under the use ray.
+    pub help: u8,
 }
 
 /// Use and limit of one world budget.

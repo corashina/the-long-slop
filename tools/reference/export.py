@@ -394,6 +394,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     resources={entry['file'] for entry in manifest['assets'][0]['dependencies']}
     manifest['assets'][0]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in runtime_resources(manifest) if r['path'] not in resources)
     manifest['ui']=export_ui(source,output,library)
+    from .language import recover_language
+    manifest['language']=recover_language(source)
     manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if not name.startswith(('item_','sky_','creature_')) and name not in ('player','ragdoll')},manifest,library,output)
     bind_condition_audio(manifest['conditions'],manifest['audio'])
     from .acquisition import recover_acquisition, validate_acquisition

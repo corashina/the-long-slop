@@ -8,7 +8,7 @@ export function hsvToRgb(h,s,v){
 }
 const css=([r,g,b])=>'rgb('+[r,g,b].map(c=>Math.round(c*255)).join(' ')+')';
 // `edit` is the `installOutfit` result. `characters` are the manifest `clothing.characters`.
-export function createAppearance({target,document,canvas,edit,characters}){
+export function createAppearance({target,document,canvas,edit,characters,language}){
  const {outfit}=edit,$=selector=>document.querySelector(selector);
  const model=$('#appearance-model'),character=$('#appearance-character'),parts=$('#appearance-parts'),view=$('#appearance-view');
  const sliders={hue:$('#appearance-hue'),brightness:$('#appearance-brightness'),saturation:$('#appearance-saturation')};
@@ -46,11 +46,11 @@ export function createAppearance({target,document,canvas,edit,characters}){
   parts.style.gridTemplateRows='repeat('+Math.ceil(segments.length/2)+',auto)';
   parts.replaceChildren(...segments.map((segment,i)=>{
    const row=document.createElement('div'),button=document.createElement('button');
-   button.type='button';button.textContent=segment.name;button.addEventListener('click',()=>select(i));
+   button.type='button';button.textContent=language.index(segment.language_name);button.addEventListener('click',()=>select(i));
    row.append(button);
    if(segment.disable_able){
     const toggle=document.createElement('input');toggle.type='checkbox';toggle.checked=current().segments[i].enabled;
-    toggle.setAttribute('aria-label',segment.name);
+    toggle.setAttribute('aria-label',button.textContent);
     // `PressedToggle`.
     toggle.addEventListener('change',()=>{current().segments[i].enabled=toggle.checked;edit.changed();});
     row.append(toggle);
@@ -62,6 +62,7 @@ export function createAppearance({target,document,canvas,edit,characters}){
  function paint(){model.value=String(outfit.model);character.value=String(outfit.character);list();}
  // `DropDownUpd`.
  model.addEventListener('change',()=>{outfit.model=Number(model.value);edit.changed();});
+ language.listen(list);
  character.addEventListener('change',()=>{outfit.character=Number(character.value);edit.changed();list();});
  // `SlidersChanged`: a change marks the character as edited (`noReset`).
  for(const [key,slider] of Object.entries(sliders))slider.addEventListener('input',()=>{

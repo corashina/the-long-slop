@@ -170,6 +170,24 @@ pub struct WorldPrototypeReference {
     /// Source `pushablescript` components with a Rigidbody on their node.
     #[serde(default)]
     pub pushes: Vec<WorldPushReference>,
+    /// Source `helptextscript` nodes.
+    #[serde(default)]
+    pub help_texts: Vec<WorldHelpTextReference>,
+}
+
+/// Source `helptextscript`. The colliders at and below `node` show the help set.
+/// `mainscript.RefreshHelpTexts` reads `motorcycle` before `bike`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldHelpTextReference {
+    pub source: SourceId,
+    pub node: u32,
+    /// `ForceAuto`: the auto shift set whatever the assists are.
+    pub force_auto: bool,
+    pub motorcycle: bool,
+    pub bike: bool,
+    /// `showifmenudisabledtoo`: shown while the help setting is off.
+    pub always: bool,
 }
 
 /// Source `pushablescript` of a world prototype. Ids are prototype node, body and collider indices.
@@ -1869,6 +1887,12 @@ impl WorldReference {
                 t.valid(p) && self.prototypes.iter().any(|g| g.source == t.grip.prototype)
             }) && p.hitches.iter().all(|h| h.valid(p)),
             &field(&p.source, "prototype trailer/hitches"),
+        )?;
+        require(
+            p.help_texts
+                .iter()
+                .all(|h| (h.node as usize) < p.nodes.len()),
+            &field(&p.source, "prototype help texts"),
         )?;
         require(
             p.followers.as_ref().is_none_or(|f| f.valid(p)),
