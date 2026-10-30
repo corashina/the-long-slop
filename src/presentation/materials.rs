@@ -1341,38 +1341,50 @@ impl SourceMaterial {
     }
     /// The bound `_EmissionMap` image.
     pub fn emission_map(&self) -> Option<&Handle<Image>> {
-        let data = &self.extension.surface.data;
-        (data.flags.y & EMISSION_SLOT_BIT != 0)
-            .then(|| self.bank(data.banks[1][0]).as_ref())
-            .flatten()
+        self.slot_map(EMISSION_SLOT)
     }
     pub fn set_emission(&mut self, linear: Vec4) {
         self.extension.surface.data.emission = linear;
     }
     /// Source `SetTexture("_EmissionMap", map)`. Null samples the white default.
     pub fn set_emission_map(&mut self, map: Option<Handle<Image>>) -> Result<(), String> {
+        self.set_slot_map(EMISSION_SLOT, map)
+    }
+    /// Source `mainTexture = map`. Null samples the white default.
+    pub fn set_main_map(&mut self, map: Option<Handle<Image>>) -> Result<(), String> {
+        self.set_slot_map(MAIN_SLOT, map)
+    }
+    /// The bound image of texture slot `slot`.
+    pub fn slot_map(&self, slot: usize) -> Option<&Handle<Image>> {
+        let data = &self.extension.surface.data;
+        (data.flags.y & (1 << slot) != 0)
+            .then(|| self.bank(data.banks[slot / 4][slot % 4]).as_ref())
+            .flatten()
+    }
+    fn set_slot_map(&mut self, slot: usize, map: Option<Handle<Image>>) -> Result<(), String> {
         let data = &mut self.extension.surface.data;
+        let bit = 1 << slot;
         let Some(map) = map else {
-            data.flags.y &= !EMISSION_SLOT_BIT;
-            data.defaults[4] = Vec4::ONE;
+            data.flags.y &= !bit;
+            data.defaults[slot] = Vec4::ONE;
             return Ok(());
         };
-        let bank = if data.flags.y & EMISSION_SLOT_BIT != 0 {
-            data.banks[1][0]
+        let bank = if data.flags.y & bit != 0 {
+            data.banks[slot / 4][slot % 4]
         } else {
             // Banks 4 and 5 are the normal and depth maps: their presence changes the pipeline.
             let used = |bank: u32| {
-                (0..9).any(|slot| {
-                    data.flags.y & (1 << slot) != 0 && data.banks[slot / 4][slot % 4] == bank
+                (0..9).any(|other| {
+                    data.flags.y & (1 << other) != 0 && data.banks[other / 4][other % 4] == bank
                 })
             };
             let bank = [1, 2, 3, 6]
                 .into_iter()
                 .find(|bank| !used(*bank))
-                .ok_or("No free texture bank for _EmissionMap")?;
-            data.flags.y |= EMISSION_SLOT_BIT;
-            data.banks[1][0] = bank;
-            data.uv[4] = Vec4::new(1., 1., 0., 0.);
+                .ok_or_else(|| format!("No free texture bank for {}", SLOTS[slot]))?;
+            data.flags.y |= bit;
+            data.banks[slot / 4][slot % 4] = bank;
+            data.uv[slot] = Vec4::new(1., 1., 0., 0.);
             bank
         };
         *self.bank_mut(bank) = Some(map);
@@ -1401,8 +1413,10 @@ impl SourceMaterial {
         }
     }
 }
-/// `flags.y` bit of the `_EmissionMap` slot.
-const EMISSION_SLOT_BIT: u32 = 1 << 4;
+/// Index of `_MainTex` in `SLOTS`.
+const MAIN_SLOT: usize = 0;
+/// Index of `_EmissionMap` in `SLOTS`.
+const EMISSION_SLOT: usize = 4;
 /// Source `SetColor("_EmissionColor")` and, with `map`, `SetTexture("_EmissionMap")`.
 /// `None` keeps the current map. Only a changed value touches the asset.
 pub fn write_emission(

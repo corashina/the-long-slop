@@ -379,6 +379,37 @@ impl InstanceMaterials<'_> {
             )),
         }
     }
+    /// `mirrorscript.FStart`: the mirror image is `_MainTex` and `_EmissionMap`.
+    /// The first call makes the binding private and returns true: the entity must take it.
+    /// Only a changed image touches the material.
+    pub fn mirror_image(
+        &mut self,
+        binding: &mut RendererMaterial,
+        image: &Handle<Image>,
+    ) -> Result<bool, ReferenceError> {
+        let private = binding.shared.is_some();
+        self.make_private(binding);
+        let InstanceMaterial::Primary(handle) = &binding.visible else {
+            return Err(ReferenceError(
+                "A live mirror needs a primary source material".into(),
+            ));
+        };
+        let Some(material) = self.primary.get(handle) else {
+            return Ok(private);
+        };
+        if material.slot_map(0) == Some(image) && material.emission_map() == Some(image) {
+            return Ok(private);
+        }
+        let mut material = self
+            .primary
+            .get_mut(handle)
+            .expect("checked source material");
+        material
+            .set_main_map(Some(image.clone()))
+            .and_then(|()| material.set_emission_map(Some(image.clone())))
+            .map_err(ReferenceError)?;
+        Ok(private)
+    }
     /// Source `SetTexture("_EmissionMap", null)`: the white default.
     pub fn clear_emission_map(
         &mut self,

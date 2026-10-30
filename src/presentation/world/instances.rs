@@ -97,8 +97,34 @@ struct Renderer {
     emissive: bool,
     /// The renderer node is an enabled Grass displacement writer.
     writer: bool,
+    /// A `mirrorscript` glass renderer. The mirror selection picks its material, not the frame.
+    mirror: bool,
 }
 impl Renderer {
+    /// Shows the material variant of `selected`. Returns whether the material changed.
+    fn select(
+        &mut self,
+        selected: Option<&crate::reference::SourceId>,
+        commands: &mut Commands,
+    ) -> bool {
+        if selected == self.material_source.as_ref() {
+            return false;
+        }
+        let Some(variant) = self
+            .variants
+            .iter_mut()
+            .find(|v| v.source.as_ref() == selected)
+        else {
+            return false;
+        };
+        std::mem::swap(&mut self.binding, &mut variant.binding);
+        std::mem::swap(&mut self.material_source, &mut variant.source);
+        std::mem::swap(&mut self.ticket, &mut variant.ticket);
+        let entity = self.entity().expect("lamp variants are entities");
+        self.binding.visible.replace(entity, commands);
+        self.binding.apply_sort(entity, commands);
+        true
+    }
     fn entity(&self) -> Option<Entity> {
         match self.target {
             Target::Entity(entity) => Some(entity),
@@ -316,12 +342,70 @@ impl SourceInstances {
             .filter(|i| i.ready && i.visible && !i.retirement.started())
             .map(|i| (i.root, &i.placement, i.prototype, i.nodes.as_slice()))
     }
-    /// Node entities by glTF node of the instance of world object `id`.
-    pub(crate) fn nodes_of(&self, id: &crate::world::GeneratedId) -> Option<&[Option<Entity>]> {
+    /// Ready visible instances with `mirrorscript` renderers: instance index, root entity,
+    /// prototype index and node entities by glTF node.
+    pub(crate) fn mirror_cars(
+        &self,
+    ) -> impl Iterator<Item = (usize, Entity, usize, &[Option<Entity>])> {
         self.instances
             .iter()
-            .find(|i| i.placement.id == *id && !i.retirement.started())
-            .map(|i| i.nodes.as_slice())
+            .enumerate()
+            .filter(|(_, i)| {
+                i.ready
+                    && i.visible
+                    && !i.retirement.started()
+                    && i.renderers.iter().any(|r| r.mirror)
+            })
+            .map(|(index, i)| (index, i.root, i.prototype, i.nodes.as_slice()))
+    }
+    /// Entity of glTF node `node` in instance `index`. Static nodes have none.
+    pub(crate) fn node_entity(&self, index: usize, node: u32) -> Option<Entity> {
+        self.instances[index].nodes[node as usize]
+    }
+    /// Entities of the shown mirror renderers of prototype node `node` in instance `index`.
+    pub(crate) fn mirror_renderers(
+        &self,
+        index: usize,
+        node: u32,
+    ) -> impl Iterator<Item = Entity> + '_ {
+        self.instances[index]
+            .renderers
+            .iter()
+            .filter(move |r| r.mirror && r.node == node as usize && r.visible())
+            .filter_map(Renderer::entity)
+    }
+    /// `mirror.Turn`: the renderers of prototype node `node` in instance `index` show `material`
+    /// with `image`, or with None the glass.
+    pub(crate) fn show_mirror(
+        &mut self,
+        index: usize,
+        node: u32,
+        live: Option<(&crate::reference::SourceId, &Handle<Image>)>,
+        materials: &mut InstanceMaterials,
+        commands: &mut Commands,
+    ) -> Result<(), ReferenceError> {
+        let instance = &mut self.instances[index];
+        let mut changed = false;
+        for renderer in instance
+            .renderers
+            .iter_mut()
+            .filter(|r| r.mirror && r.node == node as usize)
+        {
+            if renderer.select(live.map(|(material, _)| material), commands) {
+                renderer.lod_state = None;
+                changed = true;
+            }
+            if let Some((_, image)) = live
+                && materials.mirror_image(&mut renderer.binding, image)?
+            {
+                let entity = renderer.entity().expect("lamp variants are entities");
+                renderer.binding.visible.replace(entity, commands);
+            }
+        }
+        if changed {
+            self.lods.queue(&mut instance.lod, index);
+        }
+        Ok(())
     }
     /// Whether an instance with root entity `root` exists.
     pub(crate) fn has_root(&self, root: Entity) -> bool {
@@ -911,6 +995,7 @@ impl SourceInstances {
                                             settings: None,
                                             emissive: false,
                                             writer: false,
+                                            mirror: false,
                                         });
                                         continue;
                                     }
@@ -1127,6 +1212,11 @@ impl SourceInstances {
                                         settings,
                                         emissive,
                                         writer,
+                                        mirror: prototype.vehicle.as_ref().is_some_and(|v| {
+                                            v.mirrors
+                                                .iter()
+                                                .any(|m| m.renderer as usize == source_index)
+                                        }),
                                     });
                                 }
                             }
@@ -1519,28 +1609,15 @@ impl SourceInstances {
                     }
                 }
             }
-            for renderer in &mut instance.renderers {
+            for renderer in instance.renderers.iter_mut().filter(|r| !r.mirror) {
                 let selected = view
                     .materials
                     .iter()
                     .find(|m| m.node as usize == renderer.node)
                     .map(|m| &sim.material_sources[m.source as usize]);
-                if selected == renderer.material_source.as_ref() {
-                    continue;
-                }
-                if let Some(variant) = renderer
-                    .variants
-                    .iter_mut()
-                    .find(|v| v.source.as_ref() == selected)
-                {
-                    std::mem::swap(&mut renderer.binding, &mut variant.binding);
-                    std::mem::swap(&mut renderer.material_source, &mut variant.source);
-                    std::mem::swap(&mut renderer.ticket, &mut variant.ticket);
+                if renderer.select(selected, commands) {
                     renderer.lod_state = None;
                     self.lods.queue(&mut instance.lod, instance_index);
-                    let entity = renderer.entity().expect("lamp variants are entities");
-                    renderer.binding.visible.replace(entity, commands);
-                    renderer.binding.apply_sort(entity, commands);
                 }
             }
             // partconditionscript renderers: a changed state binds its material on change.
