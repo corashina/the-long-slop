@@ -162,11 +162,10 @@ pub(crate) fn prepare_views(
     {
         return;
     }
-    let Some(snapshot) = frame.views[0] else {
+    if frame.views[0].is_none() {
         return;
-    };
-    let native = snapshot.native_extent;
-    let Some(atlas) = crate::reference::shadows::source_atlas_size(native.x, native.y) else {
+    }
+    let Some(atlas) = frame.atlas_size(0) else {
         status.fail("Source world atlas extent is invalid".into());
         return;
     };

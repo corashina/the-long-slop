@@ -157,6 +157,7 @@ pub struct SourceViewFrame {
     pub session: u64,
     pub selection_revision: u64,
     pub(crate) scale: crate::render_scale::SceneScale,
+    pub(crate) shadow_quality: super::shadow_quality::ShadowQuality,
     pub preparation_warmup: bool,
     pub motion_revision: u32,
     pub scene: u32,
@@ -174,6 +175,16 @@ pub struct SourceViewFrame {
     pub views: [Option<ViewSnapshot>; VIEW_COUNT],
 }
 impl SourceViewFrame {
+    /// Shadow atlas side of a view. The shadow quality shrinks only world views.
+    pub fn atlas_size(&self, index: usize) -> Option<u32> {
+        let native = self.views[index]?.native_extent;
+        let source = crate::reference::shadows::source_atlas_size(native.x, native.y)?;
+        Some(if index < WORLD_VIEWS {
+            self.shadow_quality.atlas_size(source)
+        } else {
+            source
+        })
+    }
     pub fn skip_probe_preparation(&self, index: usize) -> bool {
         index >= PROBE_START && self.views[index].is_none()
     }
@@ -282,13 +293,18 @@ pub(crate) fn snapshot(
     mut clock: ResMut<SourceViewClock>,
     mut frame: ResMut<SourceViewFrame>,
     status: Res<RendererStateHandle>,
-    scale: Res<crate::render_scale::SceneScaleSetting>,
+    settings: (
+        Res<crate::render_scale::SceneScaleSetting>,
+        Res<super::shadow_quality::ShadowQuality>,
+    ),
     views: Query<(&SourceSurfaceView, &Camera, &GlobalTransform)>,
     sky_view: Query<(&Camera, &GlobalTransform), With<super::frame_graph::SourceSkyCamera>>,
 ) {
     frame.session = sim.frame.state.session;
     frame.selection_revision = sim.frame.state.selection_revision;
+    let (scale, shadow_quality) = settings;
     frame.scale = scale.0;
+    frame.shadow_quality = *shadow_quality;
     frame.scene = epoch.0;
     frame.probe_job = None;
     frame.views = [None; VIEW_COUNT];
@@ -439,6 +455,7 @@ pub(crate) fn snapshot(
         session: sim.frame.state.session,
         selection_revision: sim.frame.state.selection_revision,
         scale: scale.0,
+        shadow_quality: *shadow_quality,
         preparation_warmup: warmup,
         scene: epoch.0,
         motion_revision: sim.frame.state.motion_revision,

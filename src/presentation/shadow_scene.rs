@@ -19,7 +19,7 @@ use crate::reference::{
     shadow_frame::{CasterInput, ShadowViewCache},
     shadow_planes::CullPlanes,
     shadow_scene::{CasterData, CasterIndex},
-    shadows::{ShadowFit, ShadowFitInput, source_atlas_size},
+    shadows::{ShadowFit, ShadowFitInput},
 };
 use bevy::camera::visibility::{SetViewVisibility, ViewVisibility};
 use bevy::{ecs as bevy_ecs, prelude::*};
@@ -209,7 +209,8 @@ pub(super) fn prepare_scene(
             scene.mask_revisions[index] = scene.views[index].revision();
             continue;
         };
-        let atlas = source_atlas_size(v.native_extent.x, v.native_extent.y)
+        let atlas = frame
+            .atlas_size(index)
             .expect("validated source view extent");
         let w = v.source_world_from_view;
         let mut input = ShadowFitInput {

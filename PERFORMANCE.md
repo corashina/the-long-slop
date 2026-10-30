@@ -18,6 +18,7 @@ Add only items that increase render FPS or remove hitches. Remove an item when i
 - Physics steps at 50 Hz, at most 2 steps per frame (`STEP_BUDGET` in `crates/simulation/src/simulation.rs`).
 - Terrain tiles and grass meshes are built in their own workers.
 - WebGPU is the only renderer. MSAA is 4x. The "Antialiasing" setting turns it off after a reload (`src/presentation/antialiasing.rs`). No TAA, motion blur or camera-depth pass.
+- Display settings for weak GPUs: scene resolution 100% to 50% (`render_scale.rs`) and "Shadows" high, medium, low (world view atlas side halved per step, `shadow_quality.rs`).
 - World props draw through the own GPU path: compute cull and indirect draws (`src/presentation/prop_draws.rs`). Each view pass runs its prop draws as one render bundle. The bundle records again only when its commands change.
 - Shadow cascades 0 and 1 render each frame, 2 and 3 every 2nd and 4th frame (`crates/simulation/src/reference/shadow_cadence.rs`).
 - Release build: fat LTO, simd128, wasm-opt -O3.
@@ -41,8 +42,6 @@ The default stays as now. Each item adds one menu option.
 
 | # | Item | Size | Impact | Notes |
 | --- | --- | --- | --- | --- |
-| 5 | More scene scale steps or auto scale | S-M | High if GPU bound | Only 100% and 75% exist (`crates/simulation/src/render_scale.rs`). |
-| 6 | Shadow atlas size option | S | Medium-high if GPU bound | 4096x4096 at 1080p and above (`source_atlas_size`). |
 | 8 | AO quality option | M | Medium on weak GPUs | Multi-scale AO at full resolution. |
 | 9 | Grass density and distance option | S | Medium in grass areas | |
 
