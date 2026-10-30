@@ -42,7 +42,7 @@ export class SaveScreenState {
 const driven=km=>String(Math.round(km)).padStart(4,'0')+' km';
 export function createSaveScreen({storage,run,paint}){
  const state=new SaveScreenState(),q=selector=>document.querySelector(selector),urls=new Map(),kinds=['save','load','delete','last'];
- const tile=selector=>({button:q(selector),img:q(selector+' img'),label:q(selector+' span'),url:null});
+ const tile=selector=>({button:q(selector),img:q(selector+' img'),label:q(selector+'>span:last-child'),url:null});
  const tiles=Array.from({length:PER_PAGE},(_,i)=>tile('#save-tile-'+i)),auto=tile('#save-autosave');
  const name=q('#save-name'),info=q('#save-info'),cant=q('#save-cant'),pageText=q('#save-page'),countText=q('#save-count'),nameRow=q('#save-name-row');
  const fields=['name','date','seed','driven','version'].map(key=>q('#save-info-'+key));
