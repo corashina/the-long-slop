@@ -109,6 +109,7 @@ Prepare once:
 14. Tumbleweeds: check they spawn near the player, roll in gusts, stop near walls, and save with the world.
 15. Drop an item, drive about 10 km out and back, save and reload. The item stays where it was dropped.
 16. Load the game at 500 m and at the largest draw distance, then drive for 5 minutes. The game does not stop with "Source renderer allocation exceeds its resource budget".
+17. Move far in one step (sandbox building('Benzinkut01'), or load a far save). Wait while the area loads. The game does not stop with "validated authored material choice".
 
 ### More cars
 

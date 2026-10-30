@@ -361,39 +361,47 @@ impl WorldPresentation<'_, '_> {
                 self.allocation.retired_materials.swap_remove(index);
                 continue;
             }
-            if !self.materials.cache.world_asset_retirable(
-                prototype.asset,
-                &self.chains,
-                &self.server,
-            ) || prototype.deferred_materials.iter().any(|m| {
-                !self.materials.cache.world_textures.retirable(
-                    &m.source,
-                    &self.images,
+            // Initial materials can name the asset of another prototype. That asset stays
+            // while a live prototype still binds it.
+            let own = !self.prototypes.references_asset(reference, prototype.asset);
+            if (own
+                && !self.materials.cache.world_asset_retirable(
+                    prototype.asset,
+                    &self.chains,
                     &self.server,
-                )
-            }) || prototype
-                .nodes
-                .iter()
-                .filter_map(|n| super::preflight::initial_material(reference, &n.source))
-                .any(|(asset, _)| {
-                    !self.prototypes.references_asset(reference, asset)
-                        && !self.materials.cache.world_asset_retirable(
-                            asset,
-                            &self.chains,
-                            &self.server,
-                        )
+                ))
+                || prototype.deferred_materials.iter().any(|m| {
+                    !self.materials.cache.world_textures.retirable(
+                        &m.source,
+                        &self.images,
+                        &self.server,
+                    )
                 })
+                || prototype
+                    .nodes
+                    .iter()
+                    .filter_map(|n| super::preflight::initial_material(reference, &n.source))
+                    .any(|(asset, _)| {
+                        !self.prototypes.references_asset(reference, asset)
+                            && !self.materials.cache.world_asset_retirable(
+                                asset,
+                                &self.chains,
+                                &self.server,
+                            )
+                    })
             {
                 index += 1;
                 continue;
             }
-            self.materials.cache.release_world_asset(
-                prototype.asset,
-                &mut self.images,
-                &mut self.chains,
-                &mut self.materials.primary,
-                &self.server,
-            )?;
+            if own {
+                self.materials.cache.release_world_asset(
+                    prototype.asset,
+                    &mut self.images,
+                    &mut self.chains,
+                    &mut self.materials.primary,
+                    &self.server,
+                )?;
+            }
             for (asset, _) in prototype
                 .nodes
                 .iter()
