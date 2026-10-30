@@ -20,6 +20,7 @@ pub mod fluids;
 pub mod flyers;
 pub mod food_particles;
 pub mod hearing;
+pub mod heat_haze;
 pub mod horror;
 #[cfg(target_arch = "wasm32")]
 pub mod host;

@@ -1,8 +1,10 @@
-// Selected Unity particle blending, soft particles, distortion and camera-facing billboards.
+// Selected Unity particle blending, soft particles, distortion, BumpDistort glass and camera-facing billboards.
 #import bevy_pbr::mesh_view_bindings::view
 struct Particles {
     positions:array<vec4<f32>,128>,colors:array<vec4<f32>,128>,angles:array<vec4<f32>,128>,
     tint:vec4<f32>,st:vec4<f32>,fog:vec4<f32>,settings:vec4<f32>,effect:vec4<f32>,
+    // FX/Glass/Stained BumpDistort: x _BumpAmt, y 1. bump_st: _BumpMap_ST.
+    glass:vec4<f32>,bump_st:vec4<f32>,
 }
 struct ParticleView {clip_from_world:mat4x4<f32>,near_far:vec4<f32>,grab_texel_size:vec4<f32>}
 @group(1) @binding(0) var<uniform> particle_view:ParticleView;
@@ -17,7 +19,7 @@ struct ParticleView {clip_from_world:mat4x4<f32>,near_far:vec4<f32>,grab_texel_s
 struct Vertex {@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>}
 struct Varyings {
     @builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>,@location(1) color:vec4<f32>,@location(2) depth:f32,
-    @location(3) eye:f32,@location(4) grab:vec4<f32>,
+    @location(3) eye:f32,@location(4) grab:vec4<f32>,@location(5) bump_uv:vec2<f32>,
 }
 @vertex fn vertex(v:Vertex)->Varyings {
     let i=u32(v.position.z);let p=particles.positions[i];let angle=particles.angles[i];// xy: cos, sin. zw: sheet tile offset.
@@ -30,11 +32,24 @@ struct Varyings {
     o.depth=max((abs(center.z)-near)*far/(far-near),0.);
     // Source COMPUTE_EYEDEPTH and D3D ComputeGrabScreenPos.
     o.eye=-center.z;
-    o.grab=vec4((o.position.x+o.position.w)*.5,(-o.position.y+o.position.w)*.5,o.position.zw);
+    // z: the source finite reverse-Z clip depth for the BumpDistort grab weight.
+    let source_z=(particle_view.clip_from_world*(view.world_from_view*center)).z;
+    o.grab=vec4((o.position.x+o.position.w)*.5,(-o.position.y+o.position.w)*.5,source_z,o.position.w);
+    o.bump_uv=v.uv*particles.bump_st.xy+particles.bump_st.zw;
     if i>=u32(particles.settings.w) {o.position=vec4(2.,2.,2.,1.);}
     return o;
 }
 @fragment fn fragment(v:Varyings)->@location(0) vec4<f32> {
+    if particles.glass.y>0. {
+        // Installed FX/Glass/Stained BumpDistort as in source_glass.wgsl. UnpackNormal over DXT5nm AG.
+        // Blend Off: the grab replaces the destination. No vertex color and no fog.
+        let packed=textureSample(bump,bump_sampler,v.bump_uv);
+        let normal=vec2(packed.r*packed.a,packed.g)*2.-1.;
+        let offset=normal*particles.glass.x*particle_view.grab_texel_size.xy;
+        let weight=max(0.,(1.-v.grab.z/particle_view.near_far.x)*particle_view.near_far.y);
+        let grabbed=textureSampleLevel(grab_texture,grab_sampler,(v.grab.xy+offset*weight)/v.grab.w,0.);
+        return vec4((grabbed*textureSample(image,image_sampler,v.uv)*particles.tint).rgb,1.);
+    }
     var c=textureSample(image,image_sampler,v.uv)*v.color;
     if particles.effect.x>0. {
         // Source LinearEyeDepth over the single-sample camera depth.

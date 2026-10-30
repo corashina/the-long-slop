@@ -1,4 +1,5 @@
-//! The "Heat haze", "LUT" and "Grayscale" display settings. Source `settingsscript` BHeatHaze, ILUT and BGrayscale.
+//! The "Heat haze", "Old heat haze", "LUT" and "Grayscale" display settings.
+//! Source `settingsscript` BHeatHaze, BOldHeatHaze, ILUT and BGrayscale.
 use bevy::{ecs as bevy_ecs, prelude::*};
 
 /// Source ILUT: 0 is the HDR grading, 1 and 2 are LDR grading with `LutC64` and `LutSepia`.
@@ -15,6 +16,7 @@ pub enum Lut {
 #[serde(deny_unknown_fields)]
 pub struct ScreenEffects {
     pub heat_haze: bool,
+    pub old_heat_haze: bool,
     pub lut: Lut,
     pub grayscale: bool,
 }
@@ -23,6 +25,7 @@ impl Default for ScreenEffects {
     fn default() -> Self {
         Self {
             heat_haze: true,
+            old_heat_haze: false,
             lut: Lut::Default,
             grayscale: false,
         }

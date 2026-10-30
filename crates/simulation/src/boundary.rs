@@ -844,6 +844,8 @@ impl ParticleGroupRow {
     pub const FOOD: u32 = 15;
     /// A loot tool: `a` is the item, `b` the `conditions.prototype_tools` index.
     pub const LOOT_TOOL: u32 = 16;
+    /// fpscontroller `heatHaze`: the old particle heat haze.
+    pub const HEAT_HAZE: u32 = 17;
     /// Car systems in `a`.
     pub const CAR_EXHAUST: u32 = 0;
     /// Wheel effects: source is wheel * 8 + system (0 dust, 1.. grass).
@@ -1068,6 +1070,8 @@ pub struct SimCommand {
     /// Changed game options. They apply at once, also while paused.
     pub options: Option<crate::world::GameOptions>,
     pub player_settings: Option<crate::reference::PlayerSettings>,
+    /// Source `BOldHeatHaze`.
+    pub old_heat_haze: bool,
     /// Local month and day.
     pub calendar: [u8; 2],
     /// The browser asks for a world measurement.

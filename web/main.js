@@ -9,7 +9,7 @@ import {gameFields,installGameMode,installGameOptions,installSeed,installStartCa
 const seed=installSeed(window,document.querySelector('#seed'));
 import {installSunglassesEffects} from './sunglasses.js';
 import {installScreenEffects} from './screen-effects.js';
-installScreenEffects(window,()=>localStorage,{heatHaze:document.querySelector('#heat-haze'),lut:document.querySelector('#lut'),grayscale:document.querySelector('#grayscale')});
+installScreenEffects(window,()=>localStorage,{heatHaze:document.querySelector('#heat-haze'),oldHeatHaze:document.querySelector('#old-heat-haze'),lut:document.querySelector('#lut'),grayscale:document.querySelector('#grayscale')});
 const sunglasses=document.querySelector('#sunglasses-effects');
 installSunglassesEffects(window,()=>localStorage,sunglasses);
 import {installMotionBlur} from './motion-blur.js';
@@ -270,7 +270,7 @@ async function load(){
  // Source tab resets of the controls that keep their own storage.
  const choose=(node,property,value,event)=>{if(node.disabled)return;node[property]=value;node.dispatchEvent(new Event(event));};
  const select=id=>document.querySelector(id);
- const resets={graphics:[()=>choose(sunglasses,'checked',true,'change'),()=>choose(select('#heat-haze'),'checked',true,'change'),()=>choose(select('#lut'),'value','default','change'),()=>choose(select('#grayscale'),'checked',false,'change'),()=>choose(sceneResolution,'value','100','change'),()=>choose(select('#shadow-quality'),'value','0','change'),
+ const resets={graphics:[()=>choose(sunglasses,'checked',true,'change'),()=>choose(select('#heat-haze'),'checked',true,'change'),()=>choose(select('#old-heat-haze'),'checked',false,'change'),()=>choose(select('#lut'),'value','default','change'),()=>choose(select('#grayscale'),'checked',false,'change'),()=>choose(sceneResolution,'value','100','change'),()=>choose(select('#shadow-quality'),'value','0','change'),
   ()=>choose(select('#grass-quality'),'value','0','change'),()=>choose(select('#motion-blur'),'checked',true,'change'),()=>choose(select('#depth-of-field'),'checked',false,'change'),()=>choose(select('#lamp-shadows'),'checked',true,'change'),()=>choose(select('#antialiasing'),'checked',true,'change'),()=>choose(select('#ambient-occlusion'),'checked',true,'change'),()=>choose(select('#reflections'),'checked',true,'change'),()=>mirrors.reset(),()=>slider.reset()],controls:[()=>drivingSettings.resetMouse()]};
  menu=createMenu({canvas,appearance,figure,settings,resets,defaultAssists:manifest.driving.default_assists,ui:manifest.ui,bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,guest:()=>multiplayer?.role===ROLE.GUEST,slider,audio,onNewGame:()=>seed.reroll(),onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  multiplayer=createMultiplayer({document,target:window,Peer:window.peerjs.Peer,buildId:manifest.build_id,exportHash:manifestHash,simulation,saveSession,menu,outfit,storage:()=>localStorage});

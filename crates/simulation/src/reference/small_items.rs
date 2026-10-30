@@ -1,4 +1,4 @@
-//! Checked spirit level, spray bottle, genie lamp, binoculars, start pack, and mouth smoke inputs.
+//! Checked spirit level, spray bottle, genie lamp, binoculars, start pack, mouth smoke and old heat haze inputs.
 use super::*;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -10,6 +10,8 @@ pub struct SmallItemsReference {
     pub binoculars: BinocularsReference,
     pub start_packs: Vec<SmallItemStartReference>,
     pub exhale: ExhaleReference,
+    /// fpscontroller `heatHaze`: the old particle heat haze in player root space.
+    pub heat_haze: ParticleReference,
     pub washes: Vec<WashTriggerReference>,
     pub wash_effects: Vec<WashEffectReference>,
 }
@@ -401,7 +403,19 @@ impl SmallItemsReference {
                 && e.charge_speed > 0.,
             "mouth smoke",
         )?;
-        conditions::validate_particle(&e.controller, &e.particle, m)
+        conditions::validate_particle(&e.controller, &e.particle, m)?;
+        let h = &self.heat_haze;
+        checked(
+            h.simulation_space == 0
+                && h.flags.get("prewarm") == Some(&true)
+                && h.flags.get("looping") == Some(&true)
+                && h.scalars.get("ShapeModule.type") == Some(&0.)
+                && h.curves.contains_key("EmissionModule.rateOverTime")
+                && h.materials.len() == 1
+                && h.materials[0].shader.name == "FX/Glass/Stained BumpDistort",
+            "old heat haze",
+        )?;
+        conditions::validate_particle(&e.controller, h, m)
     }
 }
 
