@@ -282,9 +282,9 @@ pub fn png_pixels(mips: &[super::TextureMip]) -> Result<usize, ReferenceError> {
 
 macro_rules! fixed_shaders {
     ($($name:literal),* $(,)?) => {
-        pub const FIXED_SHADER_PATHS: [&str; 38] = [$(concat!("shaders/", $name)),*];
+        pub const FIXED_SHADER_PATHS: [&str; 40] = [$(concat!("shaders/", $name)),*];
         /// Shaders are compiled into the build, so they always match its pipeline layouts.
-        const FIXED_SHADER_SOURCES: [&str; 38] =
+        const FIXED_SHADER_SOURCES: [&str; 40] =
             [$(include_str!(concat!("../../../../web/assets/shaders/", $name))),*];
     };
 }
@@ -310,7 +310,9 @@ fixed_shaders!(
     "source_caster.wgsl",
     "source_bloom.wgsl",
     "source_lut.wgsl",
+    "source_lut_ldr.wgsl",
     "source_uber.wgsl",
+    "source_heat_haze.wgsl",
     "source_ao_depth.wgsl",
     "source_ao_render.wgsl",
     "source_ao_upsample.wgsl",
@@ -351,4 +353,19 @@ pub fn shader_input(path: &str) -> Result<FixedReservation, ReferenceError> {
         gpu: 0,
         staging: bytes.checked_mul(2).ok_or_else(overflow)?,
     })
+}
+#[cfg(test)]
+mod tests {
+    /// Every shader that the browser binds must be a fixed shader, or binding panics at start.
+    #[test]
+    fn bound_shaders_are_fixed() {
+        let source = include_str!("../../../../src/presentation/fixed_assets.rs");
+        for part in source.split("shader(\"").skip(1) {
+            let path = &part[..part.find('"').unwrap()];
+            assert!(
+                super::FIXED_SHADER_PATHS.contains(&path),
+                "{path} is not in FIXED_SHADER_PATHS"
+            );
+        }
+    }
 }
