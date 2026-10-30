@@ -18,7 +18,7 @@ Add only items that increase render FPS or remove hitches. Remove an item when i
 - Physics steps at 50 Hz, at most 2 steps per frame (`STEP_BUDGET` in `crates/simulation/src/simulation.rs`).
 - Terrain tiles and grass meshes are built in their own workers.
 - WebGPU is the only renderer. MSAA is 4x. No TAA, motion blur or camera-depth pass.
-- World props draw through the own GPU path: compute cull and indirect draws (`src/presentation/prop_draws.rs`).
+- World props draw through the own GPU path: compute cull and indirect draws (`src/presentation/prop_draws.rs`). Each view pass runs its prop draws as one render bundle. The bundle records again only when its commands change.
 - Shadow cascades 0 and 1 render each frame, 2 and 3 every 2nd and 4th frame (`crates/simulation/src/reference/shadow_cadence.rs`).
 - Release build: fat LTO, simd128, wasm-opt -O3.
 
@@ -31,9 +31,9 @@ Impact is an estimate from the code. No item has F3 numbers yet.
 
 | # | Item | Size | Impact | Notes |
 | --- | --- | --- | --- | --- |
-| 1 | Render bundles for static draws | M-L | Medium-high if CPU bound | Buildings, roads, terrain and parked cars encode the same draws each frame. |
+| 1 | Render bundles for Bevy phase draws | L | Medium-high if CPU bound | GPU prop rows use bundles (`render_bundles.rs`). Terrain, roads and entity renderers (LOD buildings, parked cars) still encode each draw each frame. Bevy makes new mesh bind groups each frame, and skinned draws share the phases. A bundle needs stable mesh bind groups and a static-only draw list. |
 | 2 | Skip unchanged item visuals | S | Low | The renderer still does a pose lookup and interpolation for every item visual each frame (`src/presentation/reference.rs`, `spawned.rs`). Use the changed pose rows to skip the rest. |
-| 3 | Reuse static shadow cascades | M | Medium if shadow bound | Skip a cascade when its fit and its casters did not change. Start after item 1. |
+| 3 | Reuse static shadow cascades | M | Medium if shadow bound | Skip a cascade when its fit and its casters did not change. Builds on the prop render bundles. |
 | 4 | Warm prop row pipelines before use | M | Removes hitches | A compiling row pipeline makes the whole view wait (`prop_draws.rs`). |
 
 ### Optional quality settings
@@ -53,3 +53,4 @@ Rejected: async compute, bindless, Hi-Z occlusion, f16, subgroups, GPU grass, ow
 ## Final test pass
 
 Do on Tomasz's PC after the open items are done: F3 frame time and "GPU ms" before and after each item, in a town and in a grass area.
+- Prop render bundles: no WebGPU errors in the console. Props and their shadows draw as before, also after a scene scale or MSAA change.
