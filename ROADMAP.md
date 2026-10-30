@@ -184,9 +184,7 @@ Prepare once:
 ### Game options
 
 1. Type a seed, start a new game, note the road. Start again with the same seed: the same road. Type `abc`: the field shows 2147483647.
-2. Pause > Game mode > Survival off: the food and water bars hide, and food and water stay full. Turn it on again: they drain.
-3. Peaceful on, then drive out: no big rabbit has evil eyes. No human monster spawns in new buildings.
-4. Toggles persist after a page reload. Load a save: the current toggles stay, the save does not change them.
+2. Peaceful on, then drive out: no big rabbit has evil eyes. No human monster spawns in new buildings.
 
 ### Settings
 
