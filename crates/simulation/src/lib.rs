@@ -32,6 +32,7 @@ pub mod player;
 pub mod reference;
 pub mod render_readiness;
 pub mod render_scale;
+pub mod sandbox;
 pub mod save;
 pub mod save_requests;
 pub mod session;

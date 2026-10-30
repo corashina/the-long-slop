@@ -10,9 +10,9 @@ function fakeWorker(){
 
 test('start moves the manifest and resolves with the startup bytes',async()=>{
  const worker=fakeWorker(),simulation=createSimulation(worker,()=>assert.fail());
- const manifest=new Uint8Array([1,2]),started=simulation.start(manifest,'hash',2500,1,-1);
+ const manifest=new Uint8Array([1,2]),started=simulation.start(manifest,'hash',2500,1,-1,['Bus02']);
  const {data,transfer}=worker.posted[0];
- assert.deepEqual({...data.start,manifest:undefined},{manifest:undefined,hash:'hash',drawDistance:2500,biome:1,startCar:-1});
+ assert.deepEqual({...data.start,manifest:undefined},{manifest:undefined,hash:'hash',drawDistance:2500,biome:1,startCar:-1,sandboxCars:['Bus02']});
  assert.equal(transfer[0],manifest.buffer);
  const startup=new Uint8Array([9]);
  worker.reply({startup});

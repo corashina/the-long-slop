@@ -925,6 +925,8 @@ pub enum Change {
     },
     /// The simulation part of a world measurement, as JSON.
     Measurements(String),
+    /// The JSON answer to one sandbox command.
+    Sandbox(String),
     Failure(String),
     /// Renderer credit of the world step for the renderer report of the command.
     Grant(crate::world::PresentationGrant),
@@ -1050,6 +1052,8 @@ pub struct SimCommand {
     pub candidate: Option<CandidateCommand>,
     /// Camera position of the last rendered frame.
     pub listener: Option<[f32; 3]>,
+    /// Test sandbox commands of the `?sandbox` page, as one JSON array.
+    pub sandbox: Option<String>,
 }
 
 /// One save input of the renderer.

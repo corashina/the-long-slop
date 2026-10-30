@@ -1,0 +1,398 @@
+//! Test sandbox. The `?sandbox` page sends these commands; Claude runs the ROADMAP test pass with them.
+//! A bad command changes nothing and answers `ok: false`. It never stops the game.
+use crate::reference::{
+    ReferenceError, ReferenceManifest, WorldPrototypeReference, WorldReference,
+};
+use crate::starting_area::GarageRuntime;
+use crate::vehicle::{VehiclePose, to_rapier};
+use rapier3d::math::{Rotation, Vector};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+
+/// Buildings that `building` checks from the start of the road.
+const BUILDING_SEARCH: usize = 4000;
+/// Metres between sandbox cars at start.
+const CAR_SPACING: f32 = 8.;
+
+#[derive(Deserialize)]
+#[serde(tag = "action", rename_all = "lowercase", deny_unknown_fields)]
+enum Action {
+    /// Moves the player on foot to the ground at absolute `x`, `z`.
+    Teleport { x: f64, z: f64 },
+    /// Moves the player to the start spawn.
+    Garage,
+    /// Moves the player to the first building on the road whose name contains `name`.
+    Building { name: String },
+    /// Spawns an item prototype `forward` metres in front of the player.
+    Spawn { name: String, forward: f32 },
+    /// Spawns an item prototype and puts it in the hand.
+    Hand { name: String },
+    /// Replaces the fuel of the seated car, or the nearest car within 10 m, with `liters` of `fluid` (0 to 5).
+    Fill { fluid: u8, liters: f32 },
+    /// Sets the source day cycle seconds.
+    Cycle { seconds: f64 },
+    /// Answers the player, the cycle, the cars and the items within `radius` metres.
+    State { radius: f32 },
+}
+
+#[derive(Serialize)]
+struct Reply {
+    id: u32,
+    ok: bool,
+    message: String,
+    data: Value,
+}
+
+/// Runs the commands of one JSON array. Each command adds one JSON reply.
+pub fn run(
+    runtime: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    json: &str,
+    replies: &mut Vec<String>,
+) {
+    let entries = match serde_json::from_str::<Vec<Value>>(json) {
+        Ok(entries) => entries,
+        Err(error) => {
+            replies.push(reply(0, Err(format!("Bad sandbox JSON: {error}"))));
+            return;
+        }
+    };
+    for mut entry in entries {
+        let id = entry
+            .as_object_mut()
+            .and_then(|e| e.remove("id"))
+            .and_then(|id| id.as_u64())
+            .unwrap_or(0) as u32;
+        let result = serde_json::from_value::<Action>(entry)
+            .map_err(|e| format!("Bad sandbox command: {e}"))
+            .and_then(|action| apply(runtime, reference, action));
+        replies.push(reply(id, result));
+    }
+}
+
+fn reply(id: u32, result: Result<(String, Value), String>) -> String {
+    let reply = match result {
+        Ok((message, data)) => Reply {
+            id,
+            ok: true,
+            message,
+            data,
+        },
+        Err(message) => Reply {
+            id,
+            ok: false,
+            message,
+            data: Value::Null,
+        },
+    };
+    serde_json::to_string(&reply).expect("sandbox reply")
+}
+
+fn apply(
+    runtime: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    action: Action,
+) -> Result<(String, Value), String> {
+    match action {
+        Action::Teleport { x, z } => {
+            let (height, _) = runtime.stream.terrain_sample([x, 0., z]);
+            place_player(runtime, [x, f64::from(height) + 2., z])?;
+            Ok((
+                "Moved. The world loads around the player.".into(),
+                json!([x, z]),
+            ))
+        }
+        Action::Garage => {
+            let spawn = reference.area.player_spawn.translation.map(f64::from);
+            place_player(runtime, spawn)?;
+            Ok(("Moved to the start spawn.".into(), Value::Null))
+        }
+        Action::Building { name } => {
+            let (found, position) = building(reference, runtime.stream.seed(), &name)?;
+            place_player(runtime, [position[0], position[1] + 2., position[2]])?;
+            Ok((format!("Moved to {found}."), json!(position)))
+        }
+        Action::Spawn { name, forward } => {
+            let items = spawn(runtime, reference, &name, forward)?;
+            Ok((format!("Spawned {name}."), json!(items)))
+        }
+        Action::Hand { name } => {
+            let items = spawn(runtime, reference, &name, 1.)?;
+            let item = *items.first().ok_or("The prototype has no pickup.")?;
+            let area = &mut runtime.area;
+            let point = area
+                .items
+                .get(crate::reference::ItemId(item))
+                .ok_or("Spawned item is missing")?
+                .pose
+                .position;
+            area.interaction
+                .pickup_item(
+                    crate::reference::ItemId(item),
+                    point,
+                    &area.player,
+                    &mut area.items,
+                    &mut runtime.physics,
+                )
+                .map_err(|e| e.to_string())?;
+            area.sync_inventory();
+            let equipped = area
+                .equip_carried(&mut runtime.physics)
+                .map_err(|e| e.to_string())?;
+            let message = if equipped { "In the hand." } else { "Carried." };
+            Ok((message.into(), json!(items)))
+        }
+        Action::Fill { fluid, liters } => fill(runtime, fluid, liters),
+        Action::Cycle { seconds } => {
+            let cycle = &reference.lighting.cycle;
+            let length = f64::from(cycle.day_seconds + cycle.night_seconds);
+            if !(0. ..=length).contains(&seconds) {
+                return Err(format!("Cycle seconds must be 0 to {length}."));
+            }
+            runtime.lighting.cycle.set_cycle_seconds(seconds);
+            Ok(("Cycle set.".into(), Value::Null))
+        }
+        Action::State { radius } => Ok(("State.".into(), state(runtime, reference, radius))),
+    }
+}
+
+/// Moves the player body on foot. The stream follows the player; the step waits for the world.
+fn place_player(runtime: &mut GarageRuntime, absolute: [f64; 3]) -> Result<(), String> {
+    if runtime.area.player.seated() {
+        return Err("Get out of the seat first.".into());
+    }
+    let target = runtime.stream.origin.local(absolute);
+    let old = runtime.area.player.body_pose(&runtime.physics).position;
+    runtime
+        .area
+        .player
+        .rebase(std::array::from_fn(|i| old[i] - target[i]));
+    let pose = runtime.area.player.body_pose(&runtime.physics);
+    let body = runtime.area.player.body_handle();
+    runtime.physics.edit_body(body, |body| {
+        body.set_position(to_rapier(pose), true);
+        body.set_linvel(Vector::ZERO, true);
+    });
+    runtime.physics.refresh_queries();
+    Ok(())
+}
+
+fn fill(runtime: &mut GarageRuntime, fluid: u8, liters: f32) -> Result<(String, Value), String> {
+    if fluid >= 6 || !liters.is_finite() || liters < 0. {
+        return Err("Fluid must be 0 to 5 and liters at least 0.".into());
+    }
+    let player = runtime.area.player.body_pose(&runtime.physics).position;
+    let distance = |key| {
+        let p = runtime.physics.snapshot(key).pose.position;
+        (0..3).map(|i| (p[i] - player[i]).powi(2)).sum::<f32>()
+    };
+    let key = match &runtime.vehicle {
+        Some(key) if runtime.area.player.seated() => key.clone(),
+        _ => runtime
+            .vehicles
+            .keys()
+            .filter(|key| distance(key) <= 100.)
+            .min_by(|a, b| distance(a).total_cmp(&distance(b)))
+            .ok_or("No car within 10 m.")?
+            .clone(),
+    };
+    let tank = runtime.vehicles[&key]
+        .fuel_tank
+        .ok_or("The car has no fuel tank.")?;
+    let container = runtime
+        .area
+        .items
+        .get_mut(tank)
+        .and_then(|item| item.fluid.as_mut())
+        .ok_or("The fuel tank has no fluid.")?;
+    let amount = liters.min(container.capacity_liters);
+    *container = crate::fluids::FluidContainer::new(
+        container.capacity_liters,
+        &[crate::fluids::FluidEntry {
+            fluid_type: fluid,
+            amount,
+        }],
+    );
+    Ok((format!("Filled {amount} L."), json!(format!("{key:?}"))))
+}
+
+/// The first building of the road sequence whose name contains `name`. Unknown: lists the names.
+fn building(
+    reference: &ReferenceManifest,
+    seed: i32,
+    name: &str,
+) -> Result<(String, [f64; 3]), String> {
+    let wanted = name.to_lowercase();
+    let mut sequence = crate::world::BuildingSequence::new(&reference.world, seed);
+    let mut names = Vec::new();
+    for placement in std::iter::from_fn(|| sequence.next()).take(BUILDING_SEARCH) {
+        let Some(prototype) = reference
+            .world
+            .prototypes
+            .iter()
+            .find(|p| p.source == placement.prototype)
+        else {
+            continue;
+        };
+        let found = prototype_name(prototype);
+        if found.to_lowercase().contains(&wanted) {
+            return Ok((found.to_string(), placement.pose.position));
+        }
+        if !names.contains(&found) {
+            names.push(found);
+        }
+    }
+    names.sort_unstable();
+    Err(format!("No building {name}. Names: {}", names.join(", ")))
+}
+
+/// Spawns item prototype `name` (a source catalog name) in front of the player. Returns the item ids.
+fn spawn(
+    runtime: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    name: &str,
+    forward: f32,
+) -> Result<Vec<u32>, String> {
+    let prototype = item_prototype(reference, name)?;
+    let body = runtime.area.player.body_pose(&runtime.physics);
+    let ahead = Rotation::from_array(body.rotation) * -Vector::Z * forward;
+    let root = VehiclePose {
+        position: std::array::from_fn(|i| body.position[i] + ahead[i] + [0., 0.5, 0.][i]),
+        rotation: body.rotation,
+    };
+    let items = crate::starting_area::spawned::spawn_prototype(
+        reference,
+        &mut runtime.area,
+        &mut runtime.physics,
+        prototype,
+        root,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(items.iter().map(|i| i.0).collect())
+}
+
+fn item_prototype(reference: &ReferenceManifest, name: &str) -> Result<usize, String> {
+    let catalog = &reference.world.catalog.items;
+    let item = catalog
+        .iter()
+        .find(|i| i.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| format!("No catalog item {name}."))?;
+    reference
+        .item_prototypes
+        .iter()
+        .position(|p| p.item_id == Some(item.index) || item.prototype.as_ref() == Some(&p.source))
+        .ok_or_else(|| format!("{name} has no item prototype."))
+}
+
+fn state(runtime: &GarageRuntime, reference: &ReferenceManifest, radius: f32) -> Value {
+    let origin = runtime.stream.origin;
+    let player = runtime.area.player.body_pose(&runtime.physics).position;
+    let near =
+        |p: [f32; 3]| (0..3).map(|i| (p[i] - player[i]).powi(2)).sum::<f32>() <= radius * radius;
+    let cars: Vec<_> = runtime
+        .vehicles
+        .iter()
+        .map(|(key, car)| {
+            let position = runtime.physics.snapshot(key).pose.position;
+            json!({
+                "key": format!("{key:?}"),
+                "name": prototype_name(&reference.world.prototypes[car.prototype]),
+                "position": origin.absolute(position),
+                "near": near(position),
+            })
+        })
+        .collect();
+    let items: Vec<_> = runtime
+        .area
+        .items
+        .iter()
+        .filter(|i| !i.removed && near(i.pose.position))
+        .map(|i| {
+            // Only sandbox and other spawned items know their prototype.
+            let name = runtime.area.spawned.get(i.id).and_then(|s| {
+                let id = reference.item_prototypes[s.prototype].item_id?;
+                let catalog = &reference.world.catalog.items;
+                catalog
+                    .iter()
+                    .find(|c| c.index == id)
+                    .map(|c| c.name.as_str())
+            });
+            json!({"id": i.id.0, "name": name, "position": origin.absolute(i.pose.position)})
+        })
+        .collect();
+    let cycle = &reference.lighting.cycle;
+    json!({
+        "player": origin.absolute(player),
+        "seated": runtime.area.player.seated(),
+        "cycle": runtime.lighting.cycle.capture_save().cycle_seconds,
+        "day_seconds": cycle.day_seconds,
+        "night_seconds": cycle.night_seconds,
+        "cars": cars,
+        "items": items,
+    })
+}
+
+/// The name of the prototype root node.
+fn prototype_name(prototype: &WorldPrototypeReference) -> &str {
+    prototype
+        .nodes
+        .iter()
+        .find(|n| n.parent.is_none())
+        .map_or("", |n| n.name.as_str())
+}
+
+/// Adds a startup copy of each car `names` (prototype root names) in a row in front of the garage car.
+/// Sandbox copies always spawn, whatever the start car.
+pub fn add_startup_cars(
+    world: &mut WorldReference,
+    names: &[String],
+) -> Result<(), ReferenceError> {
+    if names.is_empty() {
+        return Ok(());
+    }
+    let garage = world
+        .startup
+        .iter()
+        .find(|s| s.group == "StartCar02" && s.prototype.is_some())
+        .ok_or_else(|| ReferenceError("No StartCar02 placement".into()))?
+        .clone();
+    // Forward is -Z, as for the player.
+    let forward = Rotation::from_array(garage.pose.rotation) * -Vector::Z;
+    for (index, name) in names.iter().enumerate() {
+        let prototype = world
+            .prototypes
+            .iter()
+            .find(|p| p.vehicle.is_some() && prototype_name(p).eq_ignore_ascii_case(name))
+            .ok_or_else(|| ReferenceError(format!("No car prototype {name}")))?;
+        let mut copy = garage.clone();
+        copy.group = "Sandbox".into();
+        copy.start_car = false;
+        copy.prototype = Some(prototype.source.clone());
+        let distance = CAR_SPACING * (index + 2) as f32;
+        for axis in 0..3 {
+            copy.pose.translation[axis] += forward[axis] * distance;
+        }
+        copy.pose.translation[1] += 1.;
+        world.startup.push(copy);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bad_command_answers_not_ok() {
+        let value: Value =
+            serde_json::from_str(&reply(3, Err("No catalog item x.".into()))).unwrap();
+        assert_eq!(value["ok"], false);
+        assert_eq!(value["id"], 3);
+        let error = serde_json::from_value::<Action>(json!({"action": "fly"}));
+        assert!(error.is_err());
+        let action = serde_json::from_value::<Action>(
+            json!({"action": "spawn", "name": "beer", "forward": 3.0}),
+        );
+        assert!(matches!(action, Ok(Action::Spawn { forward, .. }) if forward == 3.));
+    }
+}

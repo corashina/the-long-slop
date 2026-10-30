@@ -162,6 +162,11 @@ impl CycleState {
         };
     }
 
+    /// Sandbox: jumps to `seconds` of the source cycle. The next advance evaluates it.
+    pub fn set_cycle_seconds(&mut self, seconds: f64) {
+        self.cycle_seconds = seconds;
+    }
+
     pub fn capture_save(&self) -> crate::save::CycleSnapshot {
         crate::save::CycleSnapshot {
             elapsed_seconds: self.elapsed_seconds,
