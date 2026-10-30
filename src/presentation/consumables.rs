@@ -170,12 +170,8 @@ fn food_gltf<'a>(
         .iter()
         .find(|record| record.id == asset && record.usage == AssetUsage::FoodPrototype)
         .unwrap();
-    let handle = &visuals
-        .gltfs
-        .iter()
-        .find(|(id, _)| *id == asset.id)
-        .unwrap()
-        .1;
+    // Fixed assets start their glTF loads within budget, so the handle can come later.
+    let (_, handle) = visuals.gltfs.iter().find(|(id, _)| *id == asset.id)?;
     gltfs.get(handle)
 }
 
