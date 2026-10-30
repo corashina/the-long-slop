@@ -1,16 +1,21 @@
 // The simulation runs in a Web Worker. One command is in flight; the renderer reads each frame once.
 export function createSimulation(worker,onFailure){
- let frame=null,failed=false,starting=null,tickMs=0,ticks=0,wasmBytes=0,hooks={},netIn=[],onNet=null;
+ let frame=null,failed=false,starting=null,started=false,netStart=null,tickMs=0,ticks=0,wasmBytes=0,hooks={},netIn=[],onNet=null;
  const fail=message=>{if(failed)return;failed=true;frame=null;starting?.reject(Error(message));starting=null;onFailure(message);};
  worker.addEventListener('message',({data})=>{
   if(failed)return;
   if(data.error!==undefined){fail(data.error);return;}
-  if(data.startup){starting?.resolve({startup:data.startup,loadError:data.loadError});starting=null;return;}
+  if(data.startup){started=true;if(netStart){const [role,slot,handler]=netStart;netStart=null;netSession(role,slot,handler);}starting?.resolve({startup:data.startup,loadError:data.loadError});starting=null;return;}
   frame=data.frame;tickMs+=data.tickMs;ticks++;wasmBytes=data.wasmBytes;
   if(data.net?.length)onNet?.(data.net);
   if(data.clearInput)hooks.clearInput?.();
   if(data.inputConsumed)hooks.inputConsumed?.();
  });
+ // Before the start, the last session waits. Peer packets before it are dropped.
+ function netSession(role,slot,handler){
+  if(!started){netStart=[role,slot,handler];return;}
+  onNet=role?handler:null;netIn=[];worker.postMessage({netSession:{role,slot}});
+ }
  worker.addEventListener('error',event=>fail(event.message||'The simulation worker stopped.'));
  worker.addEventListener('messageerror',()=>fail('The simulation worker message could not be read.'));
  return {
@@ -30,8 +35,8 @@ export function createSimulation(worker,onFailure){
    worker.postMessage({command:copy,net},transfer);
   },
   // Multiplayer: `role` 0 off, 1 host, 2 guest. `handler` takes the outbound packets of each frame.
-  netSession(role,slot,handler){onNet=role?handler:null;netIn=[];worker.postMessage({netSession:{role,slot}});},
-  netLeave(slot){worker.postMessage({netLeave:slot});},
+  netSession,
+  netLeave(slot){if(started)worker.postMessage({netLeave:slot});},
   // One inbound packet. It rides with the next command.
   netPacket(packet){if(onNet)netIn.push(packet);},
   frameLength:()=>frame?frame.length:-1,

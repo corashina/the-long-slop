@@ -2,7 +2,9 @@
 import {ROLE,createNet} from './net.js';
 const NAME_KEY='the-long-slop.player-name',CHAT_SHOW_MS=10000;
 
-export function createMultiplayer({document,target,Peer,buildId,exportHash,simulation,saveSession,menu,outfit,storage}){
+// `room`: the room of a Join reload. `joined(save,error)` takes its host world JSON, or null and why.
+// `reloadJoin(room)` starts the page again to join `room`.
+export function createMultiplayer({document,target,Peer,buildId,exportHash,simulation,saveSession,menu,outfit,storage,room:joinRoom=null,joined=()=>{},reloadJoin}){
  const $=selector=>document.querySelector(selector);
  const name=$('#net-name'),password=$('#net-password'),max=$('#net-max'),room=$('#net-room'),code=$('#net-code'),status=$('#net-status');
  const hostButton=$('#net-host-start'),joinButton=$('#net-join-start'),leaveButton=$('#net-leave'),players=$('#net-players');
@@ -39,18 +41,16 @@ export function createMultiplayer({document,target,Peer,buildId,exportHash,simul
    looksJson=JSON.stringify([...looks].filter(([s,l])=>s!==net.slot&&l.outfit).map(([s,l])=>[s,l.outfit]));
   },
   chat,
-  status:say,
+  status:text=>{say(text);if(joinRoom&&net.role===ROLE.OFF){joinRoom=null;joined(null,text);}},
   peers:list=>{players.replaceChildren(...list.map(p=>{const item=document.createElement('li');item.textContent=p.ping===null?p.name:`${p.name} ${p.ping} ms`;return item;}));},
   session:(role,slot)=>{
    simulation.netSession(role,slot,packets=>net.send(packets));
    if(role===ROLE.OFF){for(const node of labelNodes.values())node.remove();labelNodes.clear();looksJson='[]';}
    paint();
   },
-  save:async bytes=>{
-   let save;
-   try{save=JSON.parse(new TextDecoder().decode(bytes));}catch{net.leave();say('The host world could not be loaded.');return;}
-   await menu.join(save);
-   paint();
+  save:bytes=>{
+   if(!joinRoom)return;
+   joinRoom=null;joined(bytes,'');paint();
   },
  }});
  // Rust reads the peer outfits after each change, like `gameOutfit`.
@@ -61,7 +61,7 @@ export function createMultiplayer({document,target,Peer,buildId,exportHash,simul
   try{const value=await net.host({maxPlayers:Number(max.value),password:password.value,name:name.value,outfit:outfit.outfit});code.textContent=value;say(`Room code: ${value}`);}
   catch{say('Cannot reach the connection server.');}
  });
- joinButton.addEventListener('click',()=>{storeName();say('Connecting...');net.join({code:room.value.trim().toUpperCase(),name:name.value,password:password.value,outfit:outfit.outfit});});
+ joinButton.addEventListener('click',()=>{storeName();say('Connecting...');reloadJoin({code:room.value.trim().toUpperCase(),name:name.value,password:password.value});});
  leaveButton.addEventListener('click',()=>{net.leave();say('Left the game.');});
  // Enter opens the chat line while playing. Enter sends it, Escape closes it.
  target.addEventListener('keydown',event=>{
@@ -76,11 +76,13 @@ export function createMultiplayer({document,target,Peer,buildId,exportHash,simul
  target.addEventListener('pagehide',()=>net.leave());
  for(const id of ['#multiplayer','#start-multiplayer'])$(id).addEventListener('click',paint);
  paint();
+ if(joinRoom){room.value=joinRoom.code;password.value=joinRoom.password;say('Connecting...');net.join({...joinRoom,outfit:outfit.outfit});}
  return {
   get role(){return net.role;},
   // The game input pauses while the chat line is open.
   typing:()=>!line.hidden,
   look:value=>net.look(value,name.value),
+  leave:()=>net.leave(),
   paint,
  };
 }
