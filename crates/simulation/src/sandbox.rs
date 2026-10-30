@@ -372,16 +372,28 @@ fn state(runtime: &GarageRuntime, reference: &ReferenceManifest, radius: f32) ->
     let player = runtime.area.player.body_pose(&runtime.physics).position;
     let near =
         |p: [f32; 3]| (0..3).map(|i| (p[i] - player[i]).powi(2)).sum::<f32>() <= radius * radius;
+    // The step waits while the player or an active car has a gap: the same 8 m test as the step.
+    let gap = |p: [f32; 3]| {
+        let center = origin.absolute(p);
+        runtime.stream.support_gap(crate::world::WorldBounds {
+            min: center.map(|v| v - 8.),
+            max: center.map(|v| v + 8.),
+        })
+    };
     let cars: Vec<_> = runtime
         .vehicles
         .iter()
         .map(|(key, car)| {
             let position = runtime.physics.snapshot(key).pose.position;
+            let active = runtime
+                .physics
+                .body_active(runtime.physics.chassis_handle(key));
             json!({
                 "key": format!("{key:?}"),
                 "name": prototype_name(&reference.world.prototypes[car.prototype]),
                 "position": origin.absolute(position),
                 "near": near(position),
+                "gap": if active { gap(position) } else { None },
             })
         })
         .collect();
@@ -406,6 +418,8 @@ fn state(runtime: &GarageRuntime, reference: &ReferenceManifest, radius: f32) ->
     let cycle = &reference.lighting.cycle;
     json!({
         "player": origin.absolute(player),
+        "supported": runtime.world_supported(),
+        "player_gap": gap(runtime.area.player.focus_position(&runtime.physics)),
         "seated": runtime.area.player.seated(),
         "cycle": runtime.lighting.cycle.capture_save().cycle_seconds,
         "day_seconds": cycle.day_seconds,
