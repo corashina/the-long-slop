@@ -177,41 +177,33 @@ Prepare once:
 ### Saves
 
 1. Load, Load last and New game after death do not fail with "Asset CPU budget exceeded". Reload the page, then Load last from the start menu: the game starts, no "Source building metadata exceeds prototype CPU budget".
-2. Play 2 minutes on foot. The autosave tile appears. Check the F3 cost of the autosave frame.
-3. Turn on "Load last save at start" and reload the page. The last save loads.
-4. Sleep, wake, save and load: the sleep hint stays off until the cooldown ends.
+2. Turn on "Load last save at start" and reload the page. The last save loads.
+3. Sleep, wake, save and load: the sleep hint stays off until the cooldown ends.
 
 ### Game options
 
-1. Game mode screen defaults on a fresh profile: Peaceful enemies off, Survival on, Homesick off. The seed field shows a random number.
-2. Type a seed, start a new game, note the road. Start again with the same seed: the same road. Type `abc`: the field shows 2147483647.
-3. Pause > Game mode > Survival off: the food and water bars hide, and food and water stay full. Turn it on again: they drain.
-4. Peaceful on, then drive out: no big rabbit has evil eyes. No human monster spawns in new buildings.
-5. Toggles persist after a page reload. Load a save: the current toggles stay, the save does not change them.
+1. Type a seed, start a new game, note the road. Start again with the same seed: the same road. Type `abc`: the field shows 2147483647.
+2. Pause > Game mode > Survival off: the food and water bars hide, and food and water stay full. Turn it on again: they drain.
+3. Peaceful on, then drive out: no big rabbit has evil eyes. No human monster spawns in new buildings.
+4. Toggles persist after a page reload. Load a save: the current toggles stay, the save does not change them.
 
 ### Settings
 
-1. Start menu and pause menu: Settings opens tabs Graphics, Controls, Steering wheel and Misc. The display controls are on Graphics.
-2. Change values on each tab, then reload the page: they stay. Reset on a tab restores only that tab. In game, Reset keeps the menu-only sliders.
-3. Mouse sensitivity, X, Y and each Invert change the look. Scroll, item move and item rotate change carry, posture and slides.
-4. Key steer sensitivity changes the keyboard steering speed.
-5. Field of view on foot and in a car: walk, then sit in the Lada.
-6. Walk head bob off: the camera does not bob. Drive head bob off: the car camera does not bob.
-7. Crosshair off hides it. Old crosshair shows the source dot, tinted for E, F and MMB, with the carry bar. Crosshair scale changes its size.
-8. Help off hides the action hints and the item help.
-9. Always show health, food, water, bladder and bowel keep each bar visible.
-10. Sound volume 0 mutes the game. 50 is quieter.
-11. Fresh profile: FPS limit is off, and F3 follows the display refresh. FPS limit 60 on holds F3 at 59 to 61 FPS while playing, also on a 144 Hz display. The menu runs at 30.
-12. Fresh profile: autosave on, no autosave in a car on, auto-load off. Autosave off locks no autosave in a car.
-13. Game mode biome, start car and options stay after a page reload.
-14. Re-export first: the export now holds all 62 source actions. Controls lists them with 3 key cells, None and Reset, and a gap before Throttle.
-15. Click a key cell, then press a key, LMB, RMB or MMB: the cell shows the source key name. Escape cancels and keeps the menu open. Reset keys restores all defaults.
-16. Rebind Move Forward to Up arrow: walk with Up arrow. W still gives throttle in the Lada. Rebind Throttle to T: T drives, W does not.
-17. Rebind Steer Left/Right, Brake, Toggle Handbrake, a gear and Inventory Slot 1: each new key works. The keys stay after a page reload.
-18. Look Up on a key looks up while held. Look Down set to None stops looking down with the mouse. Scroll Up on a key scrolls.
-19. Seated, hold J (key look) and press WASD: the view turns. Key look sensitivity changes the speed. While leaning, J does nothing.
-20. HUD hints show the bound keys: rebind Use to G, then aim at a door. Hide HUD follows its binding.
-21. Seated with the clutch held, the inventory keys select nothing while Inventory Slot 1 and Shift To 1 share a key name. Rebind one: they select again.
+1. Mouse sensitivity, X, Y and each Invert change the look. Scroll, item move and item rotate change carry, posture and slides.
+2. Key steer sensitivity changes the keyboard steering speed.
+3. Field of view on foot and in a car: walk, then sit in the Lada.
+4. Walk head bob off: the camera does not bob. Drive head bob off: the car camera does not bob.
+5. Crosshair off hides it. Old crosshair shows the source dot, tinted for E, F and MMB, with the carry bar. Crosshair scale changes its size.
+6. Help off hides the action hints and the item help.
+7. Always show health, food, water, bladder and bowel keep each bar visible.
+8. Sound volume 0 mutes the game. 50 is quieter.
+9. Fresh profile: FPS limit is off, and F3 follows the display refresh. FPS limit 60 on holds F3 at 59 to 61 FPS while playing, also on a 144 Hz display. The menu runs at 30.
+10. Rebind Move Forward to Up arrow: walk with Up arrow. W still gives throttle in the Lada. Rebind Throttle to T: T drives, W does not.
+11. Rebind Steer Left/Right, Brake, Toggle Handbrake, a gear and Inventory Slot 1: each new key works. The keys stay after a page reload.
+12. Look Up on a key looks up while held. Look Down set to None stops looking down with the mouse. Scroll Up on a key scrolls.
+13. Seated, hold J (key look) and press WASD: the view turns. Key look sensitivity changes the speed. While leaning, J does nothing.
+14. HUD hints show the bound keys: rebind Use to G, then aim at a door. Hide HUD follows its binding.
+15. Seated with the clutch held, the inventory keys select nothing while Inventory Slot 1 and Shift To 1 share a key name. Rebind one: they select again.
 
 ### Languages and help text
 
