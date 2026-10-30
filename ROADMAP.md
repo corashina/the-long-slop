@@ -1,7 +1,7 @@
 # Project roadmap
 
 Goal: recreate The Long Drive for the web.
-Behavior authority: Steam build `11140890` and its decompiled code in `.cache/reference-library/decompiled/managed/Assembly-CSharp.cs`.
+Behavior authority: Steam build `11140890` and its decompiled code in `.cache/reference-library/records/managed/Assembly-CSharp.cs`.
 Save format authority: [save schema](crates/simulation/src/save/schema.rs).
 
 ## Frame rate rule
@@ -26,8 +26,14 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X03 | Creatures | XL | Ground UFO, EMP and green-eyed evil rabbits, human monster (attacks hurt the player), breakablescript `DamageFrom` for AI. Rabbits do not yet sense the player hum. |
-| X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. |
-| X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binocular lens distortion and chromatic aberration, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. |
+| X04b | Settings screen | M | Settings store and screen: sensitivities, invert, FOV, crosshair, head bob, help, always-show stats, volume, FPS limit, reset per tab. |
+| X04c | Rebinding | M | Original action list and default keys. Rebind on the Controls screen. HUD hints show bound keys. After X04b. |
+| X04d | Languages and help text | M | 10 language files, language dropdown, word table for all menu and HUD text. Help text follows the assists. After X04c. |
+| X04e | Menu figure IK | S | Start-menu figure turns its head, body and hands towards the mouse, as `menuIkScript`. |
+| X06a | Live mirrors | L | Car mirror cameras render to textures. Only the 5 nearest run. FOV and far plane follow distance. Mirrors toggle and Mirror draw distance slider. |
+| X06c | Live reflection probes | M | Only 1 probe is live. Make every building and car probe live, with the 5 s disable distance check and the Reflections toggle. |
+| X06f | Depth of field and binocular lens | M | Main DoF with focus ray, night clamp and Dof toggle. Binocular DoF, lens distortion and chromatic aberration. |
+| X06g | Heat haze and LUT options | M | Heat haze pass weighted by temperature, old particle heat haze, LUT option (Default, C64, Sepia), grayscale. |
 
 ### Multiplayer
 
@@ -185,6 +191,14 @@ Prepare once:
 5. Turn on "Load last save at start" and reload the page. The last save loads.
 6. Sleep, wake, save and load: the sleep hint stays off until the cooldown ends.
 
+### Game options
+
+1. Game mode screen defaults on a fresh profile: Peaceful enemies off, Survival on, Homesick off. The seed field shows a random number.
+2. Type a seed, start a new game, note the road. Start again with the same seed: the same road. Type `abc`: the field shows 2147483647.
+3. Pause > Game mode > Survival off: the food and water bars hide, and food and water stay full. Turn it on again: they drain.
+4. Peaceful on, then drive out: no big rabbit has evil eyes. No human monster spawns in new buildings.
+5. Toggles persist after a page reload. Load a save: the current toggles stay, the save does not change them.
+
 ### Player body and outfit
 
 1. Look down standing, crouching, walking forward and back. Carry a light and a heavy (>10 kg) item. Sit in the Lada (driver and passenger), on the WC and on the sled. Check legs, arms and hands on the wheel.
@@ -269,6 +283,20 @@ Prepare once:
 2. Eat each food. Crumbs, meat, turd and chocolate bits fall from the food. Smoke a cigarette: ash falls now and then.
 3. Stay up at night for a few nights. The horror sound plays for 5 to 15 s on the first night, then every 1 to 5 nights. It stops at day.
 4. New game between 15 October and 15 November: the start pumpkin glows and flickers at night. Hold it and wear it: the light follows.
+
+### Advanced rendering
+
+1. Antialiasing on (default): stand still in the garage. Edges of cars, wires and fences do not crawl or shimmer.
+2. Turn quickly and walk sideways past wires and poles. Edges stay sharp, with no trails behind thin objects.
+3. Drive the Lada at speed. The dashboard, wheel and hands stay sharp. The road and terrain behind them have no ghost copies.
+4. Watch another moving car or a falling item from a standing view. It shows no trail.
+5. Teleport (sandbox `building`), load a save and switch the car camera with C. The first frame after each shows no smear.
+6. Turn Antialiasing off and reload. The image has hard edges and no TAA. Check F3 frame time with it on and off, standing and driving.
+7. Lamp shadows: at night, turn on the Lada headlights, a road lamp and a house lamp near the car. Objects cast shadows from each lamp. Compare with the original: hard and soft edges, strength, fade with distance.
+8. Look for shadow acne and gaps at contact points. Tune `BIAS_TEXELS` in `src/presentation/lamp_shadows.rs` if needed.
+9. Stand near 5 or more shadowed lamps: only the 4 nearest cast shadows. No shadow pops when two lamps swap order.
+10. Turn "Lamp shadows" off and on. Reload: the setting stays. Check the F3 cost with it on and off.
+11. Check the page log for "layout requires ... textures": the lamp atlas adds one texture to each surface pipeline.
 
 ### Multiplayer
 

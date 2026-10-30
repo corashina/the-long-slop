@@ -18,8 +18,8 @@ export function createSimulation(worker,onFailure){
   hooks(value){hooks=value;},
   profile(enabled){worker.postMessage({cpuProfile:Boolean(enabled)});},
   // `manifest` moves to the worker. Resolves with the encoded startup values.
-  start(manifest,hash,drawDistance,biome,startCar){
-   return new Promise((resolve,reject)=>{starting={resolve,reject};worker.postMessage({start:{manifest,hash,drawDistance,biome,startCar}},[manifest.buffer]);});
+  start(manifest,hash,drawDistance,biome,startCar,seed,options){
+   return new Promise((resolve,reject)=>{starting={resolve,reject};worker.postMessage({start:{manifest,hash,drawDistance,biome,startCar,seed,options}},[manifest.buffer]);});
   },
   // The command is a view of WASM memory, so copy it before transfer.
   send(command){

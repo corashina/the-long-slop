@@ -19,7 +19,7 @@ export class MenuState {
  fail(message){this.generation++;this.pending=false;this.operation='';this.readyFlag=false;this.state='error';this.error=message;this.status='';this.actions=this.started?ACTIONS.PAUSE:0;}
  pause(saveSession){if(this.operation&&this.operation!=='save'&&saveSession?.cancel()){this.generation++;this.pending=false;this.operation='';this.status='';this.error='';}if(!this.operation)this.generation++;this.pending=Boolean(this.operation);this.actions=this.started?ACTIONS.PAUSE:0;if(this.state==='error')return;if(SUBSCREENS.includes(this.state)){this.origin=this.started?'pause-menu':'start-menu';return;}this.state=this.readyFlag?(this.started?'pause-menu':'start-menu'):'loading';}
  controls(){if(this.pending)return;if(this.state!=='start-menu' && this.state!=='pause-menu')return;this.origin=this.state;this.state='controls';}
- gameMode(){if(this.pending||this.state!=='start-menu')return;this.origin=this.state;this.state='game-mode';}
+ gameMode(){if(this.pending||!['start-menu','pause-menu'].includes(this.state))return;this.origin=this.state;this.state='game-mode';}
  saves(){if(this.pending||!['start-menu','pause-menu'].includes(this.state))return;this.origin=this.state;this.state='saves';}
  appearance(){if(this.pending||!['start-menu','pause-menu'].includes(this.state))return;this.origin=this.state;this.state='appearance';}
  multiplayer(){if(this.pending||!['start-menu','pause-menu'].includes(this.state))return;this.origin=this.state;this.state='multiplayer';}
@@ -32,7 +32,7 @@ export class MenuState {
   try {
    await saveSession[operation](...args);if(token!==this.generation)return;
    if(operation!=='save'&&operation!=='remove'){this.started=true;this.state=this.readyFlag?'pause-menu':'loading';this.dead=false;this.deathComplete=false;}
-   this.status=resultText[operation];
+   this.status=resultText[operation];return true;
   } catch(error){if(token===this.generation){this.error=operationError(error);this.status='';}}
   finally {if(token===this.generation){this.pending=false;this.operation='';}}
  }
@@ -45,12 +45,12 @@ export class MenuState {
  }
 }
 export async function captureWithAudio(model,action,request,audio){const success=await model.capture(action,request,()=>audio?.unlock());if(!success)audio?.pause();return success;}
-export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId,thumbnail=()=>null,sleeping=()=>false,seated=()=>false,guest=()=>false,slider,audio,drivingBindings,onPause,appearance}) {
+export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId,thumbnail=()=>null,sleeping=()=>false,seated=()=>false,guest=()=>false,slider,audio,drivingBindings,onPause,onNewGame,appearance}) {
  const model=new MenuState(),menu=document.querySelector('#menu'),controls=document.querySelector('#controls-screen'),gameMode=document.querySelector('#game-mode-screen'),savesNode=document.querySelector('#save-screen'),appearanceNode=document.querySelector('#appearance-screen'),multiplayerNode=document.querySelector('#multiplayer-screen'),startLast=document.querySelector('#start-load-last');
  const initial=document.querySelector('#start-actions'),paused=document.querySelector('#pause-actions'),error=document.querySelector('#capture-error'),status=document.querySelector('#status');
  const art=document.querySelector('#menu-art'),frame=document.querySelector('#menu-frame'),hud=document.querySelector('#hud');
  const initialNodes=[['#new-game','start'],['#start-load','start'],['#start-load-last','start-controls'],['#start-controls','start-controls'],['#start-game-mode','start-controls'],['#start-appearance','start-controls'],['#start-multiplayer','start-controls']];
- const pauseNodes=[['#resume','continue'],['#save','continue'],['#load','continue'],['#pause-new-game','restart'],['#recover','recover'],['#controls','controls'],['#appearance','controls'],['#multiplayer','controls']];
+ const pauseNodes=[['#resume','continue'],['#save','continue'],['#load','continue'],['#pause-new-game','restart'],['#recover','recover'],['#controls','controls'],['#pause-game-mode','controls'],['#appearance','controls'],['#multiplayer','controls']];
  const actionNodes=[...initialNodes,...pauseNodes],backNodes=['#back','#game-mode-back','#save-back','#appearance-back','#multiplayer-back'],nodes=[...actionNodes,...backNodes.map(selector=>[selector,'back'])];
  let lastState='',lastError='',lastStatus='',lastTravel=-1,pendingDriving=0,canLast=false,autoLoad=true;
  let storage=null;try{storage=window.localStorage;}catch{}
@@ -120,7 +120,7 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId
   catch(error){if(model.state==='saves'&&!model.pending)model.error=error?.message??String(error);}
   paint();
  }
- async function operate(operation,...args){audio?.pause();clearInput();const pending=model.run(operation,saveSession,...args);paint();await pending;flush();if(operation==='save'||operation==='remove')await refresh();paint();}
+ async function operate(operation,...args){audio?.pause();clearInput();const pending=model.run(operation,saveSession,...args);paint();if(await pending&&operation==='newGame')onNewGame?.();flush();if(operation==='save'||operation==='remove')await refresh();paint();}
  function openSaves(){model.saves();if(model.state!=='saves')return;screen.open({inMenu:!model.started,dead:model.dead,sleeping:sleeping(),seated:seated()});paint();refresh();}
  async function capture(){clearInput();const pending=captureWithAudio(model,ACTIONS.CONTINUE,async()=>{canvas.focus();await canvas.requestPointerLock();if(document.pointerLockElement!==canvas)throw Error('The browser did not capture the mouse.');},audio);paint();const success=await pending;if(!success && document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();}
  document.querySelector('#new-game').addEventListener('click',()=>operate('newGame'));
@@ -129,7 +129,7 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId
  startLast.addEventListener('click',()=>operate('loadLast',buildId));
  document.querySelector('#resume').addEventListener('click',capture);
  for(const id of ['#controls','#start-controls'])document.querySelector(id).addEventListener('click',()=>{model.controls();paint();});
- document.querySelector('#start-game-mode').addEventListener('click',()=>{model.gameMode();paint();});
+ for(const id of ['#start-game-mode','#pause-game-mode'])document.querySelector(id).addEventListener('click',()=>{model.gameMode();paint();});
  for(const id of ['#appearance','#start-appearance'])document.querySelector(id).addEventListener('click',()=>{model.appearance();paint();});
  for(const id of ['#multiplayer','#start-multiplayer'])document.querySelector(id).addEventListener('click',()=>{model.multiplayer();paint();});
  for(const id of backNodes)document.querySelector(id).addEventListener('click',()=>{model.back();paint();});

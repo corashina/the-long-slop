@@ -247,7 +247,7 @@ impl SourceContents {
                 &reference.spawn_context,
                 SpawnContext {
                     current_car,
-                    peaceful_enemies: 0,
+                    peaceful_enemies: 1,
                     date,
                     chance_bits: None,
                 },

@@ -136,7 +136,12 @@ pub fn manifest_shell(reference_json: &[u8]) -> Result<String, JsValue> {
 /// The Game mode from the browser. Biome values above 3 read as Mixed.
 /// The start car is -1 (Random) or an index into the manifest start placements.
 fn game_mode(reference: &ReferenceManifest) -> crate::world::GameMode {
-    crate::world::GameMode::from_menu(&reference.world, game_biome(), game_start_car())
+    crate::world::GameMode::from_menu(
+        &reference.world,
+        game_biome(),
+        game_start_car(),
+        game_seed(),
+    )
 }
 
 #[wasm_bindgen]
@@ -188,6 +193,8 @@ pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
         .insert_resource(ClearColor(Color::BLACK))
         .init_resource::<crate::render_scale::SceneScaleSetting>()
         .add_systems(PreUpdate, update_scene_scale)
+        .init_resource::<presentation::shadow_quality::ShadowQuality>()
+        .add_systems(PreUpdate, presentation::shadow_quality::poll)
         .add_plugins(presentation::source_io::SourceIoPlugin::new(
             reference.content_base.clone(),
             Arc::clone(&reference.file_catalog),
@@ -318,6 +325,7 @@ fn setup(
     gltf_extensions: Res<bevy::gltf::extensions::GltfExtensionHandlers>,
     reference: Res<RuntimeReference>,
     drive: Res<Drive>,
+    antialiasing: Res<presentation::antialiasing::Antialiasing>,
 ) {
     commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
     commands.insert_resource(presentation::spawned::SpawnedVisuals::default());
@@ -354,6 +362,7 @@ fn setup(
         presentation::transform(drive.startup.view),
         drive.startup.fov_degrees,
         drive.startup.far_plane,
+        *antialiasing,
     );
 }
 
@@ -361,7 +370,7 @@ fn update_scene_scale(
     mut scale: ResMut<crate::render_scale::SceneScaleSetting>,
     status: Res<presentation::readiness::RendererStateHandle>,
 ) {
-    match crate::render_scale::SceneScale::from_factor(game_scene_scale()) {
+    match crate::render_scale::SceneScale::from_percent(game_scene_scale()) {
         Ok(value) => {
             if scale.0 != value {
                 scale.0 = value;
@@ -587,9 +596,9 @@ fn read_input(
     };
     game_gamepad(&mut input.gamepad.axes, &mut input.gamepad.buttons);
     let hold = requests.pending();
-    // A pending save keeps the browser assists and settings for a later frame.
-    let (assists, settings) = if hold {
-        (None, None)
+    // A pending save keeps the browser assists, settings and options for a later frame.
+    let (assists, settings, options) = if hold {
+        (None, None, None)
     } else {
         let requested = game_driving_assists();
         (
@@ -598,6 +607,7 @@ fn read_input(
                 automatic_gears: requested & 2 != 0,
             }),
             game_driving_settings().and_then(|settings| serde_json::from_str(&settings).ok()),
+            game_options().map(crate::world::GameOptions::from_bits),
         )
     };
     drive.seq += 1;
@@ -615,6 +625,7 @@ fn read_input(
         hold,
         assists,
         settings,
+        options,
         calendar: local_calendar(),
         measure: game_measure_requested(),
         world: std::mem::take(&mut drive.world),

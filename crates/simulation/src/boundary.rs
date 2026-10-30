@@ -224,6 +224,7 @@ impl PerfBlock {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SimInit {
     pub mode: crate::world::GameMode,
+    pub options: crate::world::GameOptions,
     pub draw_distance: f32,
     /// SHA-256 of the manifest bytes. The saves carry it.
     pub manifest_sha256: String,
@@ -531,8 +532,8 @@ pub struct HudBlock {
     pub assists: u32,
     /// Steer, throttle, brake, clutch, handbrake.
     pub controls: [f32; 5],
-    /// Keeps the block free of padding.
-    pub pad: u32,
+    /// Source `postprocesscontrol.h.root` body speed: the seat owner, else the player.
+    pub view_speed_kmh: f32,
 }
 
 impl HudBlock {
@@ -1062,6 +1063,8 @@ pub struct SimCommand {
     pub assists: Option<DrivingAssists>,
     /// Stored settings from the browser. The simulation validates them.
     pub settings: Option<DrivingSettings>,
+    /// Changed game options. They apply at once, also while paused.
+    pub options: Option<crate::world::GameOptions>,
     /// Local month and day.
     pub calendar: [u8; 2],
     /// The browser asks for a world measurement.
@@ -1175,6 +1178,7 @@ impl SimCommand {
         self.hold = next.hold;
         self.assists = next.assists.or(self.assists);
         self.settings = next.settings.or(self.settings);
+        self.options = next.options.or(self.options);
         self.calendar = next.calendar;
         self.measure |= next.measure;
         self.world.merge(next.world);

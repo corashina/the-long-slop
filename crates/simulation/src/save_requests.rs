@@ -227,6 +227,7 @@ impl SimDriver {
                 } else {
                     GarageRuntime::new(reference, mode, draw_distance)?
                 };
+                runtime.set_game_options(self.runtime.options);
                 runtime.started = true;
                 runtime.paused = true;
                 self.save.prepared = Some(Prepared::Candidate {
@@ -247,6 +248,7 @@ impl SimDriver {
             .as_ref()
             .map_or(1, |audio| audio.session.wrapping_add(1));
         let settings = self.runtime.driving_input.settings;
+        let options = self.runtime.options;
         // Assignment drops the old stream and terminates its road actor first.
         self.runtime = driver.runtime;
         // The renderer takes the candidate copy with the candidate scene.
@@ -256,6 +258,8 @@ impl SimDriver {
         self.world = driver.world;
         self.grant = driver.grant;
         self.runtime.driving_input.settings = settings;
+        // A change during preparation reached only the old runtime.
+        self.runtime.set_game_options(options);
         self.runtime
             .stream
             .set_overlap(crate::world::WorldMetrics::default())

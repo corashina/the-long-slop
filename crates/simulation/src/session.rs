@@ -21,8 +21,9 @@ impl Session {
         reference: Arc<ReferenceManifest>,
         init: SimInit,
     ) -> Result<(Self, SimStartup), ReferenceError> {
-        let runtime = GarageRuntime::new(&reference, init.mode, init.draw_distance)
+        let mut runtime = GarageRuntime::new(&reference, init.mode, init.draw_distance)
             .map_err(|e| ReferenceError(e.to_string()))?;
+        runtime.set_game_options(init.options);
         let source = SourceStamp::new(&reference, init.manifest_sha256);
         let driver = SimDriver::new(runtime, source);
         let startup = driver.startup();
@@ -85,6 +86,7 @@ mod tests {
         let reference = Arc::new(ReferenceManifest::from_runtime_json(&bytes).unwrap());
         let init = SimInit {
             mode: Default::default(),
+            options: Default::default(),
             draw_distance: reference.world.draw_distance.default,
             manifest_sha256: String::new(),
         };
@@ -125,6 +127,7 @@ mod tests {
             .clone();
         let init = SimInit {
             mode: Default::default(),
+            options: Default::default(),
             draw_distance: reference.world.draw_distance.default,
             manifest_sha256: String::new(),
         };

@@ -192,6 +192,9 @@ impl SimDriver {
         if let Some(assists) = command.assists {
             let _ = self.runtime.set_driving_assists(assists);
         }
+        if let Some(options) = command.options {
+            self.runtime.set_game_options(options);
+        }
         // The browser validates stored settings. A refused value keeps the current settings.
         if let Some(settings) = command.settings
             && settings.valid(&reference.driving)
