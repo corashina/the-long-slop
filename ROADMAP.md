@@ -50,11 +50,18 @@ Not planned: multiplayer, VR, stereo 3D, mod events, Steam features, developer t
 
 Run these checks on Tomasz's PC in one run. Nothing below has passed yet.
 
+Known failures on master a01f1d84 (2026-10-30), fix before the next run:
+
+- Save fails: "Corrupt save: Source first-call context". This blocks every save and load check.
+- Appearance stops the game from both menus: "missing field source_renderer".
+- Looking down shows a hollow shirt and floating hands.
+- Most ignored cargo tests fail: no start vehicle after `load_garage`, restore stays pending, stack overflows in debug.
+- `--test garage_parts`, `--test world_range`, `v03_bus_pool` and `w05_loot_matches_source_rules` match no test.
+
 Prepare once:
 
 1. Pull master. Re-export, then make a release build. Old exports and old saves do not load. Only the current save schema loads.
 2. Paste the acquisition hash that the export prints into `CONTRACT_SHA256` if it changed.
-3. Check the export log for the "Biome materials" line (set count and marked nodes), the melee weapon list, the gun list and the explosion record. The clothing preview export runs without the assets: if it fails, read its error.
 
 ### Starting area (section 1)
 
@@ -339,14 +346,13 @@ Prepare once:
 
 ### Loot tools (X11)
 
-1. Re-export. The log shows "Loot tools: 3 prototypes".
-2. Run `cargo test --lib loot_tools -- --ignored`.
-3. Find a loot wire brush, sponge and spray paint. Pick up each one and hold LMB to use it.
-4. Clean rust and dirt with the loot wire brush and sponge. The brush model moves on the surface, with particles and sound.
-5. Paint a car part with loot spray paint. The can shows its color, sprays particles with sound, and runs out.
-6. Use a loot brush until it wears out. Its scrub part hides and it stops working.
-7. Save and load. Paint left, color and wear stay. Drive away and back: they stay.
-8. Check F3 while you use each loot tool. Compare with the frame rate rule.
+1. Run `cargo test --lib loot_tools -- --ignored`.
+2. Find a loot wire brush, sponge and spray paint. Pick up each one and hold LMB to use it.
+3. Clean rust and dirt with the loot wire brush and sponge. The brush model moves on the surface, with particles and sound.
+4. Paint a car part with loot spray paint. The can shows its color, sprays particles with sound, and runs out.
+5. Use a loot brush until it wears out. Its scrub part hides and it stops working.
+6. Save and load. Paint left, color and wear stay. Drive away and back: they stay.
+7. Check F3 while you use each loot tool. Compare with the frame rate rule.
 
 ### Worn start cars
 
