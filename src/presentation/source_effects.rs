@@ -2,7 +2,9 @@
 use super::{
     lighting_assets::{LightingAssets, LightingRenderAssets},
     lighting_scene::SourceSceneLighting,
-    postprocessing::chain::{PostFrame, PostShaders, PostTextures, SourceAoChain, SourcePostChain},
+    postprocessing::chain::{
+        PostFrame, PostShaders, PostTextures, SourceAoChain, SourcePostChain, TaaInputs,
+    },
     readiness::{RendererStateHandle, SourceExecutionGate},
     render_targets::SourceColorTargets,
     surface_graph::{SourceSurface, SourceSurfaceStage, SurfaceViewTargets},
@@ -170,10 +172,13 @@ fn shaders(assets: &LightingRenderAssets) -> PostShaders {
         ao_render: s.ao_render.clone(),
         ao_upsample: s.ao_upsample.clone(),
         ao_composite: s.ao_composite.clone(),
+        taa: s.taa.clone(),
     }
 }
-fn prepare(
+pub(crate) fn prepare(
     mut effects: ResMut<SourceEffects>,
+    antialiasing: Res<super::antialiasing::Antialiasing>,
+    motion: Res<super::motion_vectors::SourceMotion>,
     frame: Res<SourceViewFrame>,
     surfaces: Option<Res<SurfaceResources>>,
     assets: Option<Res<LightingRenderAssets>>,
@@ -247,6 +252,18 @@ fn prepare(
     };
     let colors = surfaces.targets.world.clone();
     let extent = [colors.width, colors.height];
+    let taa = if antialiasing.0 {
+        let Some(pass) = motion.pass(&colors) else {
+            return;
+        };
+        Some(TaaInputs {
+            settings: record.taa,
+            depth: surfaces.targets.views[0].depth.sampled.as_ref().unwrap(),
+            motion: pass.view(),
+        })
+    } else {
+        None
+    };
     let shaders = shaders(&assets);
     let mut previous = effects.targets.take();
     let result = (|| -> Result<EffectTargets, String> {
@@ -277,6 +294,7 @@ fn prepare(
             &assets.record.0.clothing.dead_profile,
             &assets.record.0.clothing.glasses_profiles,
             layer.stop_nan,
+            taa,
             previous.as_mut().and_then(|old| old.chain.take()),
         )?;
         Ok(EffectTargets {
@@ -361,6 +379,7 @@ fn encode_ao(
 }
 fn encode_post(
     view: ViewQuery<&SourceSurfaceView>,
+    motion: Res<super::motion_vectors::SourceMotion>,
     mut effects: ResMut<SourceEffects>,
     frame: Res<SourceViewFrame>,
     input: Res<EffectInput>,
@@ -380,6 +399,14 @@ fn encode_post(
     let Some(targets) = effects.targets.as_mut() else {
         return;
     };
+    // TAA reads this frame's motion target.
+    if frame.main_motion.is_some()
+        && motion
+            .pass(&targets.colors)
+            .is_none_or(|pass| !pass.encoded(frame.frame))
+    {
+        return;
+    }
     let encoded = targets.chain.as_mut().unwrap().encode(
         context.command_encoder(),
         &device,
@@ -392,6 +419,9 @@ fn encode_post(
             dead_weight: input.dead_weight,
             glasses: input.glasses,
             binoculars: input.binoculars,
+            motion: frame
+                .main_motion
+                .map(|motion| (motion.jitter, motion.reset)),
         },
         targets.colors.attachment(),
         targets.colors.resolve_target(),

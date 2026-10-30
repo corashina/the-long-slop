@@ -16,6 +16,7 @@ pub mod light_dither;
 pub mod lighting;
 pub mod materials;
 pub mod mechanisms;
+pub mod motion_vectors;
 pub mod outfit;
 pub mod outfit_preview;
 pub mod player_body;
@@ -28,6 +29,7 @@ pub(crate) mod sim_frame;
 pub mod sky_traffic;
 pub mod spawned;
 pub mod sunglasses;
+pub mod temporal;
 pub mod world;
 pub mod world_metrics;
 

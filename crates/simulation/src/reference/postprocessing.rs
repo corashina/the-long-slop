@@ -110,6 +110,7 @@ impl ExposureSettings {
 pub struct PostprocessingRecord {
     pub main_layer: super::SourceId,
     pub stop_nan: bool,
+    pub taa: TaaSettings,
     pub exposure: ExposureSettings,
     pub bloom: BloomSettings,
     pub occlusion: OcclusionSettings,
@@ -128,6 +129,29 @@ pub struct BinocularVignette {
     /// `tavcsoscript.defVignette`. The shader reads its alpha.
     pub mask: super::SourceId,
 }
+/// `pplayermelle.TurnOn` temporal antialiasing settings.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaaSettings {
+    pub jitter_spread: f32,
+    pub stationary_blending: f32,
+    pub motion_blending: f32,
+    pub sharpness: f32,
+}
+impl TaaSettings {
+    pub fn validate(&self) -> bool {
+        [
+            self.jitter_spread,
+            self.stationary_blending,
+            self.motion_blending,
+        ]
+        .iter()
+        .all(|value| value.is_finite() && (0. ..=1.).contains(value))
+            && self.sharpness.is_finite()
+            && self.sharpness >= 0.
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BloomSettings {
@@ -182,6 +206,7 @@ impl PostprocessingRecord {
             !self.main_layer.file.is_empty() && self.main_layer.path_id != 0,
             "postprocessing main layer",
         )?;
+        require(self.taa.validate(), "postprocessing temporal antialiasing")?;
         require(self.exposure.validate(), "postprocessing exposure")?;
         let bloom = &self.bloom;
         require(
