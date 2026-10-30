@@ -1,7 +1,9 @@
 use super::lighting_scene::PROBE_COUNT;
 use simulation::boundary::StateBlock;
 // One main-world view snapshot for raster, culling, and shadow fitting.
-use super::surface_views::{PROBE_START, VIEW_COUNT, WORLD_VIEWS};
+use super::surface_views::{
+    MIRROR_EXTENT, MIRROR_START, PROBE_START, VIEW_COUNT, WORLD_VIEWS, mirror_view, probe_view,
+};
 use super::{
     lighting_assets::LightingAssets, lighting_scene::SourceSceneLighting,
     readiness::RendererStateHandle, surface_views::SourceSurfaceView,
@@ -208,7 +210,8 @@ impl SourceViewFrame {
             source
         })
     }
-    pub fn skip_probe_preparation(&self, index: usize) -> bool {
+    /// A probe face or mirror view without a snapshot prepares and draws nothing this frame.
+    pub fn skip_preparation(&self, index: usize) -> bool {
         index >= PROBE_START && self.views[index].is_none()
     }
     pub(crate) fn render_identity(&self) -> Option<crate::render_readiness::RenderIdentity> {
@@ -297,7 +300,7 @@ fn sync_probe_cameras(
     }
     let active = clock.probe_cameras_active(activation.enabled);
     for (view, mut camera) in &mut views {
-        if (PROBE_START..VIEW_COUNT).contains(&view.index) && camera.is_active != active {
+        if probe_view(view.index) && camera.is_active != active {
             camera.is_active = active;
         }
     }
@@ -319,6 +322,7 @@ pub(crate) fn snapshot(
     settings: (
         Res<crate::render_scale::SceneScaleSetting>,
         Res<super::shadow_quality::ShadowQuality>,
+        Res<super::mirrors::MirrorFrame>,
     ),
     views: Query<(&SourceSurfaceView, &Camera, &GlobalTransform)>,
     sky_view: Query<(&Camera, &GlobalTransform), With<super::frame_graph::SourceSkyCamera>>,
@@ -331,7 +335,7 @@ pub(crate) fn snapshot(
 ) {
     frame.session = sim.frame.state.session;
     frame.selection_revision = sim.frame.state.selection_revision;
-    let (scale, shadow_quality) = settings;
+    let (scale, shadow_quality, mirrors) = settings;
     frame.scale = scale.0;
     frame.shadow_quality = *shadow_quality;
     frame.scene = epoch.0;
@@ -373,7 +377,8 @@ pub(crate) fn snapshot(
             return;
         }
         identities[view.index] = true;
-        if view.index >= PROBE_START && !probes_active {
+        // Mirror views take their pose and extent from the mirror frame.
+        if mirror_view(view.index) || (probe_view(view.index) && !probes_active) {
             continue;
         }
         if !camera.is_active {
@@ -433,6 +438,18 @@ pub(crate) fn snapshot(
     let job = probe_job;
     let fov_degrees = sim.frame.state.fov_degrees;
     let mut snapshots: [Option<ViewSnapshot>; VIEW_COUNT] = std::array::from_fn(|index| {
+        if mirror_view(index) {
+            let view = mirrors.views[index - MIRROR_START]?;
+            return Some(camera_snapshot(
+                UVec2::splat(MIRROR_EXTENT),
+                view.world_from_view.inverse(),
+                view.near,
+                view.far,
+                view.fov_degrees,
+                view.mask,
+                assets.record.shadows.distance,
+            ));
+        }
         if index >= PROBE_START && !prepare_probe_face(job, index - PROBE_START, warmup) {
             return None;
         }
@@ -565,7 +582,8 @@ pub fn apply_render_snapshot(
             view.world_from_view = GlobalTransform::from(snapshot.view_from_world.inverse());
             view.clip_from_view = snapshot.raster_projection;
             view.clip_from_world = Some(snapshot.raster_projection * snapshot.view_from_world);
-            view.invert_culling = state.index < WORLD_VIEWS;
+            // World and mirror poses are converted transforms. Probe faces are source matrices.
+            view.invert_culling = !probe_view(state.index);
             view.viewport = UVec4::new(0, 0, snapshot.extent.x, snapshot.extent.y);
             state.clip_from_world = snapshot.raster_projection * snapshot.view_from_world;
             state.near = snapshot.near;

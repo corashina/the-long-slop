@@ -88,6 +88,8 @@ pub struct WorldVehicleReference {
     pub plates: Vec<WorldPlateReference>,
     /// The realtime reflection probe that follows this car.
     pub probe: Option<WorldProbeReference>,
+    /// Source `mirrorscript` live mirrors.
+    pub mirrors: Vec<WorldMirrorReference>,
     pub audio: Option<CarAudioReference>,
 }
 
@@ -235,6 +237,24 @@ pub struct KmhMeterReference {
     pub types: Vec<String>,
     /// `partslotscript` components.
     pub slots: Vec<SourceId>,
+}
+
+/// One source `mirrorscript`. Node ids are prototype node indices.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldMirrorReference {
+    pub source: SourceId,
+    /// `M.R`: the glass renderer. Live, it shows `material` with the mirror image.
+    pub renderer: u32,
+    /// `M.T`: the mirror plane. Its up axis is the normal.
+    pub plane: u32,
+    /// `M.CT`: the camera node.
+    pub camera: u32,
+    pub near: f32,
+    /// Camera culling mask.
+    pub mask: u32,
+    /// `mainscript.defMirrorMaterial`.
+    pub material: MaterialLink,
 }
 
 /// A realtime `ReflectionProbe` of a car prototype. The fields are those of `ProbeRecord`.
@@ -707,7 +727,7 @@ fn curve_valid(c: &TorqueCurve) -> bool {
 
 impl WorldVehicleReference {
     /// Every material that the car can show on renderer node `node`: lamp states, gauge lamps,
-    /// odometer digits and backlights.
+    /// odometer digits, backlights and live mirrors.
     pub fn renderer_materials(&self, node: u32) -> impl Iterator<Item = &MaterialLink> {
         let lights = self
             .lights
@@ -737,7 +757,12 @@ impl WorldVehicleReference {
                 .flatten();
             lamps.chain(digits).chain(backlights)
         });
-        lights.chain(instruments)
+        let mirrors = self
+            .mirrors
+            .iter()
+            .filter(move |m| m.renderer == node)
+            .map(|m| &m.material);
+        lights.chain(instruments).chain(mirrors)
     }
     pub(super) fn validate(&self, b: PrototypeBounds) -> Result<(), ReferenceError> {
         let s = &self.source;
@@ -850,6 +875,16 @@ impl WorldVehicleReference {
             s,
             "vehicle probe node",
             self.probe.as_ref().is_none_or(|p| b.node(p.node)),
+        )?;
+        check(
+            s,
+            "vehicle mirrors",
+            self.mirrors.iter().all(|m| {
+                b.nodes(&[m.renderer, m.plane, m.camera])
+                    && m.near > 0.
+                    && m.near.is_finite()
+                    && b.material(&m.material)
+            }),
         )?;
         check(
             s,

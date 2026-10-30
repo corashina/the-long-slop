@@ -22,15 +22,27 @@ use bevy::{ecs as bevy_ecs, prelude::*};
 
 pub const WORLD_VIEWS: usize = 1;
 pub const PROBE_START: usize = WORLD_VIEWS;
-pub const VIEW_COUNT: usize = PROBE_START + 6;
+pub const MIRROR_START: usize = PROBE_START + 6;
+/// `MirrorsUpdate` renders the 5 nearest mirrors.
+pub const MIRROR_COUNT: usize = 5;
+pub const VIEW_COUNT: usize = MIRROR_START + MIRROR_COUNT;
+/// Side of the square `defMirrorTexture`.
+pub const MIRROR_EXTENT: u32 = 256;
+
+pub fn probe_view(index: usize) -> bool {
+    (PROBE_START..MIRROR_START).contains(&index)
+}
+pub fn mirror_view(index: usize) -> bool {
+    (MIRROR_START..VIEW_COUNT).contains(&index)
+}
 
 /// Source `playermodeloutfitscript.SetDistance`: `player_model` `_Dist` is 0.35 while the player camera draws.
-/// Other views, such as the probe faces, draw it with 0.
+/// Other views, such as the probe faces and mirrors, draw it with 0.
 pub fn player_dist(index: usize) -> f32 {
     if index < WORLD_VIEWS { 0.35 } else { 0. }
 }
 
-/// The world view precedes six probe faces.
+/// The world view precedes six probe faces and the mirrors.
 /// Shadow values come from each view's source fit and sun shadow preparation.
 #[derive(Component, Clone, Copy)]
 pub struct SourceSurfaceView {
@@ -153,16 +165,20 @@ pub(crate) fn prepare_views(
         extents[source.index] = Some(view.viewport.zw());
     }
     let Some(main) = extents[0] else { return };
-    if extents[PROBE_START..]
+    if extents[PROBE_START..MIRROR_START]
         .iter()
         .flatten()
         .any(|size| *size != UVec2::splat(64))
+        || extents[MIRROR_START..]
+            .iter()
+            .flatten()
+            .any(|size| *size != UVec2::splat(MIRROR_EXTENT))
     {
         status.fail("Source surface view extents disagree".into());
         return;
     }
     if (PROBE_START..VIEW_COUNT)
-        .any(|index| !frame.skip_probe_preparation(index) && extents[index].is_none())
+        .any(|index| !frame.skip_preparation(index) && extents[index].is_none())
     {
         return;
     }
@@ -216,7 +232,7 @@ pub(crate) fn prepare_views(
         return;
     };
     for (entity, source, _, _, bound, binding, glass, sun_shadow) in &mut views {
-        if frame.skip_probe_preparation(source.index) {
+        if frame.skip_preparation(source.index) {
             continue;
         }
         let target = &resources.targets.views[source.index];
@@ -260,7 +276,7 @@ pub(crate) fn prepare_views(
             binding.write(uniform, &device, &queue);
             continue;
         }
-        let cubes = if source.index < PROBE_START {
+        let cubes = if !probe_view(source.index) {
             &resources.published.view
         } else {
             &resources.published.capture_view

@@ -1,6 +1,6 @@
 //! Persistent source render targets. Allocation is restricted to startup or resize.
 use super::lighting_scene::PROBE_COUNT;
-use super::surface_views::{VIEW_COUNT, WORLD_VIEWS};
+use super::surface_views::{MIRROR_EXTENT, MIRROR_START, VIEW_COUNT, WORLD_VIEWS};
 
 use bevy::render::{
     render_resource::*,
@@ -203,10 +203,11 @@ impl SourceViewTargets {
 }
 
 /// The world view owns color storage; six capture views share single-sample scratch.
-/// Depth and shadow atlas storage never alias between views.
+/// The mirror views share another scratch. Depth and shadow atlas storage never alias between views.
 pub struct SurfaceTargets {
     pub world: std::sync::Arc<SourceColorTargets>,
     pub capture: std::sync::Arc<SourceColorTargets>,
+    pub mirror: std::sync::Arc<SourceColorTargets>,
     pub views: [std::sync::Arc<SourceViewTargets>; VIEW_COUNT],
     /// Lamp shadow atlas of the world view. Every view binds it.
     pub lamp_atlas: Target,
@@ -224,12 +225,22 @@ impl SurfaceTargets {
         let capture_atlas = crate::reference::shadows::source_atlas_size(64, 64).unwrap();
         let world = Arc::new(SourceColorTargets::new(device, width, height, samples)?);
         let capture = Arc::new(SourceColorTargets::new(device, 64, 64, 1)?);
+        let mirror_atlas =
+            crate::reference::shadows::source_atlas_size(MIRROR_EXTENT, MIRROR_EXTENT).unwrap();
+        let mirror = Arc::new(SourceColorTargets::new(
+            device,
+            MIRROR_EXTENT,
+            MIRROR_EXTENT,
+            1,
+        )?);
         let mut views = Vec::with_capacity(VIEW_COUNT);
         for index in 0..VIEW_COUNT {
             let (color, atlas_size) = if index < WORLD_VIEWS {
                 (&world, atlas)
-            } else {
+            } else if index < MIRROR_START {
                 (&capture, capture_atlas)
+            } else {
+                (&mirror, mirror_atlas)
             };
             views.push(Arc::new(SourceViewTargets::new(
                 device,
@@ -249,17 +260,19 @@ impl SurfaceTargets {
         );
         let logical_bytes = world.logical_bytes
             + capture.logical_bytes
+            + mirror.logical_bytes
             + views.iter().map(|view| view.logical_bytes).sum::<u64>()
             + lamp_atlas_bytes();
         Ok(Self {
             world,
             capture,
+            mirror,
             views: views.try_into().ok().unwrap(),
             lamp_atlas,
             logical_bytes,
         })
     }
-    /// Main resize preserves fixed capture targets and published probe storage.
+    /// Main resize preserves fixed capture and mirror targets and published probe storage.
     pub fn resize_world(
         &mut self,
         device: &RenderDevice,
@@ -276,6 +289,7 @@ impl SurfaceTargets {
         self.world = world;
         self.logical_bytes = self.world.logical_bytes
             + self.capture.logical_bytes
+            + self.mirror.logical_bytes
             + self
                 .views
                 .iter()

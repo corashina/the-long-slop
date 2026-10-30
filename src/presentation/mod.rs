@@ -21,6 +21,7 @@ pub mod materials;
 pub mod mechanisms;
 pub mod menu_figure;
 mod menu_ik;
+pub mod mirrors;
 pub mod motion_blur;
 pub mod motion_vectors;
 pub mod outfit;

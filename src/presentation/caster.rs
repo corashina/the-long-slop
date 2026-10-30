@@ -324,7 +324,7 @@ pub(crate) fn prepare_views(
         return;
     };
     for (entity, source) in &views {
-        if frame.skip_probe_preparation(source.index) {
+        if frame.skip_preparation(source.index) {
             continue;
         }
         commands.entity(entity).insert(CasterViews::new(
