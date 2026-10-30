@@ -287,6 +287,9 @@ extern "C" {
     /// Pending "Motion blur" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameMotionBlur)]
     pub fn game_motion_blur() -> Option<bool>;
+    /// Pending "Depth of field" setting, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameDepthOfField)]
+    pub fn game_depth_of_field() -> Option<bool>;
     /// Pending "Sunglasses effects" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameSunglassesEffects)]
     pub fn game_sunglasses_effects() -> Option<bool>;

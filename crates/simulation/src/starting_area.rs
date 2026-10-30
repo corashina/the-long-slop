@@ -766,6 +766,8 @@ pub struct GarageRuntime {
     pub persistent_world: crate::save::PersistentWorld,
     pending_restore: Option<save::PendingRestore>,
     pub lighting: crate::lighting::LightingState,
+    /// The main depth of field focus.
+    pub focus: crate::depth_of_field::Focus,
     /// Resolved once from the requested draw distance.
     pub distances: crate::world::DrawDistances,
     pub physics: PhysicsWorld,
@@ -952,6 +954,9 @@ impl GarageRuntime {
             sleep_camera: None,
             other_view: false,
             audio_motion_revision: 0,
+            focus: crate::depth_of_field::Focus::new(
+                &reference.render_lighting.postprocessing.depth_of_field,
+            ),
             simulation_seconds: 0.,
             survival_draw: 0,
             previous_speed: None,
@@ -1293,6 +1298,10 @@ impl GarageRuntime {
             self.notice = "";
         }
         self.aim = aim;
+        let focus = &reference.render_lighting.postprocessing.depth_of_field;
+        let hit = crate::depth_of_field::ray(&self.physics, view.camera_pose, focus);
+        self.focus
+            .step(focus, hit, self.lighting.cycle.output(), FIXED_DT);
         let previous_seat = self.area.player.seat_body();
         let seated = self.area.player.seated();
         let outcome = self.area.interaction.step(

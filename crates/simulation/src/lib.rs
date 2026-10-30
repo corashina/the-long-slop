@@ -13,6 +13,7 @@ pub mod cpu_profile;
 pub mod crash;
 pub mod creatures;
 pub mod damage;
+pub mod depth_of_field;
 pub mod driver;
 pub mod exhaust;
 pub mod fluids;
