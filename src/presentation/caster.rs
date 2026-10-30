@@ -35,11 +35,11 @@ struct CasterBinding {
     uniform: UniformBuffer<CasterUniform>,
     binding: BindGroup,
 }
-/// Slots 0..3 are the four source cascades.
+/// Slots 0..3 are the four source cascades. Then 6 faces for each lamp slot; only the world view uses them.
 /// Each source view owns this component; queued views never overwrite another view's state.
 #[derive(Component)]
 pub struct CasterViews {
-    slots: [CasterBinding; 4],
+    slots: [CasterBinding; super::lamp_shadows::TILES],
     pub(crate) shadow_key: Option<super::shadow_preparation::CascadeKey>,
 }
 impl CasterViews {

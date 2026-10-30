@@ -614,6 +614,7 @@ impl GarageRuntime {
             dt,
             self.lighting.cycle.output().ambient_temperature,
             need_scale,
+            self.options.survival,
         );
         self.announce_death(reference);
         if self.needs_output().menu_due {

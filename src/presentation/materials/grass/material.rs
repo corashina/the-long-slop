@@ -135,7 +135,7 @@ impl GrassMaterial {
                     get("_Softness00")?,
                 ),
                 fade_lod: Vec4::new(
-                    get("_GrassFadeStart")?,
+                    get("_GrassFadeStart")? * super::settings::quality_scale().1,
                     settings.fade_end,
                     settings.lod_start,
                     settings.lod_end,

@@ -132,6 +132,31 @@ impl DrawState {
 pub struct TrackedRenderPass<'a> {
     pass: RenderPass<'a>,
     state: DrawState,
+    capture: Option<PassCapture<'a>>,
+}
+
+/// Most dynamic offsets of one captured bind group command.
+pub const CAPTURE_OFFSETS: usize = 8;
+
+/// A command of a captured [`TrackedRenderPass`]. It holds the commands that a render bundle can hold.
+#[derive(Clone, Debug)]
+pub enum PassCommand<'a> {
+    Pipeline(&'a RenderPipeline),
+    BindGroup(u32, &'a BindGroup, [u32; CAPTURE_OFFSETS], usize),
+    VertexBuffer(u32, BufferSlice<'a>),
+    IndexBuffer(BufferSlice<'a>, IndexFormat),
+    Draw(Range<u32>, Range<u32>),
+    DrawIndexed(Range<u32>, i32, Range<u32>),
+    DrawIndirect(&'a Buffer, u64),
+    DrawIndexedIndirect(&'a Buffer, u64),
+}
+
+/// Commands sent to a capture instead of the pass.
+#[derive(Debug)]
+pub struct PassCapture<'a> {
+    pub commands: Vec<PassCommand<'a>>,
+    /// The name of the first command that a render bundle cannot hold.
+    pub unsupported: Option<&'static str>,
 }
 
 impl<'a> TrackedRenderPass<'a> {
@@ -147,7 +172,42 @@ impl<'a> TrackedRenderPass<'a> {
                 ..default()
             },
             pass,
+            capture: None,
         }
+    }
+
+    /// Send the next commands to `commands` instead of the pass. A render bundle starts with empty state.
+    pub fn begin_capture(&mut self, mut commands: Vec<PassCommand<'a>>) {
+        commands.clear();
+        self.state.reset_tracking();
+        self.capture = Some(PassCapture {
+            commands,
+            unsupported: None,
+        });
+    }
+
+    /// Stop the capture. The pass state is unknown after it, as after a render bundle.
+    pub fn end_capture(&mut self) -> Option<PassCapture<'a>> {
+        self.state.reset_tracking();
+        self.capture.take()
+    }
+
+    /// Record a captured command. Returns false when the pass must run it.
+    fn captured(&mut self, command: impl FnOnce() -> PassCommand<'a>) -> bool {
+        let Some(capture) = &mut self.capture else {
+            return false;
+        };
+        capture.commands.push(command());
+        true
+    }
+
+    /// Mark a command that a render bundle cannot hold. Returns false when the pass must run it.
+    fn unsupported(&mut self, name: &'static str) -> bool {
+        let Some(capture) = &mut self.capture else {
+            return false;
+        };
+        capture.unsupported.get_or_insert(name);
+        true
     }
 
     /// Returns the wgpu [`RenderPass`].
@@ -155,6 +215,7 @@ impl<'a> TrackedRenderPass<'a> {
     /// Function invalidates internal tracking state,
     /// some redundant pipeline operations may not be skipped.
     pub fn wgpu_pass(&mut self) -> &mut RenderPass<'a> {
+        self.unsupported("wgpu_pass");
         self.state.reset_tracking();
         &mut self.pass
     }
@@ -168,8 +229,11 @@ impl<'a> TrackedRenderPass<'a> {
         if self.state.is_pipeline_set(pipeline.id()) {
             return;
         }
-        self.pass.set_pipeline(pipeline);
         self.state.set_pipeline(pipeline.id());
+        if self.captured(|| PassCommand::Pipeline(pipeline)) {
+            return;
+        }
+        self.pass.set_pipeline(pipeline);
     }
 
     /// Sets the active bind group for a given bind group index. The bind group layout
@@ -206,10 +270,21 @@ impl<'a> TrackedRenderPass<'a> {
             dynamic_uniform_indices
         );
 
-        self.pass
-            .set_bind_group(index as u32, bind_group, dynamic_uniform_indices);
         self.state
             .set_bind_group(index, bind_group.id(), dynamic_uniform_indices);
+        if self.capture.is_some() {
+            if dynamic_uniform_indices.len() > CAPTURE_OFFSETS {
+                self.unsupported("set_bind_group with many offsets");
+                return;
+            }
+            let mut offsets = [0; CAPTURE_OFFSETS];
+            offsets[..dynamic_uniform_indices.len()].copy_from_slice(dynamic_uniform_indices);
+            let count = dynamic_uniform_indices.len();
+            self.captured(|| PassCommand::BindGroup(index as u32, bind_group, offsets, count));
+            return;
+        }
+        self.pass
+            .set_bind_group(index as u32, bind_group, dynamic_uniform_indices);
     }
 
     /// Assign a vertex buffer to a slot.
@@ -243,9 +318,12 @@ impl<'a> TrackedRenderPass<'a> {
             buffer_slice.size(),
         );
 
+        self.state.set_vertex_buffer(slot_index, buffer_slice.clone());
+        if self.captured(|| PassCommand::VertexBuffer(slot_index as u32, buffer_slice.clone())) {
+            return;
+        }
         self.pass
             .set_vertex_buffer(slot_index as u32, *buffer_slice);
-        self.state.set_vertex_buffer(slot_index, buffer_slice);
     }
 
     /// Sets the active index buffer.
@@ -265,8 +343,11 @@ impl<'a> TrackedRenderPass<'a> {
         if already_set {
             return;
         }
-        self.pass.set_index_buffer(*buffer_slice, index_format);
         self.state.set_index_buffer(&buffer_slice, index_format);
+        if self.captured(|| PassCommand::IndexBuffer(buffer_slice.clone(), index_format)) {
+            return;
+        }
+        self.pass.set_index_buffer(*buffer_slice, index_format);
     }
 
     /// Draws primitives from the active vertex buffer(s).
@@ -275,6 +356,9 @@ impl<'a> TrackedRenderPass<'a> {
     pub fn draw(&mut self, vertices: Range<u32>, instances: Range<u32>) {
         #[cfg(feature = "detailed_trace")]
         trace!("draw: {:?} {:?}", vertices, instances);
+        if self.captured(|| PassCommand::Draw(vertices.clone(), instances.clone())) {
+            return;
+        }
         self.pass.draw(vertices, instances);
     }
 
@@ -290,6 +374,11 @@ impl<'a> TrackedRenderPass<'a> {
             base_vertex,
             instances
         );
+        if self.captured(|| {
+            PassCommand::DrawIndexed(indices.clone(), base_vertex, instances.clone())
+        }) {
+            return;
+        }
         self.pass.draw_indexed(indices, base_vertex, instances);
     }
 
@@ -313,6 +402,9 @@ impl<'a> TrackedRenderPass<'a> {
     pub fn draw_indirect(&mut self, indirect_buffer: &'a Buffer, indirect_offset: u64) {
         #[cfg(feature = "detailed_trace")]
         trace!("draw indirect: {:?} {}", indirect_buffer, indirect_offset);
+        if self.captured(|| PassCommand::DrawIndirect(indirect_buffer, indirect_offset)) {
+            return;
+        }
         self.pass.draw_indirect(indirect_buffer, indirect_offset);
     }
 
@@ -342,6 +434,9 @@ impl<'a> TrackedRenderPass<'a> {
             indirect_buffer,
             indirect_offset
         );
+        if self.captured(|| PassCommand::DrawIndexedIndirect(indirect_buffer, indirect_offset)) {
+            return;
+        }
         self.pass
             .draw_indexed_indirect(indirect_buffer, indirect_offset);
     }
@@ -376,6 +471,9 @@ impl<'a> TrackedRenderPass<'a> {
             indirect_offset,
             count
         );
+        if self.unsupported("multi_draw_indirect") {
+            return;
+        }
         self.pass
             .multi_draw_indirect(indirect_buffer, indirect_offset, count);
     }
@@ -419,6 +517,9 @@ impl<'a> TrackedRenderPass<'a> {
             count_offset,
             max_count
         );
+        if self.unsupported("multi_draw_indirect_count") {
+            return;
+        }
         self.pass.multi_draw_indirect_count(
             indirect_buffer,
             indirect_offset,
@@ -460,6 +561,9 @@ impl<'a> TrackedRenderPass<'a> {
             indirect_offset,
             count
         );
+        if self.unsupported("multi_draw_indexed_indirect") {
+            return;
+        }
         self.pass
             .multi_draw_indexed_indirect(indirect_buffer, indirect_offset, count);
     }
@@ -505,6 +609,9 @@ impl<'a> TrackedRenderPass<'a> {
             count_offset,
             max_count
         );
+        if self.unsupported("multi_draw_indexed_indirect_count") {
+            return;
+        }
         self.pass.multi_draw_indexed_indirect_count(
             indirect_buffer,
             indirect_offset,
@@ -520,6 +627,9 @@ impl<'a> TrackedRenderPass<'a> {
     pub fn set_stencil_reference(&mut self, reference: u32) {
         #[cfg(feature = "detailed_trace")]
         trace!("set stencil reference: {}", reference);
+        if self.unsupported("set_stencil_reference") {
+            return;
+        }
         self.pass.set_stencil_reference(reference);
     }
 
@@ -529,6 +639,9 @@ impl<'a> TrackedRenderPass<'a> {
     pub fn set_scissor_rect(&mut self, x: u32, y: u32, width: u32, height: u32) {
         #[cfg(feature = "detailed_trace")]
         trace!("set_scissor_rect: {} {} {} {}", x, y, width, height);
+        if self.unsupported("set_scissor_rect") {
+            return;
+        }
         self.pass.set_scissor_rect(x, y, width, height);
     }
 
@@ -538,6 +651,9 @@ impl<'a> TrackedRenderPass<'a> {
     pub fn set_immediates(&mut self, offset: u32, data: &[u8]) {
         #[cfg(feature = "detailed_trace")]
         trace!("set immediates offset: {} data.len: {}", offset, data.len());
+        if self.unsupported("set_immediates") {
+            return;
+        }
         self.pass.set_immediates(offset, data);
     }
 
@@ -563,6 +679,9 @@ impl<'a> TrackedRenderPass<'a> {
             min_depth,
             max_depth
         );
+        if self.unsupported("set_viewport") {
+            return;
+        }
         self.pass
             .set_viewport(x, y, width, height, min_depth, max_depth);
     }
@@ -587,6 +706,9 @@ impl<'a> TrackedRenderPass<'a> {
     pub fn insert_debug_marker(&mut self, label: &str) {
         #[cfg(feature = "detailed_trace")]
         trace!("insert debug marker: {}", label);
+        if self.unsupported("insert_debug_marker") {
+            return;
+        }
         self.pass.insert_debug_marker(label);
     }
 
@@ -613,6 +735,9 @@ impl<'a> TrackedRenderPass<'a> {
     pub fn push_debug_group(&mut self, label: &str) {
         #[cfg(feature = "detailed_trace")]
         trace!("push_debug_group marker: {}", label);
+        if self.unsupported("push_debug_group") {
+            return;
+        }
         self.pass.push_debug_group(label);
     }
 
@@ -631,6 +756,9 @@ impl<'a> TrackedRenderPass<'a> {
     pub fn pop_debug_group(&mut self) {
         #[cfg(feature = "detailed_trace")]
         trace!("pop_debug_group");
+        if self.unsupported("pop_debug_group") {
+            return;
+        }
         self.pass.pop_debug_group();
     }
 
@@ -640,22 +768,28 @@ impl<'a> TrackedRenderPass<'a> {
     pub fn set_blend_constant(&mut self, color: LinearRgba) {
         #[cfg(feature = "detailed_trace")]
         trace!("set blend constant: {:?}", color);
+        if self.unsupported("set_blend_constant") {
+            return;
+        }
         self.pass.set_blend_constant(wgpu::Color::from(color));
     }
 }
 
 impl WriteTimestamp for TrackedRenderPass<'_> {
     fn write_timestamp(&mut self, query_set: &QuerySet, index: u32) {
+        self.unsupported("write_timestamp");
         self.pass.write_timestamp(query_set, index);
     }
 }
 
 impl WritePipelineStatistics for TrackedRenderPass<'_> {
     fn begin_pipeline_statistics_query(&mut self, query_set: &QuerySet, index: u32) {
+        self.unsupported("begin_pipeline_statistics_query");
         self.pass.begin_pipeline_statistics_query(query_set, index);
     }
 
     fn end_pipeline_statistics_query(&mut self) {
+        self.unsupported("end_pipeline_statistics_query");
         self.pass.end_pipeline_statistics_query();
     }
 }

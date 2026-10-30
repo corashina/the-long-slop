@@ -477,7 +477,7 @@ mod tests {
             },
             context: SpawnContext {
                 current_car: 0,
-                peaceful_enemies: 0,
+                peaceful_enemies: 1,
                 date: [0; 3],
                 chance_bits: None,
             },

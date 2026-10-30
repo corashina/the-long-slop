@@ -1,5 +1,6 @@
 //! Source four-cascade atlas dispatch over the persistent caster phase.
 use super::{
+    lamp_shadows::{LampShadowUniform, LampShadows, TILES, tile_bit},
     lighting_assets::LightingRenderAssets,
     materials::MaterialLoading,
     readiness::RendererStateHandle,
@@ -11,9 +12,8 @@ use super::{
     surface_views::{SourceSurfaceView, WORLD_VIEWS},
     view_frame::SourceViewFrame,
 };
-use crate::reference::{
-    shadow_cadence::{CascadeEpoch, CascadeHistory, CascadeInputs, cascades_to_render},
-    shadows::ShadowFit,
+use crate::reference::shadow_cadence::{
+    CascadeEpoch, CascadeHistory, CascadeInputs, CascadePlan, plan_cascades as plan_tiles,
 };
 use bevy::render::{
     Render, RenderApp, RenderSystems,
@@ -30,22 +30,22 @@ use std::sync::Arc;
 pub struct ShadowCadence {
     targets: Arc<SourceViewTargets>,
     history: CascadeHistory,
-    pub render: [bool; 4],
+    pub plan: CascadePlan,
     pub frame: u32,
     /// Changes when a tile gets a different fit.
     pub revision: u64,
 }
 impl ShadowCadence {
-    fn plan(
+    fn update(
         &mut self,
         frame: u32,
-        world_view: bool,
-        fit: Option<&ShadowFit>,
+        scene: &ShadowScene,
+        index: usize,
         epoch: CascadeEpoch,
         encoded: u32,
     ) {
-        self.render = [true; 4];
-        let Some(fit) = fit else {
+        self.plan = CascadePlan::ALL;
+        let Some(fit) = &scene.fits[index] else {
             // The next fit renders all cascades.
             if self.history.epoch.is_some() {
                 self.history = CascadeHistory::default();
@@ -57,12 +57,14 @@ impl ShadowCadence {
         let current = CascadeInputs {
             epoch,
             cascades: fit.cascades,
+            sun: scene.sun.to_array().map(f32::to_bits),
+            contents: scene.contents[index],
             forced: encoded != self.frame,
         };
-        if world_view {
-            self.render = cascades_to_render(frame, &self.history, &current);
+        if index < WORLD_VIEWS {
+            self.plan = plan_tiles(frame, &self.history, &current);
         }
-        self.revision += u64::from(self.history.commit(self.render, &current));
+        self.revision += u64::from(self.history.commit(&self.plan, &current));
         self.frame = frame;
     }
 }
@@ -106,22 +108,20 @@ pub(crate) fn plan_cascades(
         if frame.views[view.index].is_none() {
             continue;
         }
-        let fit = scene.fits[view.index].as_ref();
         let encoded = state.map_or(0, ShadowDrawState::encoded_frame);
-        let world_view = view.index < WORLD_VIEWS;
         if let Some(mut cadence) = cadence.filter(|c| Arc::ptr_eq(&c.targets, &targets.0)) {
-            cadence.plan(frame.frame, world_view, fit, epoch, encoded);
+            cadence.update(frame.frame, &scene, view.index, epoch, encoded);
             continue;
         }
         // A new atlas has no history, so all cascades render.
         let mut cadence = ShadowCadence {
             targets: targets.0.clone(),
             history: CascadeHistory::default(),
-            render: [true; 4],
+            plan: CascadePlan::ALL,
             frame: 0,
             revision: 0,
         };
-        cadence.plan(frame.frame, world_view, fit, epoch, encoded);
+        cadence.update(frame.frame, &scene, view.index, epoch, encoded);
         commands.entity(entity).insert(cadence);
     }
 }
@@ -204,6 +204,8 @@ pub(crate) fn render_atlas(
     queues: Res<ShadowQueues>,
     status: Res<RendererStateHandle>,
     loading: Res<MaterialLoading>,
+    lamps: Res<LampShadows>,
+    resources: Res<super::surface_views::SurfaceResources>,
     mut context: RenderContext,
 ) {
     if !loading.is_ready() || status.failure().is_some() {
@@ -249,7 +251,7 @@ pub(crate) fn render_atlas(
         ..default()
     });
     for cascade in 0..4 {
-        if !cadence.render[cascade] {
+        if !cadence.plan.draw[cascade] {
             continue;
         }
         state.select(cascade);
@@ -262,8 +264,14 @@ pub(crate) fn render_atlas(
             status.fail(format!("Source shadow atlas draw: {error:?}"));
             return;
         }
-        let (attempted, issued) =
-            super::prop_draws::draw_cascade(world, &mut pass, entity, source.index, cascade);
+        let (attempted, issued) = super::prop_draws::draw_cascade(
+            world,
+            &mut pass,
+            entity,
+            source.index,
+            cascade,
+            cascade,
+        );
         if attempted != issued {
             status.fail(format!(
                 "Source GPU prop caster draw skipped in cascade {cascade}: {issued}/{attempted}"
@@ -272,11 +280,61 @@ pub(crate) fn render_atlas(
         }
     }
     drop(pass);
+    let lamp_faces = |tile: usize| {
+        tile >= 4 && source.index < WORLD_VIEWS && (tile - 4) % 6 < lamps.faces((tile - 4) / 6)
+    };
+    if (4..TILES).any(lamp_faces) {
+        let mut pass = context.begin_tracked_render_pass(RenderPassDescriptor {
+            label: Some("source_lamp_shadow_atlas"),
+            color_attachments: &[],
+            depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                view: &resources.targets.lamp_atlas.attachment,
+                // Reversed depth: 0 is lit.
+                depth_ops: Some(Operations {
+                    load: LoadOp::Clear(0.),
+                    store: StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            ..default()
+        });
+        for tile in (4..TILES).filter(|tile| lamp_faces(*tile)) {
+            let slot = (tile - 4) / 6;
+            state.select(tile);
+            let [x, y, width, height] =
+                LampShadowUniform::viewport(slot, (tile - 4) % 6, lamps.uniforms[slot].point());
+            pass.set_viewport(x as f32, y as f32, width as f32, height as f32, 0., 1.);
+            pass.set_scissor_rect(x, y, width, height);
+            if let Err(error) = phase.render(&mut pass, world, entity) {
+                status.fail(format!("Source lamp shadow draw: {error:?}"));
+                return;
+            }
+            let (attempted, issued) = super::prop_draws::draw_cascade(
+                world,
+                &mut pass,
+                entity,
+                source.index,
+                tile_bit(tile),
+                tile,
+            );
+            if attempted != issued {
+                status.fail(format!(
+                    "Source GPU prop caster draw skipped in lamp tile {tile}: {issued}/{attempted}"
+                ));
+                return;
+            }
+        }
+    }
     let (epoch, attempted, issued) = state.counts();
     let instances = state.instance_counts();
-    // Skipped cascades draw no instances.
-    let required: [u32; 4] = std::array::from_fn(|cascade| {
-        queues.instances[source.index][cascade] * u32::from(cadence.render[cascade])
+    // Skipped cascades and empty lamp faces draw no instances.
+    let required: [u32; TILES] = std::array::from_fn(|tile| {
+        let rendered = if tile < 4 {
+            cadence.plan.draw[tile]
+        } else {
+            lamp_faces(tile)
+        };
+        queues.instances[source.index][tile_bit(tile)] * u32::from(rendered)
     });
     if attempted != issued || instances[0] != required || instances[1] != required {
         status.fail(format!(

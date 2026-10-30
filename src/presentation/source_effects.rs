@@ -2,7 +2,10 @@
 use super::{
     lighting_assets::{LightingAssets, LightingRenderAssets},
     lighting_scene::SourceSceneLighting,
-    postprocessing::chain::{PostFrame, PostShaders, PostTextures, SourceAoChain, SourcePostChain},
+    postprocessing::chain::{
+        FrameMotion, MotionInputs, PostFrame, PostShaders, PostTextures, SourceAoChain,
+        SourcePostChain,
+    },
     readiness::{RendererStateHandle, SourceExecutionGate},
     render_targets::SourceColorTargets,
     surface_graph::{SourceSurface, SourceSurfaceStage, SurfaceViewTargets},
@@ -24,7 +27,7 @@ use bevy::{ecs as bevy_ecs, prelude::*, render as bevy_render};
 use std::sync::Arc;
 
 #[derive(Resource, Clone, Default, ExtractResource)]
-struct EffectInput {
+pub(crate) struct EffectInput {
     scene: u32,
     frame: u32,
     delta_seconds: f32,
@@ -32,12 +35,18 @@ struct EffectInput {
     dead_weight: f32,
     glasses: Option<u32>,
     binoculars: bool,
+    ambient_occlusion: bool,
+    motion_blur: bool,
+    /// Source `MotionBlur.shutterAngle` in degrees. None before the first frame.
+    shutter: Option<f32>,
 }
 fn snapshot_input(
     frame: Res<SourceViewFrame>,
     assets: Option<Res<LightingAssets>>,
     sim: Res<super::sim_frame::SimFrameResource>,
     effects: Res<super::sunglasses::SunglassesEffects>,
+    occlusion: Res<super::ambient_occlusion::AmbientOcclusion>,
+    blur: Res<super::motion_blur::MotionBlur>,
     mut input: ResMut<EffectInput>,
 ) {
     if input.scene != frame.scene {
@@ -46,12 +55,20 @@ fn snapshot_input(
             ..default()
         };
     }
+    input.ambient_occlusion = occlusion.0;
+    input.motion_blur = blur.0;
     input.frame = 0;
     let Some(assets) = assets else { return };
     if !assets.loaded || frame.views[0].is_none() {
         return;
     }
     input.delta_seconds = sim.frame.state.perf.frame_seconds();
+    let settings = &assets.record.postprocessing.motion_blur;
+    input.shutter = Some(settings.shutter(
+        input.shutter.unwrap_or(settings.shutter_range[0]),
+        sim.frame.hud.view_speed_kmh,
+        input.delta_seconds,
+    ));
     input.grading_temperature = sim.frame.lighting.cycle.grading_temperature;
     input.dead_weight = sim.frame.state.dead_weight;
     // Source `PPVSunGlasses.enabled = !otherView()`.
@@ -127,8 +144,17 @@ impl SourceEffects {
 pub fn install(app: &mut App) {
     app.init_resource::<EffectInput>()
         .init_resource::<super::sunglasses::SunglassesEffects>()
+        .init_resource::<super::ambient_occlusion::AmbientOcclusion>()
+        .init_resource::<super::motion_blur::MotionBlur>()
         .add_plugins(ExtractResourcePlugin::<EffectInput>::default())
-        .add_systems(Update, super::sunglasses::poll)
+        .add_systems(
+            Update,
+            (
+                super::sunglasses::poll,
+                super::ambient_occlusion::poll,
+                super::motion_blur::poll,
+            ),
+        )
         .add_systems(
             PostUpdate,
             snapshot_input.after(super::view_frame::snapshot),
@@ -170,11 +196,16 @@ fn shaders(assets: &LightingRenderAssets) -> PostShaders {
         ao_render: s.ao_render.clone(),
         ao_upsample: s.ao_upsample.clone(),
         ao_composite: s.ao_composite.clone(),
+        taa: s.taa.clone(),
+        motion_blur: s.motion_blur.clone(),
     }
 }
-fn prepare(
+pub(crate) fn prepare(
     mut effects: ResMut<SourceEffects>,
+    antialiasing: Res<super::antialiasing::Antialiasing>,
+    motion: Res<super::motion_vectors::SourceMotion>,
     frame: Res<SourceViewFrame>,
+    input: Res<EffectInput>,
     surfaces: Option<Res<SurfaceResources>>,
     assets: Option<Res<LightingRenderAssets>>,
     images: Res<RenderAssets<GpuImage>>,
@@ -214,11 +245,11 @@ fn prepare(
     let (Some(surfaces), Some(assets)) = (surfaces, assets) else {
         return;
     };
-    if effects
-        .targets
-        .as_ref()
-        .is_some_and(|old| Arc::ptr_eq(&old.colors, &surfaces.targets.world))
-    {
+    // The motion blur setting changes the chain without a resize.
+    if effects.targets.as_ref().is_some_and(|old| {
+        Arc::ptr_eq(&old.colors, &surfaces.targets.world)
+            && old.chain.as_ref().unwrap().has_blur() == input.motion_blur
+    }) {
         return;
     }
     let record = &assets.record.postprocessing;
@@ -247,6 +278,19 @@ fn prepare(
     };
     let colors = surfaces.targets.world.clone();
     let extent = [colors.width, colors.height];
+    let motion = if antialiasing.0 || input.motion_blur {
+        let Some(pass) = motion.pass(&colors) else {
+            return;
+        };
+        Some(MotionInputs {
+            taa: antialiasing.0.then_some(record.taa),
+            blur: input.motion_blur.then_some(record.motion_blur),
+            depth: surfaces.targets.views[0].depth.sampled.as_ref().unwrap(),
+            motion: pass.view(),
+        })
+    } else {
+        None
+    };
     let shaders = shaders(&assets);
     let mut previous = effects.targets.take();
     let result = (|| -> Result<EffectTargets, String> {
@@ -258,6 +302,7 @@ fn prepare(
             &shaders,
             surfaces.targets.views[0].depth.sampled.as_ref().unwrap(),
             extent,
+            colors.samples,
             record,
             previous.as_mut().and_then(|old| old.ao.take()),
         )?;
@@ -271,10 +316,12 @@ fn prepare(
             &textures,
             colors.resolved.sampled.as_ref().unwrap(),
             extent,
+            colors.samples,
             record,
             &assets.record.0.clothing.dead_profile,
             &assets.record.0.clothing.glasses_profiles,
             layer.stop_nan,
+            motion,
             previous.as_mut().and_then(|old| old.chain.take()),
         )?;
         Ok(EffectTargets {
@@ -321,6 +368,7 @@ fn encode_ao(
     view: ViewQuery<(&SourceSurfaceView, &SurfaceViewTargets)>,
     mut effects: ResMut<SourceEffects>,
     frame: Res<SourceViewFrame>,
+    input: Res<EffectInput>,
     scene: Res<SourceSceneLighting>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
@@ -330,6 +378,12 @@ fn encode_ao(
 ) {
     let (view, targets) = view.into_inner();
     if view.index != 0 || status.failure().is_some() {
+        return;
+    }
+    // Off: no AO passes. Opaque and transparent passes already resolved the color.
+    if !input.ambient_occlusion {
+        effects.audit.ao_frame = frame.frame;
+        effects.audit.ao_token = frame.main_token;
         return;
     }
     let (Some(snapshot), Some(scene), Some(storage)) =
@@ -343,7 +397,7 @@ fn encode_ao(
         &queue,
         &cache,
         targets.0.colors.attachment(),
-        targets.0.colors.resolve_target().unwrap(),
+        targets.0.colors.resolve_target(),
         snapshot.near,
         snapshot.far,
         snapshot.implicit_projection.x_axis.x,
@@ -359,6 +413,7 @@ fn encode_ao(
 }
 fn encode_post(
     view: ViewQuery<&SourceSurfaceView>,
+    motion: Res<super::motion_vectors::SourceMotion>,
     mut effects: ResMut<SourceEffects>,
     frame: Res<SourceViewFrame>,
     input: Res<EffectInput>,
@@ -378,6 +433,17 @@ fn encode_post(
     let Some(targets) = effects.targets.as_mut() else {
         return;
     };
+    // TAA and motion blur read this frame's motion target.
+    if frame.main_motion.is_some()
+        && motion
+            .pass(&targets.colors)
+            .is_none_or(|pass| !pass.encoded(frame.frame))
+    {
+        return;
+    }
+    let snapshot = frame.views[index].as_ref().unwrap();
+    // Source `MotionBlurOff` around screenshot renders.
+    let thumbnail = super::frame_graph::thumbnail_requested();
     let encoded = targets.chain.as_mut().unwrap().encode(
         context.command_encoder(),
         &device,
@@ -390,13 +456,23 @@ fn encode_post(
             dead_weight: input.dead_weight,
             glasses: input.glasses,
             binoculars: input.binoculars,
+            motion: frame.main_motion.map(|motion| FrameMotion {
+                jitter: motion.jitter,
+                reset: motion.reset,
+                near: snapshot.near,
+                far: snapshot.far,
+                shutter: input.shutter.filter(|_| !thumbnail),
+            }),
         },
         targets.colors.attachment(),
-        targets.colors.resolve_target().unwrap(),
+        targets.colors.resolve_target(),
     );
     match encoded {
         Ok(true) => {
             effects.audit.encoded_token = frame.main_token;
+            if thumbnail {
+                super::frame_graph::thumbnail_encoded(frame.main_token);
+            }
         }
         Ok(false) => {}
         Err(error) => status.fail(error),

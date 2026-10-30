@@ -541,28 +541,21 @@ impl InstanceMaterial {
             }
         }
     }
+    /// Requests the pipelines of this material. A parent continuation batches them with its structure.
     pub(crate) fn warm(
         &self,
         stream: &RendererWorld,
         ledger: &mut crate::ownership::PresentationLedger,
         pipelines: &mut WorldPipelines,
-        parent: &mut crate::ownership::renderer_pending::PipelineContinuation,
+        parent: Option<&mut crate::ownership::renderer_pending::PipelineContinuation>,
         mesh: &Handle<Mesh>,
         shadow: bool,
     ) -> Result<Option<PipelineTicket>, ReferenceError> {
         match self {
-            Self::Primary(h) => {
-                pipelines.request_continuation(stream, ledger, parent, mesh, h, false)
-            }
-            Self::Specular(h) => {
-                pipelines.request_continuation(stream, ledger, parent, mesh, h, false)
-            }
-            Self::Impostor(h) => {
-                pipelines.request_continuation(stream, ledger, parent, mesh, h, shadow)
-            }
-            Self::Grass(h) => {
-                pipelines.request_continuation(stream, ledger, parent, mesh, h, shadow)
-            }
+            Self::Primary(h) => pipelines.request(stream, ledger, parent, mesh, h, false),
+            Self::Specular(h) => pipelines.request(stream, ledger, parent, mesh, h, false),
+            Self::Impostor(h) => pipelines.request(stream, ledger, parent, mesh, h, shadow),
+            Self::Grass(h) => pipelines.request(stream, ledger, parent, mesh, h, shadow),
         }
     }
 }

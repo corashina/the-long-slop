@@ -86,6 +86,8 @@ struct Renderer {
     mesh: Handle<Mesh>,
     binding: RendererMaterial,
     ticket: Option<PipelineTicket>,
+    /// A changed condition material that waits for its pipelines.
+    pending: Option<MaterialVariant>,
     shadow: bool,
     lod_state: Option<(bool, f32)>,
     // The static node chain of the renderer is active. Spawned nodes carry their own visibility.
@@ -432,7 +434,7 @@ impl SourceInstances {
             commands.entity(instance.root).despawn();
             for renderer in instance.renderers {
                 materials.release(renderer.binding);
-                for variant in renderer.variants {
+                for variant in renderer.variants.into_iter().chain(renderer.pending) {
                     materials.release(variant.binding);
                 }
             }
@@ -547,26 +549,30 @@ impl SourceInstances {
         view: GrassView,
     ) -> Result<(), ReferenceError> {
         self.rebase(stream.origin, commands);
+        let required_ready = stream.required_ready();
+        // Descriptors are requested only for these placements. See `request_descriptors`.
+        let selectable = |p: &crate::world::Placement| {
+            stream.contents_initialized(&p.id)
+                && (stream.structure_required(&p.id)
+                    || stream.structure_replay_required(&p.id)
+                    || required_ready)
+        };
+        // A new required structure clears required_ready. A pick that is not selectable then
+        // never gets its descriptor and would block the required structure.
         if self.pending.as_ref().is_some_and(|p| {
-            !stream
-                .pending_structures()
-                .iter()
-                .any(|wanted| wanted.id == p.id)
+            !selectable(p)
+                || !stream
+                    .pending_structures()
+                    .iter()
+                    .any(|wanted| wanted.id == p.id)
         }) {
             self.pending = None;
         }
         if self.pending.is_none() {
-            let required_ready = stream.required_ready();
             self.pending = stream
                 .pending_structures()
                 .iter()
-                .filter(|p| {
-                    stream.contents_initialized(&p.id)
-                        && (stream.structure_required(&p.id)
-                            || stream.structure_replay_required(&p.id)
-                            || required_ready)
-                        && !self.instances.iter().any(|i| i.placement.id == p.id)
-                })
+                .filter(|p| selectable(p) && !self.instances.iter().any(|i| i.placement.id == p.id))
                 .min_by(|a, b| {
                     stream
                         .focus_distance_squared(a.pose.position)
@@ -989,6 +995,7 @@ impl SourceInstances {
                                             mesh,
                                             binding,
                                             ticket: None,
+                                            pending: None,
                                             lod_state: None,
                                             active: active_nodes[source_index],
                                             shadow: shadow != 0,
@@ -1205,6 +1212,7 @@ impl SourceInstances {
                                         mesh,
                                         binding,
                                         ticket: None,
+                                        pending: None,
                                         lod_state: None,
                                         active: chain_active,
                                         shadow: shadow != 0,
@@ -1335,7 +1343,7 @@ impl SourceInstances {
                         stream,
                         ledger,
                         pipelines,
-                        instance.continuation.as_mut().unwrap(),
+                        instance.continuation.as_mut(),
                         &renderer.mesh,
                         renderer.shadow,
                     )?;
@@ -1348,7 +1356,7 @@ impl SourceInstances {
                             stream,
                             ledger,
                             pipelines,
-                            instance.continuation.as_mut().unwrap(),
+                            instance.continuation.as_mut(),
                             &renderer.mesh,
                             renderer.shadow,
                         )?;
@@ -1385,6 +1393,8 @@ impl SourceInstances {
         materials: &mut InstanceMaterials,
         screens: &crate::presentation::computer::ComputerScreens,
         ledger: &mut PresentationLedger,
+        stream: Option<&RendererWorld>,
+        pipelines: &mut WorldPipelines,
     ) -> Result<(), ReferenceError> {
         use simulation::boundary::{NodePoseRow, StructureRow};
         let origin = crate::world::WorldOrigin {
@@ -1639,65 +1649,104 @@ impl SourceInstances {
                         .iter()
                         .any(|v| v.source.as_ref() == selected)
                 {
-                    let initial = selected.and_then(|source| {
-                        super::instance_materials::source_primary(reference, prototype, source)
-                    });
-                    // The new material was not admitted with the instance. Admit it first.
-                    let admitted = materials.admit_binding(
-                        ledger,
-                        reference,
-                        prototype,
-                        &rebind.primitive,
-                        initial,
-                        selected,
-                    )?;
-                    material_pending |= !admitted;
-                    let row = matches!(renderer.target, Target::Row { .. });
-                    if admitted
-                        && let Some(mut binding) = materials.bind(
-                            instance.session,
+                    if renderer
+                        .pending
+                        .as_ref()
+                        .is_some_and(|p| p.source.as_ref() != selected)
+                    {
+                        materials.release(renderer.pending.take().unwrap().binding);
+                    }
+                    if renderer.pending.is_none() {
+                        let initial = selected.and_then(|source| {
+                            super::instance_materials::source_primary(reference, prototype, source)
+                        });
+                        // The new material was not admitted with the instance. Admit it first.
+                        let admitted = materials.admit_binding(
+                            ledger,
+                            reference,
                             prototype,
                             &rebind.primitive,
-                            &rebind.record,
                             initial,
                             selected,
-                            rebind.layer,
-                            rebind.receive,
-                            rebind.reflected,
-                            rebind.source_position,
-                            Default::default(),
-                            row,
-                        )?
-                    {
-                        match &mut renderer.target {
-                            Target::Entity(entity) => {
-                                if rebind.has_lod {
-                                    materials.make_private(&mut binding);
-                                }
-                                binding.visible.replace(*entity, commands);
-                                binding.apply_sort(*entity, commands);
-                                renderer.lod_state = None;
-                                self.lods.queue(&mut instance.lod, instance_index);
+                        )?;
+                        material_pending |= !admitted;
+                        let row = matches!(renderer.target, Target::Row { .. });
+                        if admitted
+                            && let Some(mut binding) = materials.bind(
+                                instance.session,
+                                prototype,
+                                &rebind.primitive,
+                                &rebind.record,
+                                initial,
+                                selected,
+                                rebind.layer,
+                                rebind.receive,
+                                rebind.reflected,
+                                rebind.source_position,
+                                Default::default(),
+                                row,
+                            )?
+                        {
+                            if rebind.has_lod && !row {
+                                materials.make_private(&mut binding);
                             }
-                            Target::Row { slot, .. } => {
-                                let mut data = self.props.rows()[*slot as usize];
-                                data.color = materials.row_color(&binding, color)?;
-                                self.props.free(*slot);
-                                *slot = self.props.alloc(
-                                    BatchKey {
-                                        mesh: renderer.mesh.id(),
-                                        material: batch_material(&binding),
-                                    },
-                                    data,
-                                );
-                            }
+                            renderer.pending = Some(MaterialVariant {
+                                source: selected.cloned(),
+                                binding,
+                                ticket: None,
+                            });
                         }
-                        materials.release(std::mem::replace(&mut renderer.binding, binding));
-                        renderer.ticket = None;
-                        renderer.material_source = selected.cloned();
-                        // The new material starts from its own color.
-                        renderer.color = None;
                     }
+                    // A compiling pipeline stops the whole view. The old material shows until the new one compiles.
+                    if let Some(pending) = &mut renderer.pending {
+                        PipelineTicket::retry(&mut pending.ticket);
+                        if pending.ticket.is_none()
+                            && let Some(stream) = stream
+                        {
+                            pending.ticket = pending.binding.visible.warm(
+                                stream,
+                                ledger,
+                                pipelines,
+                                None,
+                                &renderer.mesh,
+                                renderer.shadow,
+                            )?;
+                        }
+                        if ready(&pending.ticket)? {
+                            let MaterialVariant {
+                                binding, ticket, ..
+                            } = renderer.pending.take().unwrap();
+                            match &mut renderer.target {
+                                Target::Entity(entity) => {
+                                    binding.visible.replace(*entity, commands);
+                                    binding.apply_sort(*entity, commands);
+                                    renderer.lod_state = None;
+                                    self.lods.queue(&mut instance.lod, instance_index);
+                                }
+                                Target::Row { slot, .. } => {
+                                    let mut data = self.props.rows()[*slot as usize];
+                                    data.color = materials.row_color(&binding, color)?;
+                                    self.props.free(*slot);
+                                    *slot = self.props.alloc(
+                                        BatchKey {
+                                            mesh: renderer.mesh.id(),
+                                            material: batch_material(&binding),
+                                        },
+                                        data,
+                                    );
+                                }
+                            }
+                            materials.release(std::mem::replace(&mut renderer.binding, binding));
+                            renderer.ticket = ticket;
+                            renderer.material_source = selected.cloned();
+                            // The new material starts from its own color.
+                            renderer.color = None;
+                        } else {
+                            material_pending = true;
+                        }
+                    }
+                } else if let Some(pending) = renderer.pending.take() {
+                    materials.release(pending.binding);
                 }
                 if color != renderer.color {
                     if let Some(c) = color {
@@ -1907,7 +1956,7 @@ impl SourceInstances {
                     Target::Row { slot, .. } => self.props.free(slot),
                 }
                 materials.release(renderer.binding);
-                for variant in renderer.variants {
+                for variant in renderer.variants.into_iter().chain(renderer.pending) {
                     materials.release(variant.binding);
                 }
             }

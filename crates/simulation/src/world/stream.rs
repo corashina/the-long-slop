@@ -791,6 +791,10 @@ impl WorldStream {
         self.request.player
     }
 
+    /// Spawn context of later source spawns. Spawned content keeps its own context.
+    pub fn set_peaceful_enemies(&mut self, value: i32) {
+        self.contents.state.context.peaceful_enemies = value;
+    }
     pub fn mode(&self) -> super::GameMode {
         self.mode
     }
@@ -1092,12 +1096,39 @@ impl WorldStream {
         })
     }
 
+    /// Takes the other world use. Growth that fits only without unused renderer credit
+    /// waits: the old use stays, and the renderer gives back that credit.
     pub fn set_overlap(&mut self, overlap: WorldMetrics) -> Result<(), ReferenceError> {
         let previous = std::mem::replace(&mut self.overlap, overlap);
-        if let Err(error) = self.set_presentation_allocation(self.presentation) {
-            self.overlap = previous;
-            return Err(error);
+        let Err(error) = self.set_presentation_allocation(self.presentation) else {
+            return Ok(());
+        };
+        let used = self.presentation.zip(self.presentation_used, usize::min);
+        let mut fields = 0;
+        let credit = self.presentation_budgets(self.presentation);
+        for (index, (credit, used)) in credit
+            .iter()
+            .zip(self.presentation_budgets(used))
+            .enumerate()
+        {
+            if credit.used <= credit.limit {
+                continue;
+            }
+            let field = match index {
+                2 => Reclaim::PROTOTYPE_CPU,
+                5 => Reclaim::PENDING,
+                6 | 7 => Reclaim::STAGING,
+                9 => Reclaim::JOBS,
+                _ => 0,
+            };
+            if field == 0 || used.used > used.limit {
+                self.overlap = previous;
+                return Err(error);
+            }
+            fields |= field;
         }
+        self.overlap = previous;
+        self.wait_for_room(false, fields);
         Ok(())
     }
     pub(crate) fn set_presentation_allocation(
@@ -1418,6 +1449,18 @@ impl WorldStream {
         );
         self.wait_for_room(free > 0, Reclaim::JOBS);
         free
+    }
+    /// Where a wanted structure waits on its way to publication.
+    pub fn structure_audit(&self, placement: &Placement) -> serde_json::Value {
+        let source = &placement.prototype;
+        serde_json::json!({
+            "contents_initialized": self.contents.initialized(&placement.id),
+            "required": self.structure_required(&placement.id),
+            "held": self.holds_prototype(source),
+            "bound": self.prototype_holds.get(source).is_some_and(|bound| *bound),
+            "renderer_ready": self.ready_structures.contains(&placement.id),
+            "recipe": self.recipes.contains_key(source),
+        })
     }
     pub fn startup_job_audit(&self) -> serde_json::Value {
         serde_json::json!({
@@ -4184,6 +4227,9 @@ impl WorldStream {
         Ok(Some(pose))
     }
     /// The material cache admits the complete visible prototype before this recipe is bound.
+    /// Without room the recipe waits while the renderer holds unused prototype CPU credit.
+    /// The renderer gives it back and `bind_waiting_recipes` binds it. Without unused credit
+    /// the stream fails.
     fn bind_structure_recipe(&mut self, source: &SourceId) -> Result<(), ReferenceError> {
         if self.recipes.contains_key(source) {
             return Ok(());
@@ -4201,22 +4247,41 @@ impl WorldStream {
             .ok_or_else(|| ReferenceError("Missing structure prototype".into()))?;
         let bytes = super::StructureRecipe::reservation(prototype);
         let owner_bytes = super::metrics::map_insert_bytes(&self.recipes) + source.file.len();
-        if self
-            .metrics()
-            .prototype_cpu_bytes
-            .saturating_add(bytes)
-            .saturating_add(owner_bytes)
-            > PROTOTYPE_CPU
-        {
-            return Err(ReferenceError(
-                "Source collision recipe exceeds prototype CPU budget".into(),
-            ));
+        let used = self.metrics().prototype_cpu_bytes;
+        if used.saturating_add(bytes).saturating_add(owner_bytes) > PROTOTYPE_CPU {
+            if self.presentation.prototype_cpu > self.presentation_used.prototype_cpu {
+                self.wait_for_room(false, Reclaim::PROTOTYPE_CPU);
+                return Ok(());
+            }
+            return Err(ReferenceError(format!(
+                "Source collision recipe exceeds prototype CPU budget: recipe {} bytes, used {used} of {PROTOTYPE_CPU} bytes, renderer {} bytes, other world {} bytes",
+                bytes + owner_bytes,
+                self.presentation.prototype_cpu,
+                self.overlap.prototype_cpu_bytes,
+            )));
         }
         let recipe = super::StructureRecipe::new(&self.reference, prototype)?;
         self.recipes.insert(source.clone(), recipe);
         Ok(())
     }
 
+    /// Binds the recipes of renderer-ready structures that waited for prototype CPU room.
+    fn bind_waiting_recipes(&mut self) -> Result<(), ReferenceError> {
+        for index in 0..self.ready_structures.len() {
+            let id = &self.ready_structures[index];
+            let Some(source) = self
+                .wanted_structures
+                .iter()
+                .find(|p| &p.id == id)
+                .map(|p| &p.prototype)
+                .filter(|source| !self.recipes.contains_key(*source))
+            else {
+                continue;
+            };
+            self.bind_structure_recipe(&source.clone())?;
+        }
+        Ok(())
+    }
     /// True while the stream still wants the structure.
     pub fn structure_wanted(&self, request: WorldRequest, id: &super::GeneratedId) -> bool {
         request.session == self.request.session
@@ -4260,6 +4325,7 @@ impl WorldStream {
             return Ok(());
         }
         self.discard_fixed_decoration_changes();
+        self.bind_waiting_recipes()?;
         let request = self.request;
         let ready = |placement: &&Placement| {
             !self
