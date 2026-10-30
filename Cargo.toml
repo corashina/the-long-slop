@@ -33,6 +33,8 @@ bevy = { version = "=0.19.1", default-features = false, features = [
 ] }
 wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = "=0.4.79"
+# The frame limit wakes the Bevy event loop through its proxy. Same version as bevy_winit.
+winit = { version = "=0.30.13", default-features = false }
 gltf = { version = "=1.4.1", default-features = false, features = ["utils", "names", "extras"] }
 console_error_panic_hook = "=0.1.7"
 

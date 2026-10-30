@@ -263,7 +263,7 @@ extern "C" {
     /// Pending `PlayerSettings` JSON, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gamePlayerSettings)]
     pub fn game_player_settings() -> Option<String>;
-    /// Pending frame limit in frames per second, or none. 0 is no limit.
+    /// Pending frame limit in frames per second, or none. 0 is no limit. `web/frame-pacer.js` paces the frames.
     #[wasm_bindgen(js_namespace = window, js_name = gameFrameLimit)]
     pub fn game_frame_limit() -> Option<f32>;
     /// Pending `Outfit` JSON, or none.

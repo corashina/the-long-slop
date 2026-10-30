@@ -205,7 +205,7 @@ Prepare once:
 8. Help off hides the action hints and the item help.
 9. Always show health, food, water, bladder and bowel keep each bar visible.
 10. Sound volume 0 mutes the game. 50 is quieter.
-11. FPS limit 60 caps F3 near 60 while playing. Limit off lifts the cap. The menu runs at 30.
+11. FPS limit 60 holds F3 at 59 to 61 FPS while playing, also on a 144 Hz display. Limit off lifts the cap. The menu runs at 30.
 12. Fresh profile: autosave on, no autosave in a car on, auto-load off. Autosave off locks no autosave in a car.
 13. Game mode biome, start car and options stay after a page reload.
 14. Re-export first: the export now holds all 62 source actions. Controls lists them with 3 key cells, None and Reset, and a gap before Throttle.
