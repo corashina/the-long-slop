@@ -26,7 +26,8 @@ import {installReflections} from './reflections.js';
 installReflections(window,()=>localStorage,document.querySelector('#reflections'));
 import {installMirrors} from './mirrors.js';
 const mirrors=installMirrors(window,()=>localStorage,document.querySelector('#mirrors'),document.querySelector('#mirror-draw-distance'),document.querySelector('#mirror-draw-distance-value'));
-import {createSettings,installSettingsBridge} from './settings.js';
+import {createSettings,frameLimit,installSettingsBridge} from './settings.js';
+import {installFramePacer} from './frame-pacer.js';
 import {actionIndex,compileBindings,inputsField} from './bindings.js';
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
@@ -224,7 +225,7 @@ async function load(){
  const bytes=new Uint8Array(await response.arrayBuffer());
  status.textContent='Loading game code...';
  loading.stage(status.textContent);
- const [{default:init,run,manifest_shell,source_render_failure,source_render_audit,cpu_profile,request_thumbnail},module]=await code;
+ const [{default:init,run,manifest_shell,source_render_failure,source_render_audit,cpu_profile,request_thumbnail,wake_frame},module]=await code;
  const exports=await init({module_or_path:module});wasmMemory=exports.memory;renderFailure=source_render_failure;renderAudit=source_render_audit;
  rustCpuProfile=cpu_profile;if(startupCpuProfile)rustCpuProfile(true);
  window.gameThumbnailFrame=()=>thumbnail.frame();thumbnail.connect(request_thumbnail);
@@ -237,6 +238,7 @@ async function load(){
  installStartCar(window,document.querySelector('#start-car'),manifest.world.start_cars,settings);
  const gameOptions=installGameOptions(window,{peaceful:document.querySelector('#peaceful'),survival:document.querySelector('#survival-mode'),homesick:document.querySelector('#homesick')},settings,options=>survival?.setSurvival(options.survival));
  installSettingsBridge(window,settings,()=>menu?.model.state==='playing',actions);
+ installFramePacer(f=>requestAnimationFrame(f),()=>frameLimit(settings.values,menu?.model.state==='playing'),wake_frame);
  const autosaveToggles=v=>{toggles.autosave=v.BAutoSave;toggles.inCar=!v.BDisableAutoSaveInCar;};
  autosaveToggles(settings.values);settings.listen(autosaveToggles);
  const outfit=installOutfit(window,()=>localStorage,manifest.clothing.characters);

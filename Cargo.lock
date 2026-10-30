@@ -4492,6 +4492,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wgpu",
+ "winit",
 ]
 
 [[package]]

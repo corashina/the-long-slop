@@ -1,4 +1,5 @@
 pub(crate) use simulation::cpu_profile;
+mod frame_limit;
 mod performance;
 pub(crate) mod save;
 mod sim_link;
@@ -199,7 +200,8 @@ pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
         })
         .insert_resource(ClearColor(Color::BLACK))
         .init_resource::<crate::render_scale::SceneScaleSetting>()
-        .add_systems(PreUpdate, (update_scene_scale, update_frame_limit))
+        .add_systems(Startup, frame_limit::keep_proxy)
+        .add_systems(PreUpdate, (update_scene_scale, frame_limit::update))
         .init_resource::<presentation::shadow_quality::ShadowQuality>()
         .add_systems(PreUpdate, presentation::shadow_quality::poll)
         .add_plugins(presentation::source_io::SourceIoPlugin::new(
@@ -374,25 +376,6 @@ fn setup(
         drive.startup.far_plane,
         *antialiasing,
     );
-}
-
-/// Source `Application.targetFrameRate`: timed updates at the limit, or every browser frame.
-fn update_frame_limit(mut winit: ResMut<bevy::winit::WinitSettings>) {
-    let Some(limit) = game_frame_limit() else {
-        return;
-    };
-    let mode = if limit > 0. {
-        bevy::winit::UpdateMode::Reactive {
-            wait: std::time::Duration::from_secs_f32(1. / limit),
-            react_to_device_events: false,
-            react_to_user_events: false,
-            react_to_window_events: false,
-        }
-    } else {
-        bevy::winit::UpdateMode::Continuous
-    };
-    winit.focused_mode = mode;
-    winit.unfocused_mode = mode;
 }
 
 fn update_scene_scale(
