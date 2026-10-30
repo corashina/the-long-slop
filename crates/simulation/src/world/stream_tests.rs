@@ -4000,6 +4000,65 @@ fn g08_frame(
     let view = run.area.player.view(&run.physics).head_pose;
     run.advance_inventory_frame(reference, input, dt, view)
 }
+/// PB13: a short Tab tap on foot puts the carried sunglasses on.
+#[test]
+#[ignore = "requires the installed source export"]
+fn tab_tap_puts_on_carried_sunglasses() {
+    use crate::{
+        interaction::items::ItemLocation,
+        simulation::{FIXED_DT, FrameInput, keys},
+    };
+    let reference = reference();
+    let mut run = g08_ready(&reference);
+    let glasses = reference
+        .clothing
+        .wearables
+        .iter()
+        .find(|w| !w.lenses.is_empty())
+        .unwrap();
+    let prototype = reference
+        .item_prototypes
+        .iter()
+        .position(|p| p.id == glasses.prototype)
+        .unwrap();
+    let pose = run.area.player.body_pose(&run.physics);
+    let item = crate::starting_area::spawned::spawn_prototype(
+        &reference,
+        &mut run.area,
+        &mut run.physics,
+        prototype,
+        pose,
+    )
+    .unwrap()[0];
+    g08_pickup(&mut run, item);
+    assert!(!run.area.player.seated());
+    let tap = [
+        FrameInput {
+            pressed: keys::RECENTER,
+            held: keys::RECENTER,
+            ..Default::default()
+        },
+        FrameInput {
+            held: keys::RECENTER,
+            ..Default::default()
+        },
+        FrameInput {
+            released: keys::RECENTER,
+            ..Default::default()
+        },
+    ];
+    for input in tap {
+        let frame = g08_frame(&mut run, &reference, input, FIXED_DT);
+        let mut pending = FrameInput::default();
+        frame.merge_fixed_input(&mut pending);
+        run.step(&reference, pending);
+    }
+    assert_eq!(run.area.interaction.held(), None);
+    assert!(matches!(
+        run.area.items.get(item).unwrap().location,
+        ItemLocation::Worn(_)
+    ));
+}
 #[test]
 #[ignore = "requires the installed source export"]
 fn g08_frame_combined_input_and_cancellation() {
