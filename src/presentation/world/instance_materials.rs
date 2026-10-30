@@ -170,6 +170,14 @@ impl InstanceMaterials<'_> {
                 .iter()
                 .find(|m| m.source == *id)
                 .ok_or_else(|| ReferenceError("Missing generated material record".into()))?;
+            // Admission checked readiness. A texture that is not ready here waits for a later frame.
+            if !self.cache.world_textures.ready(id) {
+                warn!(
+                    "Source texture not ready at bind: {}:{}",
+                    id.file, id.path_id
+                );
+                return Ok(None);
+            }
             match record.shader.name.as_str() {
                 "Stix Games/Grass" => InstanceMaterial::Grass(
                     self.grass
