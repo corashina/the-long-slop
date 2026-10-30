@@ -514,8 +514,8 @@ pub struct HudBlock {
     pub assists: u32,
     /// Steer, throttle, brake, clutch, handbrake.
     pub controls: [f32; 5],
-    /// Keeps the block free of padding.
-    pub pad: u32,
+    /// Source `postprocesscontrol.h.root` body speed: the seat owner, else the player.
+    pub view_speed_kmh: f32,
 }
 
 impl HudBlock {

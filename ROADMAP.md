@@ -34,7 +34,6 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | X06a | Live mirrors | L | Car mirror cameras render to textures. Only the 5 nearest run. FOV and far plane follow distance. Mirrors toggle and Mirror draw distance slider. |
 | X06b | Lamp shadows | L | Point and spot lights with a shadow mode cast shadows. |
 | X06c | Live reflection probes | M | Only 1 probe is live. Make every building and car probe live, with the 5 s disable distance check and the Reflections toggle. |
-| X06e | Motion blur | M | Uses the motion target of `motion_vectors.rs`. Shutter angle follows car speed. Off where the source turns it off. |
 | X06f | Depth of field and binocular lens | M | Main DoF with focus ray, night clamp and Dof toggle. Binocular DoF, lens distortion and chromatic aberration. |
 | X06g | Heat haze and LUT options | M | Heat haze pass weighted by temperature, old particle heat haze, LUT option (Default, C64, Sepia), grayscale. |
 
