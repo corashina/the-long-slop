@@ -188,6 +188,8 @@ pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
         .insert_resource(ClearColor(Color::BLACK))
         .init_resource::<crate::render_scale::SceneScaleSetting>()
         .add_systems(PreUpdate, update_scene_scale)
+        .init_resource::<presentation::shadow_quality::ShadowQuality>()
+        .add_systems(PreUpdate, presentation::shadow_quality::poll)
         .add_plugins(presentation::source_io::SourceIoPlugin::new(
             reference.content_base.clone(),
             Arc::clone(&reference.file_catalog),
@@ -359,7 +361,7 @@ fn update_scene_scale(
     mut scale: ResMut<crate::render_scale::SceneScaleSetting>,
     status: Res<presentation::readiness::RendererStateHandle>,
 ) {
-    match crate::render_scale::SceneScale::from_factor(game_scene_scale()) {
+    match crate::render_scale::SceneScale::from_percent(game_scene_scale()) {
         Ok(value) => {
             if scale.0 != value {
                 scale.0 = value;

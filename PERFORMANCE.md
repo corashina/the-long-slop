@@ -18,6 +18,7 @@ Add only items that increase render FPS or remove hitches. Remove an item when i
 - Physics steps at 50 Hz, at most 2 steps per frame (`STEP_BUDGET` in `crates/simulation/src/simulation.rs`).
 - Terrain tiles and grass meshes are built in their own workers.
 - WebGPU is the only renderer. MSAA is 4x. The "Antialiasing" setting turns it off after a reload (`src/presentation/antialiasing.rs`). No TAA, motion blur or camera-depth pass.
+- Display settings for weak GPUs, default at full quality: scene resolution 100% to 50% (`render_scale.rs`), "Shadows" high, medium, low (world view atlas side halved per step, `shadow_quality.rs`), "Ambient occlusion" on or off (`ambient_occlusion.rs`), "Grass" high, medium, low (blade spacing and fade distance, after a reload, `materials/grass/settings.rs`).
 - World props draw through the own GPU path: compute cull and indirect draws (`src/presentation/prop_draws.rs`). Each view pass runs its prop draws as one render bundle.
 - Static draws use render bundles (`src/presentation/render_bundles.rs`). A bundle records again only when its commands change. In the camera pass, unskinned meshes without morph targets run as one bundle per view (`static_draws.rs`); skinned meshes draw directly. The prop draws of each pass and cascade run as bundles.
 - Shadow cascades 0 and 1 render each frame, 2 and 3 every 2nd and 4th frame (`crates/simulation/src/reference/shadow_cadence.rs`).
@@ -34,17 +35,6 @@ Impact is an estimate from the code. No item has F3 numbers yet.
 | --- | --- | --- | --- | --- |
 | 2 | Skip unchanged item visuals | S | Low | The renderer still does a pose lookup and interpolation for every item visual each frame (`src/presentation/reference.rs`, `spawned.rs`). Use the changed pose rows to skip the rest. |
 | 3 | Reuse static shadow cascades | M | Medium if shadow bound | Skip a cascade when its fit and its casters did not change. Can use `DrawBundle` and `render_filtered` for the caster phase. |
-
-### Optional quality settings
-
-The default stays as now. Each item adds one menu option.
-
-| # | Item | Size | Impact | Notes |
-| --- | --- | --- | --- | --- |
-| 5 | More scene scale steps or auto scale | S-M | High if GPU bound | Only 100% and 75% exist (`crates/simulation/src/render_scale.rs`). |
-| 6 | Shadow atlas size option | S | Medium-high if GPU bound | 4096x4096 at 1080p and above (`source_atlas_size`). |
-| 8 | AO quality option | M | Medium on weak GPUs | Multi-scale AO at full resolution. |
-| 9 | Grass density and distance option | S | Medium in grass areas | |
 
 Rejected: async compute, bindless, Hi-Z occlusion, f16, subgroups, GPU grass, own QueryBounds BVH removal.
 

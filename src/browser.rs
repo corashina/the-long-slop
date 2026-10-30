@@ -53,7 +53,10 @@ extern "C" {
     pub fn grass_dispose(this: &GrassTransport);
 
     #[wasm_bindgen(js_namespace = window, js_name = gameSceneScale)]
-    pub fn game_scene_scale() -> f32;
+    pub fn game_scene_scale() -> u32;
+    /// "Shadows" setting: 0 high, 1 medium, 2 low.
+    #[wasm_bindgen(js_namespace = window, js_name = gameShadowQuality)]
+    pub fn game_shadow_quality() -> u32;
     #[wasm_bindgen(js_name = gameAudioError)]
     pub fn game_audio_error(message: &str);
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioSurvival)]
@@ -255,6 +258,12 @@ extern "C" {
     /// "Antialiasing" setting at page load.
     #[wasm_bindgen(js_namespace = window, js_name = gameAntialiasing)]
     pub fn game_antialiasing() -> bool;
+    /// "Grass" setting at page load: 0 high, 1 medium, 2 low.
+    #[wasm_bindgen(js_namespace = window, js_name = gameGrassQuality)]
+    pub fn game_grass_quality() -> u32;
+    /// Pending "Ambient occlusion" setting, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameAmbientOcclusion)]
+    pub fn game_ambient_occlusion() -> Option<bool>;
     /// Pending "Sunglasses effects" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameSunglassesEffects)]
     pub fn game_sunglasses_effects() -> Option<bool>;

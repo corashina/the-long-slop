@@ -1,11 +1,17 @@
 import {installSceneResolution} from './scene-resolution.js';
 installSceneResolution(window,document.querySelector('#scene-resolution'));
+import {installShadowQuality} from './shadow-quality.js';
+installShadowQuality(window,()=>localStorage,document.querySelector('#shadow-quality'));
+import {installGrassQuality} from './grass-quality.js';
+installGrassQuality(window,()=>localStorage,document.querySelector('#grass-quality'));
 import {installGameMode,installStartCar} from './game-mode.js';
 installGameMode(window,document.querySelector('#biome'));
 import {installSunglassesEffects} from './sunglasses.js';
 installSunglassesEffects(window,()=>localStorage,document.querySelector('#sunglasses-effects'));
 import {installAntialiasing} from './antialiasing.js';
 installAntialiasing(window,()=>localStorage,document.querySelector('#antialiasing'));
+import {installAmbientOcclusion} from './ambient-occlusion.js';
+installAmbientOcclusion(window,()=>localStorage,document.querySelector('#ambient-occlusion'));
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
 import {manifestStamp,createSaveStorage,AUTOSAVE} from './save-storage.js';

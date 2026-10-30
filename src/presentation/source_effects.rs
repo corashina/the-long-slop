@@ -32,12 +32,14 @@ struct EffectInput {
     dead_weight: f32,
     glasses: Option<u32>,
     binoculars: bool,
+    ambient_occlusion: bool,
 }
 fn snapshot_input(
     frame: Res<SourceViewFrame>,
     assets: Option<Res<LightingAssets>>,
     sim: Res<super::sim_frame::SimFrameResource>,
     effects: Res<super::sunglasses::SunglassesEffects>,
+    occlusion: Res<super::ambient_occlusion::AmbientOcclusion>,
     mut input: ResMut<EffectInput>,
 ) {
     if input.scene != frame.scene {
@@ -46,6 +48,7 @@ fn snapshot_input(
             ..default()
         };
     }
+    input.ambient_occlusion = occlusion.0;
     input.frame = 0;
     let Some(assets) = assets else { return };
     if !assets.loaded || frame.views[0].is_none() {
@@ -127,8 +130,12 @@ impl SourceEffects {
 pub fn install(app: &mut App) {
     app.init_resource::<EffectInput>()
         .init_resource::<super::sunglasses::SunglassesEffects>()
+        .init_resource::<super::ambient_occlusion::AmbientOcclusion>()
         .add_plugins(ExtractResourcePlugin::<EffectInput>::default())
-        .add_systems(Update, super::sunglasses::poll)
+        .add_systems(
+            Update,
+            (super::sunglasses::poll, super::ambient_occlusion::poll),
+        )
         .add_systems(
             PostUpdate,
             snapshot_input.after(super::view_frame::snapshot),
@@ -323,6 +330,7 @@ fn encode_ao(
     view: ViewQuery<(&SourceSurfaceView, &SurfaceViewTargets)>,
     mut effects: ResMut<SourceEffects>,
     frame: Res<SourceViewFrame>,
+    input: Res<EffectInput>,
     scene: Res<SourceSceneLighting>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
@@ -332,6 +340,12 @@ fn encode_ao(
 ) {
     let (view, targets) = view.into_inner();
     if view.index != 0 || status.failure().is_some() {
+        return;
+    }
+    // Off: no AO passes. Opaque and transparent passes already resolved the color.
+    if !input.ambient_occlusion {
+        effects.audit.ao_frame = frame.frame;
+        effects.audit.ao_token = frame.main_token;
         return;
     }
     let (Some(snapshot), Some(scene), Some(storage)) =
