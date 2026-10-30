@@ -75,10 +75,10 @@ test('default_name_uses_local_yy_MM_dd_HHmm',()=>{
  assert.equal(defaultName(new Date(2026,0,5,7,3)),'26_01_05_0703');
 });
 
-test('schema_5_rejection_preserves_stored_bytes',async()=>{
+test('load_reloads_with_the_name_and_preserves_stored_bytes',async()=>{
  const {createSaveSession}=await import('../../web/save-session.js');
  const f=fake(); await f.storage.write('a',{...payload,schema_version:5},entry('a')); const stored=await f.storage.read('a');
- const before=JSON.stringify(stored); let commits=0;
- const session=createSaveSession({drawDistance:()=>2500,storage:{read:async()=>stored,write:async()=>{throw new Error('Unexpected write');}},runtime:{prepare:async()=>{throw new Error('Schema version');},commit:async()=>{commits++;},discard:()=>{}}});
- await assert.rejects(session.load('a'),/Schema version/); assert.equal(JSON.stringify(stored),before); assert.equal(commits,0);
+ const before=JSON.stringify(stored),reloads=[];
+ const session=createSaveSession({drawDistance:()=>2500,reload:async name=>{reloads.push(name);},storage:{read:async()=>stored,write:async()=>{throw new Error('Unexpected write');}},runtime:{}});
+ await session.load('a'); assert.equal(JSON.stringify(stored),before); assert.deepEqual(reloads,['a']);
 });

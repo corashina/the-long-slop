@@ -232,6 +232,8 @@ pub struct SimInit {
     pub draw_distance: f32,
     /// SHA-256 of the manifest bytes. The saves carry it.
     pub manifest_sha256: String,
+    /// JSON of the save that the simulation starts from. Empty: the garage of a new game.
+    pub save: Vec<u8>,
 }
 
 /// Renderer setup values of a new simulation.

@@ -21,6 +21,7 @@ pub fn start(
     start_car: i32,
     seed: i32,
     options: u32,
+    save: Vec<u8>,
 ) -> Result<Vec<u8>, JsValue> {
     console_error_panic_hook::set_once();
     let error = |e: &dyn std::fmt::Display| JsValue::from_str(&e.to_string());
@@ -31,10 +32,22 @@ pub fn start(
         options: GameOptions::from_bits(options),
         draw_distance,
         manifest_sha256,
+        save,
     };
     let (session, startup) = Session::new(reference, init).map_err(|e| error(&e))?;
     SESSION.with_borrow_mut(|s| *s = Some(session));
     Ok(encode_startup(&startup))
+}
+
+/// Why the save of `start` did not load. Empty: it loaded, or there was none.
+#[wasm_bindgen]
+pub fn load_error() -> String {
+    SESSION.with_borrow(|s| {
+        s.as_ref()
+            .and_then(Session::load_error)
+            .unwrap_or_default()
+            .to_owned()
+    })
 }
 
 /// Runs one encoded command. Returns the encoded frame.

@@ -6,9 +6,9 @@ const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});retur
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 async function record(payload){const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(payload)));return {version:1,payload,checksum:Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('')};}
 function setup(overrides={}){
- const calls={commit:[],discard:[],write:[],status:[],read:[],remove:[]};const runtime={capture:async()=>({save:{schema_version:4},summary:{seed:1,driven_km:0,build_id:1}}),prepare:async()=>7,commit:async(token,onDispatch)=>{onDispatch();calls.commit.push(token);},discard:token=>calls.discard.push(token),prepareNewGame:async()=>8,...overrides.runtime};
+ const calls={commit:[],discard:[],write:[],status:[],read:[],remove:[],reload:[]};const runtime={capture:async()=>({save:{schema_version:4},summary:{seed:1,driven_km:0,build_id:1}}),prepare:async()=>7,commit:async(token,onDispatch)=>{onDispatch();calls.commit.push(token);},discard:token=>calls.discard.push(token),prepareNewGame:async()=>8,...overrides.runtime};
  const storage={list:async()=>({saves:[],autosave:null,last:'a'}),read:async name=>{calls.read.push(name);return await record({schema_version:4});},remove:async name=>{calls.remove.push(name);},write:async(name,save,entry)=>{calls.write.push({name,save,entry});},...overrides.storage};
- const session=createSaveSession({runtime,storage,drawDistance:()=>2500,onStatus:status=>calls.status.push(status)});return {calls,session};
+ const session=createSaveSession({runtime,storage,drawDistance:()=>2500,reload:async name=>{calls.reload.push(name);},onStatus:status=>calls.status.push(status)});return {calls,session};
 }
 test('canceled_preparation_discards_stale_candidate_without_commit',async()=>{
  const candidate=deferred();const {session,calls}=setup({runtime:{prepareNewGame:()=>candidate.promise}});const operation=session.newGame();session.cancel();assert.equal(session.pending,false);candidate.resolve(11);await operation;assert.deepEqual(calls.discard,[11]);assert.equal(calls.commit.length,0);
@@ -48,7 +48,7 @@ test('load_last_requires_matching_build',async()=>{
  const list={saves:[{name:'a',version:1}],autosave:{name:'autosave',version:2},last:'autosave'};
  const {session,calls}=setup({storage:{list:async()=>list}});
  assert.equal(canLoadLast(list,1),false);await assert.rejects(session.loadLast(1),/No saved game/);assert.equal(calls.read.length,0);
- assert.equal(canLoadLast(list,2),true);await session.loadLast(2);assert.deepEqual(calls.read,['autosave']);assert.deepEqual(calls.commit,[7]);
+ assert.equal(canLoadLast(list,2),true);await session.loadLast(2);assert.deepEqual(calls.read,['autosave']);assert.deepEqual(calls.reload,['autosave']);assert.equal(calls.commit.length,0);
 });
 test('remove_deletes_named_save',async()=>{
  const {session,calls}=setup();await session.remove('a');assert.deepEqual(calls.remove,['a']);assert.equal(session.pending,false);assert.equal(calls.status.at(-1).operation,'remove');
