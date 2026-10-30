@@ -50,11 +50,15 @@ Not planned: multiplayer, VR, stereo 3D, mod events, Steam features, developer t
 
 Run these checks on Tomasz's PC in one run. Nothing below has passed yet.
 
-Known failures on master a01f1d84 (2026-10-30), fix before the next run:
+Known failures on master c0da737f (2026-10-30 browser retest), fix before the next run:
 
-- Save fails: "Corrupt save: Source first-call context". This blocks every save and load check.
-- Appearance stops the game from both menus: "missing field source_renderer".
-- Looking down shows a hollow shirt and floating hands.
+- Load fails: "Reconstruction failed: Asset CPU budget exceeded" (537378065 of 536870912 bytes). Load, Load last and New game after death all hit it. A second world build in one page seems to exceed the budget.
+- Save tiles are black: `web/save-screen.js` writes the tile name into the first `span`, which is `.save-thumb`, and deletes the thumbnail.
+- Appearance preview shows only the legs and shoes. The camera framing is wrong for Male and Female.
+- Looking down shows hollow shirt sleeves, floating hands and hollow pant legs. It also shows at normal pitch while walking.
+- Outside the Lada, E on the door handle does not open it. The HUD shows "[LMB]+[Mouse]: Move | [F]: Dismount".
+- The inspection pit traps the player: about 2 m deep, no way to climb out.
+- First page load can stall at the start of object loading with dependency staging full (7.7/7.8 MiB). A reload clears it.
 - Most ignored cargo tests fail: no start vehicle after `load_garage`, restore stays pending, stack overflows in debug.
 - `--test garage_parts`, `--test world_range`, `v03_bus_pool` and `w05_loot_matches_source_rules` match no test.
 
