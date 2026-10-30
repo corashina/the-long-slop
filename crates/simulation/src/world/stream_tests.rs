@@ -5522,3 +5522,32 @@ fn hazard_trigger_damages_player_until_death() {
     }
     assert!(run.needs_output().dead);
 }
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn overlap_growth_waits_for_unused_renderer_credit() {
+    let reference = reference();
+    let mut stream = WorldStream::new_default(&reference, 42).unwrap();
+    let free = PROTOTYPE_CPU - stream.metrics().prototype_cpu_bytes;
+    let mut credit = stream.presentation_credit();
+    credit.prototype_cpu = free;
+    stream.set_presentation_allocation(credit).unwrap();
+    stream.presentation_used.prototype_cpu = free - 8192;
+    let grown = WorldMetrics {
+        prototype_cpu_bytes: 4400,
+        ..Default::default()
+    };
+    stream.set_overlap(grown).unwrap();
+    assert_eq!(stream.overlap.prototype_cpu_bytes, 0);
+    assert!(stream.grant_presentation().reclaim.prototype_cpu);
+    credit.prototype_cpu = free - 8192;
+    stream.set_presentation_allocation(credit).unwrap();
+    stream.set_overlap(grown).unwrap();
+    assert_eq!(stream.overlap.prototype_cpu_bytes, 4400);
+    let full = WorldMetrics {
+        prototype_cpu_bytes: 8193,
+        ..Default::default()
+    };
+    assert!(stream.set_overlap(full).is_err());
+    assert_eq!(stream.overlap.prototype_cpu_bytes, 4400);
+}

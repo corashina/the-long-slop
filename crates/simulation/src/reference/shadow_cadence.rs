@@ -13,28 +13,52 @@ pub struct CascadeEpoch {
 pub struct CascadeInputs {
     pub epoch: CascadeEpoch,
     pub cascades: [ShadowCascade; 4],
+    /// Held shadow sun rotation, as bits.
+    pub sun: [u32; 4],
+    /// Caster content counter of each cascade. It changes when the tile content would change.
+    pub contents: [u64; 4],
     /// The atlas is new, or its last planned frame was not encoded.
     pub forced: bool,
 }
-/// The fit of each cascade at its last render. The atlas tile holds this fit.
+/// The fit of each cascade at its last render. The atlas tile holds this projection.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CascadeHistory {
     pub epoch: Option<CascadeEpoch>,
     pub cascades: [ShadowCascade; 4],
+    pub suns: [[u32; 4]; 4],
+    /// Caster content counter of each tile at its last draw.
+    pub contents: [u64; 4],
 }
 impl CascadeHistory {
     /// Keep the current fit for each rendered cascade. Returns true when a value changed.
-    pub fn commit(&mut self, render: [bool; 4], current: &CascadeInputs) -> bool {
+    pub fn commit(&mut self, plan: &CascadePlan, current: &CascadeInputs) -> bool {
         let mut changed = self.epoch != Some(current.epoch);
         self.epoch = Some(current.epoch);
         for (index, cascade) in current.cascades.iter().enumerate() {
-            if render[index] {
-                changed |= !same(&self.cascades[index], cascade);
+            if plan.render[index] {
+                changed |= !same(&self.cascades[index], cascade) || self.suns[index] != current.sun;
                 self.cascades[index] = *cascade;
+                self.suns[index] = current.sun;
+            }
+            if plan.draw[index] {
+                self.contents[index] = current.contents[index];
             }
         }
         changed
     }
+}
+/// `render`: the cascade takes the current fit. Else it keeps its last fit and tile.
+/// `draw`: the tile draws. A rendered cascade without a draw has the same projection and content.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CascadePlan {
+    pub render: [bool; 4],
+    pub draw: [bool; 4],
+}
+impl CascadePlan {
+    pub const ALL: Self = Self {
+        render: [true; 4],
+        draw: [true; 4],
+    };
 }
 fn same(a: &ShadowCascade, b: &ShadowCascade) -> bool {
     let words = |c: &ShadowCascade| {
@@ -50,9 +74,35 @@ fn same(a: &ShadowCascade, b: &ShadowCascade) -> bool {
     };
     words(a).eq(words(b))
 }
+/// Values that set the tile depth: the projection and the normal bias texel size.
+fn same_projection(a: &ShadowCascade, b: &ShadowCascade) -> bool {
+    let words = |c: &ShadowCascade| {
+        c.light_position
+            .into_iter()
+            .chain(c.width_height)
+            .chain(c.texel_size)
+            .chain([c.near, c.far])
+            .map(f32::to_bits)
+    };
+    words(a).eq(words(b))
+}
 /// Cascades 0 and 1 render each frame, cascade 2 on even frames, cascade 3 when frame % 4 == 1.
 /// All render after an epoch change, a forced refresh, or a cascade 2 or 3 sphere move above 25% of its radius.
-pub fn cascades_to_render(frame: u32, last: &CascadeHistory, current: &CascadeInputs) -> [bool; 4] {
+/// A rendered tile does not draw when its projection, sun and content did not change.
+pub fn plan_cascades(frame: u32, last: &CascadeHistory, current: &CascadeInputs) -> CascadePlan {
+    let render = cascades_to_render(frame, last, current);
+    if current.forced || last.epoch != Some(current.epoch) {
+        return CascadePlan::ALL;
+    }
+    let draw = std::array::from_fn(|i| {
+        render[i]
+            && (last.suns[i] != current.sun
+                || last.contents[i] != current.contents[i]
+                || !same_projection(&last.cascades[i], &current.cascades[i]))
+    });
+    CascadePlan { render, draw }
+}
+fn cascades_to_render(frame: u32, last: &CascadeHistory, current: &CascadeInputs) -> [bool; 4] {
     // Cascades 0 and 1 render each frame, so only the skipped cascades can hold a stale fit.
     let moved = last.cascades[2..]
         .iter()
@@ -67,4 +117,72 @@ pub fn cascades_to_render(frame: u32, last: &CascadeHistory, current: &CascadeIn
         return [true; 4];
     }
     [true, true, frame.is_multiple_of(2), frame % 4 == 1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn inputs(contents: [u64; 4]) -> CascadeInputs {
+        CascadeInputs {
+            epoch: CascadeEpoch {
+                session: 1,
+                scene: 1,
+                origin: [0; 3],
+                settings: [0; 6],
+            },
+            cascades: [ShadowCascade {
+                sphere_radius: 10.,
+                width_height: [20.; 2],
+                texel_size: [0.01; 2],
+                far: 20.,
+                ..ShadowCascade::default()
+            }; 4],
+            sun: [0, 0, 0, 1f32.to_bits()],
+            contents,
+            forced: false,
+        }
+    }
+
+    #[test]
+    fn unchanged_tiles_skip_the_draw() {
+        let mut history = CascadeHistory::default();
+        let first = inputs([0; 4]);
+        let plan = plan_cascades(0, &history, &first);
+        assert_eq!(plan, CascadePlan::ALL);
+        history.commit(&plan, &first);
+
+        // Same fit and content: rendered cascades keep the tile. A sphere move does not draw.
+        let mut same = inputs([0; 4]);
+        same.cascades[0].sphere_center = [0.5, 0., 0.];
+        let plan = plan_cascades(1, &history, &same);
+        assert_eq!(plan.render, [true, true, false, true]);
+        assert_eq!(plan.draw, [false; 4]);
+        history.commit(&plan, &same);
+
+        // A content change or a projection change draws only that cascade.
+        let mut next = inputs([0, 1, 0, 0]);
+        next.cascades[0].light_position = [0.1, 0., 0.];
+        let plan = plan_cascades(2, &history, &next);
+        assert_eq!(plan.draw, [true, true, false, false]);
+
+        // A content change of a stale cascade waits for its render, then draws.
+        let next = inputs([0, 0, 0, 1]);
+        assert_eq!(plan_cascades(2, &history, &next).draw, [false; 4]);
+        assert_eq!(
+            plan_cascades(1, &history, &next).draw,
+            [false, false, false, true]
+        );
+
+        // A sun step or a forced refresh draws.
+        let mut sun = inputs([0; 4]);
+        sun.sun[0] = 1;
+        assert_eq!(
+            plan_cascades(2, &history, &sun).draw,
+            [true, true, true, false]
+        );
+        let mut forced = inputs([0; 4]);
+        forced.forced = true;
+        assert_eq!(plan_cascades(2, &history, &forced), CascadePlan::ALL);
+    }
 }
