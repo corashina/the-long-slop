@@ -317,9 +317,12 @@ impl SaveSnapshot {
                 )?;
             }
         }
+        // The browser starts a new game on the PC date, so any calendar date is valid.
         let context = |c: SpawnContext| -> Result<(), SaveError> {
+            let [_, month, day] = c.date;
             data(
-                c.date == reference.world.spawn_context.date
+                (1..=12).contains(&month)
+                    && (1..=31).contains(&day)
                     && c.chance_bits.is_none_or(|v| f32::from_bits(v).is_finite()),
                 "Source first-call context",
             )
