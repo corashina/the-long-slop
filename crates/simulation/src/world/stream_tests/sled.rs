@@ -112,7 +112,7 @@ fn sled_slides_steers_and_keeps_its_seat() {
     );
     run.physics.refresh_queries();
     let mut driving = DrivingInput::new(
-        reference.driving.keyboard_steering_rate,
+        reference.settings.sliders.key_steer.value(),
         reference.driving.pedal_rate,
         DrivingSettings::defaults(&reference.driving),
     );

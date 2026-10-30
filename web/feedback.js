@@ -54,7 +54,16 @@ export class FeedbackState {
   return changed||radioChanged||actionsChanged||detailChanged;
  }
 }
-export function createFeedback(ui,manifest) {
+/** Source `mainscript.CrosshairColor` tint of the old crosshair, from the layer bits. */
+export function oldCrosshairColor(bits,colors){
+ if(bits&(3<<CROSSHAIR.E_SHIFT|3<<CROSSHAIR.ADJUST_SHIFT))return colors.e;
+ if(bits&(7<<CROSSHAIR.F_SHIFT|CROSSHAIR.CAN_PICKUP|CROSSHAIR.DISMOUNT))return colors.f;
+ if(bits&CROSSHAIR.MMB)return colors.mmb;
+ return colors.default;
+}
+const css=([r,g,b,a])=>`rgba(${r*255},${g*255},${b*255},${a})`;
+// `settings` is the settings store: `BHelp`, `BCrosshair`, `BOldCrosshair` and `FCrosshairScale`.
+export function createFeedback(ui,manifest,settings) {
  const state=new FeedbackState(),root=document.querySelector('#hud'),icon=document.querySelector('#crosshair'),fluid=document.querySelector('#fluid-text'),carry=document.querySelector('#carry-help'),notice=document.querySelector('#action-notice'),charge=document.querySelector('#throw-charge'),level=document.querySelector('#throw-level');
  const gear=document.querySelector('#driving-gear');let lastGear,wasSeated;
  const rows=[
@@ -109,8 +118,10 @@ export function createFeedback(ui,manifest) {
  const pickupChildren=['carrying-medium','carrying-heavy'].map(role=>{const n=document.createElement('img');n.alt='';n.src=ui.urls[ui.icons[role]];n.style.opacity=0;n.hidden=true;return n;});
  layers[2].after(...pickupChildren);
  layers[3].style.opacity=ui.layouts.reticle.image_color[3];
+ // Source GC and GC2: one sprite, tinted by the target and by the carried weight.
+ const old=['old-crosshair','old-crosshair-carry'].map(role=>{const n=document.createElement('div');n.className='old-crosshair';n.hidden=true;const url=ui.urls[ui.layouts[role].sprite];n.style.maskImage=n.style.webkitMaskImage=`url("${url}")`;icon.append(n);return n;});
  function showWeapon(){weapon.hidden=!(weaponIcon&&state.crosshair&CROSSHAIR.WEAPON);}
- let lastLayers=-1,lastWeight=-1,lastFluid='',lastNotice='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='',lastPrimary='',lastCrank='';
+ let lastLayers=-1,lastOld=-1,lastWeight=-1,lastFluid='',lastNotice='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='',lastPrimary='',lastCrank='';
  const translationHelp='[RMB]+[Mouse]: Move\n[Scroll]: Distance\n[Q]+[Scroll]: Posture';
  const rotationHelp='[RMB]+[Mouse]: Move\n[MMB]+[Mouse]: Rotate\n[RMB]+[MMB]+[Mouse]: Roll\n[Scroll]: Distance\n[Q]+[Scroll]: Posture';
  const counts=new Uint8Array(4);
@@ -126,6 +137,7 @@ export function createFeedback(ui,manifest) {
   const scale=applyLayout(icon,ui.layouts.reticle).scale;icon.style.left='50%';icon.style.top='50%';icon.style.width=icon.style.height='0';
   for(const [layer,[,width,height]] of layers.map((n,i)=>[n,crosshairLayers(0)[i]])){layer.style.width=width*scale+'px';layer.style.height=height*scale+'px';}
   for(const child of pickupChildren){child.style.width=layers[2].style.width;child.style.height=layers[2].style.height;}
+  old.forEach((n,i)=>{const [,,width,height]=ui.layouts[i?'old-crosshair-carry':'old-crosshair'].rect;n.style.width=width*scale+'px';n.style.height=height*scale+'px';});
   const fluidBox=applyLayout(fluid,ui.layouts.fluid);fluid.style.top=(fluidBox.y+fluidBox.height/2)+'px';fluid.style.height='auto';fluid.style.width='max-content';fluid.style.left='50%';
   const carryBox=applyLayout(carry,ui.layouts.carry);carry.style.left='auto';carry.style.right='8px';carry.style.width='max-content';carry.style.height='auto';carry.style.top='auto';carry.style.bottom=(innerHeight-carryBox.y-carryBox.height)+'px';
   notice.style.fontSize=ui.layouts.use.font_size*scale+'px';
@@ -133,7 +145,9 @@ export function createFeedback(ui,manifest) {
  }
  function paint(){
   root.hidden=!state.visible;
-  for(const r of rows)r.n.hidden=r.computer?!(state.computer&r.computer):r.prompt?!(state.prompts&r.prompt):!(state.actions&r.bit)||(r.bit===ACTION.DROP&&Boolean(state.actions&ACTION.THROW))||(r.bit===ACTION.SWITCH&&Boolean(state.actions&ACTION.PRIMARY_SWITCH))||(r.bit===ACTION.MOUNT&&Boolean(state.prompts&PROMPT.ATTACH));
+  const v=settings.values,help=v.BHelp;
+  // Source `BHelp` hides the prompts and the item help.
+  for(const r of rows)r.n.hidden=!help||(r.computer?!(state.computer&r.computer):r.prompt?!(state.prompts&r.prompt):!(state.actions&r.bit)||(r.bit===ACTION.DROP&&Boolean(state.actions&ACTION.THROW))||(r.bit===ACTION.SWITCH&&Boolean(state.actions&ACTION.PRIMARY_SWITCH))||(r.bit===ACTION.MOUNT&&Boolean(state.prompts&PROMPT.ATTACH)));
   const doorText=state.context===7?'[LMB]+[Mouse]: Move':'[LMB]+[Mouse]: Open/Close';
   if(doorText!==lastDoor){named.door.textContent=doorText;lastDoor=doorText;}
   const useText=state.context===10?(state.lmbUse&&!(state.actions&ACTION.HELD_SWITCH)?'[E] / [LMB]: Switch':'[E]: Switch'):'[E]: Open/Close';
@@ -150,8 +164,18 @@ export function createFeedback(ui,manifest) {
   placeRows();
   charge.hidden=!state.throwActive;const strength=Math.max(0,Math.min(1,state.throwCharge||0));
   if(strength!==lastCharge){level.value=strength;lastCharge=strength;}
-  carry.hidden=!state.carrying;const help=state.actions&ACTION.ROTATE?rotationHelp:translationHelp;
-  if(help!==lastCarry){carry.textContent=help;lastCarry=help;}
+  carry.hidden=!help||!state.carrying;const carryText=state.actions&ACTION.ROTATE?rotationHelp:translationHelp;
+  if(carryText!==lastCarry){carry.textContent=carryText;lastCarry=carryText;}
+  // Source `BCrosshair` hides every crosshair. `BOldCrosshair` swaps the layers for GC and GC2. TCrossHair scales both.
+  icon.hidden=!v.BCrosshair;icon.style.scale=String(v.FCrosshairScale);
+  for(const layer of layers)layer.style.visibility=v.BOldCrosshair?'hidden':'';
+  for(const child of pickupChildren)child.style.visibility=v.BOldCrosshair?'hidden':'';
+  const oldBits=v.BOldCrosshair?state.crosshair:-1;
+  if(oldBits!==lastOld){
+   lastOld=oldBits;old[0].hidden=oldBits<=0;old[1].hidden=oldBits<=0||!(oldBits&CROSSHAIR.PICKUP);
+   if(oldBits>0)old[0].style.backgroundColor=css(oldCrosshairColor(oldBits,ui.crosshair_colors));
+  }
+  if(!old[1].hidden){const w=state.weight;old[1].style.backgroundColor=css([(.5-(w-.5))*2,w*2,0,.5]);}
   if(state.crosshair!==lastLayers){lastLayers=state.crosshair;crosshairLayers(state.crosshair).forEach(([role],i)=>{const layer=layers[i];if(layer===weapon)return;layer.hidden=role===null;if(role!==null&&layer.dataset.role!==String(role)){layer.src=ui.urls[typeof role==='number'?role:ui.icons[role]];layer.dataset.role=role;}});for(const child of pickupChildren)child.hidden=layers[2].hidden;showWeapon();}
   if(state.weight!==lastWeight){lastWeight=state.weight;pickupWeightAlphas(state.weight).forEach((alpha,i)=>{pickupChildren[i].style.opacity=alpha;});}
   if(state.fluidText!==lastFluid){fluid.textContent=state.fluidText;lastFluid=state.fluidText;}fluid.hidden=!state.fluidText;
@@ -171,6 +195,7 @@ export function createFeedback(ui,manifest) {
   swap.hidden=!(r.progress>0);swap.value=Math.min(1,r.progress);
  }
  const key=event=>{if(event.code==='Backspace'&&!event.repeat&&state.active){event.preventDefault();state.toggle();paint();}};
+ settings.listen(()=>paint());
  window.addEventListener('keydown',key);window.addEventListener('resize',resize);resize();paint();
  return {state,inventory:updateInventory,weapon:setWeapon,drivingState(value,seated){if(value!==lastGear){gear.textContent='Gear: '+formatGear(value);lastGear=value;}if(seated!==wasSeated){gear.hidden=!seated;wasSeated=seated;}},update(record){if(state.update(record))paint();},setVisible(value){const before=state.visible;state.setVisible(value);if(before!==state.visible)paint();},dispose(){window.removeEventListener('keydown',key);window.removeEventListener('resize',resize);}};
 }

@@ -41,6 +41,8 @@ pub(crate) struct Drive {
     pub(crate) ready: bool,
     /// Mouse of commands that no step consumed yet.
     look: MouseLook,
+    /// `PlayerSettings::look` of the last browser settings.
+    look_scale: [f32; 2],
     /// Player camera of this frame, with the look of the latest mouse.
     view: VehiclePose,
     /// `view` position minus the current step camera position.
@@ -72,6 +74,8 @@ struct ManifestShell<'a> {
     source_hashes: &'a serde_json::value::RawValue,
     #[serde(borrow)]
     driving: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    settings: &'a serde_json::value::RawValue,
     #[serde(borrow)]
     ui: &'a serde_json::value::RawValue,
     #[serde(borrow)]
@@ -185,6 +189,7 @@ pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
             listener: None,
             ready: false,
             look: MouseLook::default(),
+            look_scale: simulation::reference::PlayerSettings::defaults(&reference.settings).look(),
             view_offset: [0.; 3],
             last_inventory: None,
             last_crosshair: None,
@@ -192,7 +197,7 @@ pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
         })
         .insert_resource(ClearColor(Color::BLACK))
         .init_resource::<crate::render_scale::SceneScaleSetting>()
-        .add_systems(PreUpdate, update_scene_scale)
+        .add_systems(PreUpdate, (update_scene_scale, update_frame_limit))
         .init_resource::<presentation::shadow_quality::ShadowQuality>()
         .add_systems(PreUpdate, presentation::shadow_quality::poll)
         .add_plugins(presentation::source_io::SourceIoPlugin::new(
@@ -364,6 +369,25 @@ fn setup(
         drive.startup.far_plane,
         *antialiasing,
     );
+}
+
+/// Source `Application.targetFrameRate`: timed updates at the limit, or every browser frame.
+fn update_frame_limit(mut winit: ResMut<bevy::winit::WinitSettings>) {
+    let Some(limit) = game_frame_limit() else {
+        return;
+    };
+    let mode = if limit > 0. {
+        bevy::winit::UpdateMode::Reactive {
+            wait: std::time::Duration::from_secs_f32(1. / limit),
+            react_to_device_events: false,
+            react_to_user_events: false,
+            react_to_window_events: false,
+        }
+    } else {
+        bevy::winit::UpdateMode::Continuous
+    };
+    winit.focused_mode = mode;
+    winit.unfocused_mode = mode;
 }
 
 fn update_scene_scale(
@@ -564,6 +588,20 @@ fn read_input(
         handbrake,
     );
     let actions = game_actions() & SimCommand::ACTIONS;
+    let hold = requests.pending();
+    // A pending save keeps the browser assists and settings for a later frame.
+    let player_settings = if hold {
+        None
+    } else {
+        game_player_settings()
+            .and_then(|settings| {
+                serde_json::from_str::<simulation::reference::PlayerSettings>(&settings).ok()
+            })
+            .filter(|settings| settings.valid(&reference.0.settings))
+    };
+    if let Some(settings) = player_settings {
+        drive.look_scale = settings.look();
+    }
     let held = game_keys();
     let player = game_player_keys();
     let mut input = FrameInput {
@@ -576,8 +614,8 @@ fn read_input(
         inventory_held: game_inventory_keys() as u8 & 15,
         inventory_released: (game_inventory_keys() >> 4) as u8 & 15,
         mouse: [
-            game_mouse_x() * reference.0.player.look_sensitivity[0],
-            game_mouse_y() * reference.0.player.look_sensitivity[1],
+            game_mouse_x() * drive.look_scale[0],
+            game_mouse_y() * drive.look_scale[1],
         ],
         drive_mouse: [game_mouse_x(), -game_mouse_y()],
         wheel: game_wheel(),
@@ -595,7 +633,6 @@ fn read_input(
         gamepad: crate::simulation::GamepadFrame::default(),
     };
     game_gamepad(&mut input.gamepad.axes, &mut input.gamepad.buttons);
-    let hold = requests.pending();
     // A pending save keeps the browser assists, settings and options for a later frame.
     let (assists, settings, options) = if hold {
         (None, None, None)
@@ -626,6 +663,7 @@ fn read_input(
         assists,
         settings,
         options,
+        player_settings,
         calendar: local_calendar(),
         measure: game_measure_requested(),
         world: std::mem::take(&mut drive.world),
