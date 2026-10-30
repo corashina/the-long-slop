@@ -1,4 +1,5 @@
 //! Main-view TAA jitter and camera motion history. Source `pplayermelle.TurnOn` enables TAA with antialiasing.
+//! Motion blur reads the same history without jitter.
 use super::view_frame::ViewSnapshot;
 use crate::reference::{postprocessing::TaaSettings, temporal::TaaSequence};
 use bevy::{ecs as bevy_ecs, prelude::*};
@@ -28,18 +29,19 @@ pub struct TemporalView {
     previous: Option<Previous>,
 }
 impl TemporalView {
-    /// Jitter the main raster projection and return the motion state of this frame.
+    /// Return the motion state of this frame. With TAA, jitter the main raster projection.
     pub fn advance(
         &mut self,
         view: &mut ViewSnapshot,
-        settings: &TaaSettings,
+        taa: Option<&TaaSettings>,
         origin: [f64; 3],
         revision: u32,
         scene: u32,
     ) -> MainMotion {
         let clip_from_world = view.raster_projection * view.view_from_world;
-        let pixels = self.sequence.advance(settings.jitter_spread);
-        let jitter = Vec2::from_array(pixels) / view.extent.as_vec2();
+        let jitter = taa.map_or(Vec2::ZERO, |settings| {
+            Vec2::from_array(self.sequence.advance(settings.jitter_spread)) / view.extent.as_vec2()
+        });
         view.raster_projection = jitter_clip(jitter) * view.raster_projection;
         let previous = self.previous.replace(Previous {
             clip_from_world,

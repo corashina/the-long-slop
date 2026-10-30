@@ -884,7 +884,9 @@ fn submitted(
             state.audit.first_token = state.audit.token;
         }
         acks.main_submitted(state.audit.token);
-        if THUMBNAIL.swap(false, Ordering::Relaxed) {
+        let thumbnail = THUMBNAIL_TOKEN.load(Ordering::Relaxed);
+        if thumbnail != 0 && state.audit.token >= thumbnail {
+            THUMBNAIL_TOKEN.store(0, Ordering::Relaxed);
             crate::browser::game_thumbnail_frame();
         }
         if crate::app::cpu_profile::enabled() {
@@ -1026,11 +1028,21 @@ struct SourceDiagnostics {
 static SOURCE_DIAGNOSTICS: OnceLock<SourceDiagnostics> = OnceLock::new();
 
 static THUMBNAIL: AtomicBool = AtomicBool::new(false);
+/// Token of the frame encoded for the thumbnail. 0 is none.
+static THUMBNAIL_TOKEN: AtomicU32 = AtomicU32::new(0);
 
-/// The canvas holds a frame only in the task that drew it, so the next presented frame calls back.
+/// The canvas holds a frame only in the task that drew it, so the thumbnail frame calls back when presented.
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub fn request_thumbnail() {
     THUMBNAIL.store(true, Ordering::Relaxed);
+}
+/// The next encoded main frame is the thumbnail. It has no motion blur.
+pub(crate) fn thumbnail_requested() -> bool {
+    THUMBNAIL.load(Ordering::Relaxed)
+}
+pub(crate) fn thumbnail_encoded(token: u32) {
+    THUMBNAIL.store(false, Ordering::Relaxed);
+    THUMBNAIL_TOKEN.store(token, Ordering::Relaxed);
 }
 
 /// Browser graphics failures use the same terminal state as native device errors.

@@ -18,6 +18,7 @@ pub mod light_dither;
 pub mod lighting;
 pub mod materials;
 pub mod mechanisms;
+pub mod motion_blur;
 pub mod motion_vectors;
 pub mod outfit;
 pub mod outfit_preview;

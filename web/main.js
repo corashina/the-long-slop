@@ -10,6 +10,8 @@ const seed=installSeed(window,document.querySelector('#seed'));
 import {installSunglassesEffects} from './sunglasses.js';
 const sunglasses=document.querySelector('#sunglasses-effects');
 installSunglassesEffects(window,()=>localStorage,sunglasses);
+import {installMotionBlur} from './motion-blur.js';
+installMotionBlur(window,()=>localStorage,document.querySelector('#motion-blur'));
 import {installAntialiasing} from './antialiasing.js';
 installAntialiasing(window,()=>localStorage,document.querySelector('#antialiasing'));
 import {installAmbientOcclusion} from './ambient-occlusion.js';
@@ -251,7 +253,7 @@ async function load(){
  const choose=(node,property,value,event)=>{if(node.disabled)return;node[property]=value;node.dispatchEvent(new Event(event));};
  const select=id=>document.querySelector(id);
  const resets={graphics:[()=>choose(sunglasses,'checked',true,'change'),()=>choose(sceneResolution,'value','100','change'),()=>choose(select('#shadow-quality'),'value','0','change'),
-  ()=>choose(select('#grass-quality'),'value','0','change'),()=>choose(select('#lamp-shadows'),'checked',true,'change'),()=>choose(select('#antialiasing'),'checked',true,'change'),()=>choose(select('#ambient-occlusion'),'checked',true,'change'),()=>slider.reset()],controls:[()=>drivingSettings.resetMouse()]};
+  ()=>choose(select('#grass-quality'),'value','0','change'),()=>choose(select('#motion-blur'),'checked',true,'change'),()=>choose(select('#lamp-shadows'),'checked',true,'change'),()=>choose(select('#antialiasing'),'checked',true,'change'),()=>choose(select('#ambient-occlusion'),'checked',true,'change'),()=>slider.reset()],controls:[()=>drivingSettings.resetMouse()]};
  menu=createMenu({canvas,appearance,settings,resets,defaultAssists:manifest.driving.default_assists,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,slider,audio,onNewGame:()=>seed.reroll(),onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  feedback=createFeedback(manifest.ui,manifest,settings);
  startup.end('interface');

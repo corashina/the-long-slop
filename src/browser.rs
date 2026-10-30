@@ -270,6 +270,9 @@ extern "C" {
     /// Pending "Ambient occlusion" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameAmbientOcclusion)]
     pub fn game_ambient_occlusion() -> Option<bool>;
+    /// Pending "Motion blur" setting, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameMotionBlur)]
+    pub fn game_motion_blur() -> Option<bool>;
     /// Pending "Sunglasses effects" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameSunglassesEffects)]
     pub fn game_sunglasses_effects() -> Option<bool>;
