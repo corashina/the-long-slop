@@ -104,8 +104,6 @@ Prepare once:
 
 ### World and terrain
 
-1. Check the Game mode button position on the start menu.
-2. Start a new game in each biome. Check terrain, props, roads, lamps, fog, sky and swapped materials.
 3. Load a Mixed save with Winter set. The world must load as winter.
 4. Check the winter color: colder view in Winter, changes at biome borders in Mixed. Check F3 in Mixed while the color grading rebakes.
 5. Sandstorms: spawn a storm near the player with a temporary hook (never commit it). Check sky, fog, light, sound, dust, wind on loose items, and that dust and wind stop inside buildings and cars. Check the F3 storm line. Save and load inside a storm.
@@ -179,30 +177,11 @@ Prepare once:
 
 1. Load, Load last and New game after death do not fail with "Asset CPU budget exceeded". Reload the page, then Load last from the start menu: the game starts, no "Source building metadata exceeds prototype CPU budget".
 2. Turn on "Load last save at start" and reload the page. The last save loads.
-3. Sleep, wake, save and load: the sleep hint stays off until the cooldown ends.
-
-### Game options
-
-1. Type a seed, start a new game, note the road. Start again with the same seed: the same road. Type `abc`: the field shows 2147483647.
-2. Peaceful on, then drive out: no big rabbit has evil eyes. No human monster spawns in new buildings.
 
 ### Settings
 
-1. Mouse sensitivity, X, Y and each Invert change the look. Scroll, item move and item rotate change carry, posture and slides.
-2. Key steer sensitivity changes the keyboard steering speed.
-3. Field of view on foot and in a car: walk, then sit in the Lada.
-4. Walk head bob off: the camera does not bob. Drive head bob off: the car camera does not bob.
 5. Crosshair off hides it. Old crosshair shows the source dot, tinted for E, F and MMB, with the carry bar. Crosshair scale changes its size.
-6. Help off hides the action hints and the item help.
-7. Always show health, food, water, bladder and bowel keep each bar visible.
-8. Sound volume 0 mutes the game. 50 is quieter.
 9. Fresh profile: FPS limit is off, and F3 follows the display refresh. FPS limit 60 on holds F3 at 59 to 61 FPS while playing, also on a 144 Hz display. The menu runs at 30.
-10. Rebind Move Forward to Up arrow: walk with Up arrow. W still gives throttle in the Lada. Rebind Throttle to T: T drives, W does not.
-11. Rebind Steer Left/Right, Brake, Toggle Handbrake, a gear and Inventory Slot 1: each new key works. The keys stay after a page reload.
-12. Look Up on a key looks up while held. Look Down set to None stops looking down with the mouse. Scroll Up on a key scrolls.
-13. Seated, hold J (key look) and press WASD: the view turns. Key look sensitivity changes the speed. While leaning, J does nothing.
-14. HUD hints show the bound keys: rebind Use to G, then aim at a door. Hide HUD follows its binding.
-15. Seated with the clutch held, the inventory keys select nothing while Inventory Slot 1 and Shift To 1 share a key name. Rebind one: they select again.
 
 ### Languages and help text
 
@@ -212,7 +191,6 @@ Prepare once:
 4. In game with Deutsch: action hints, tank texts (name, Liter, voll, percents and fluids), radio volume and AM/FM, and the session distance use the German words.
 5. Look at the dashboard of a world car: the help box shows the car set with the bound keys. Toggle Auto clutch, then Auto shift: the set changes.
 6. A bus shows the auto shift set whatever the assists are. A motorcycle shows the motorcycle auto shift set.
-7. Help off hides the help box. Rebind Ignition: the help box shows the new key.
 8. Compare the help box place and the line breaks with the original.
 
 ### Start menu figure
@@ -220,7 +198,6 @@ Prepare once:
 1. The start menu shows the figure in the menu camera view, under the menu art. It wears the Appearance outfit. Change the outfit: the figure follows.
 2. Move the mouse: the head turns toward it. Hands and feet stay at their rest goals.
 3. Click and hold the left button on the figure, then move: the head and right hand follow the mouse. The right button kicks with the left leg. Both buttons slide the body. Release: the figure returns to rest.
-4. The right button opens no context menu on the start menu.
 5. The figure is gone in the pause menu, Appearance and in game. F3 on the start menu: frame time near the previous run.
 6. Compare with the original menu: pose, place, head turn speed. Note the port choices: no idle clip, no menu scenery, gray background.
 
@@ -249,7 +226,6 @@ Prepare once:
 21. The dark lens (profile 0) dims the view by 2 stops.
 22. Bright highlights look untonemapped, like the original.
 23. Lenses with the flare flag hide the sun flare. Other lenses keep it.
-24. Turn off "Sunglasses effects" in Settings > Graphics: the tint goes away. The flare rule stays. Reload the page: the setting stays.
 25. Take the glasses off: the tint clears. Die with them on: the tint clears and the death effect fades in.
 26. Save and load with the glasses worn: the tint comes back. Read the console for a warning about more than one active lens.
 
@@ -305,7 +281,6 @@ Prepare once:
 
 1. Drop and throw food and cut food pieces. Each makes its hit sound.
 2. Eat each food. Crumbs, meat, turd and chocolate bits fall from the food. Smoke a cigarette: ash falls now and then.
-3. Stay up at night for a few nights. The horror sound plays for 5 to 15 s on the first night, then every 1 to 5 nights. It stops at day.
 4. New game between 15 October and 15 November: the start pumpkin glows and flickers at night. Hold it and wear it: the light follows.
 
 ### Advanced rendering
@@ -319,11 +294,9 @@ Prepare once:
 7. Lamp shadows: at night, turn on the Lada headlights, a road lamp and a house lamp near the car. Objects cast shadows from each lamp. Compare with the original: hard and soft edges, strength, fade with distance.
 8. Look for shadow acne and gaps at contact points. Tune `BIAS_TEXELS` in `src/presentation/lamp_shadows.rs` if needed.
 9. Stand near 5 or more shadowed lamps: only the 4 nearest cast shadows. No shadow pops when two lamps swap order.
-10. Turn "Lamp shadows" off and on. Reload: the setting stays. Check the F3 cost with it on and off.
 11. Check the page log for "layout requires ... textures": the lamp atlas adds one texture to each surface pipeline.
 12. Park three cars near the garage. Each car body reflects its own surroundings, and the reflections update as the cars and the sun move.
 13. Walk more than 50 m from a car: within 5 s its reflection probe turns off. Walk back: it turns on again within 5 s.
-14. Turn Reflections off: car reflections go away at once. Turn it on: they return. Reload the page: the setting stays.
 15. Check F3 near four cars with Reflections on and off. Live probes render one 64 px cube face each frame.
 16. Re-export first: the export now has the live mirror records.
 17. Sit in the Lada with Mirrors on. The side and front mirrors show the world behind the car, not flipped.

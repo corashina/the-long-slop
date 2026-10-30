@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {actionName,compileBindings,inputsField,keyName,resetAction,setKey} from '../../web/bindings.js';
+import {actionIndex,actionName,compileBindings,inputsField,keyName,resetAction,setKey} from '../../web/bindings.js';
 import {InputState} from '../../web/input.js';
 
 // Source `InitDefault` keys of some actions.
@@ -53,4 +53,21 @@ test('look_and_scroll_come_from_their_bindings',()=>{
  state.code('KeyK',true);state.mouse(0,4);
  frame=state.takeFrame();
  assert.equal(frame.mouseY,-1);assert.equal(frame.driveY,4);
+});
+
+test('rebound_keys_persist_and_drive_the_shared_key_rule',async()=>{
+ const {createSettings,playerSettings}=await import('../../web/settings.js');
+ const items=new Map(),storage=()=>({getItem:key=>items.get(key)??null,setItem:(key,value)=>items.set(key,value)});
+ const reference={sliders:{},toggles:{}},fields={inputs:inputsField(defaults)},index=actionIndex(defaults);
+ const settings=createSettings(storage,reference,fields);
+ assert.equal(JSON.parse(playerSettings(settings.values,index)).inventory_gear_keys,true);
+ settings.set('inputs',setKey(settings.values.inputs,index.inventory1,0,'KeyT'));
+ assert.equal(JSON.parse(playerSettings(settings.values,index)).inventory_gear_keys,false);
+ // A page reload reads the stored keys.
+ const reloaded=createSettings(storage,reference,fields).values.inputs;
+ assert.equal(reloaded[index.inventory1][0],'KeyT');
+ // Scroll Up on a key: one source axis unit per frame.
+ const state=new InputState(compileBindings(defaults,setKey(reloaded,index.scrollup,1,'KeyK')));
+ state.code('KeyK',true);
+ assert.equal(state.takeFrame().wheel,1);
 });
