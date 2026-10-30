@@ -117,19 +117,13 @@ def recover_player_movement(source):
         center = [prone_pose['translation'][axis] + template['center'][axis]
                   + (distance * fraction if axis == 1 else 0.0) for axis in range(3)]
         clearance.append(dict(posture=fraction, sphere={**template, 'center': center}))
-    settings = source.get('level0', 16865)
-    sliders = source.read(settings)['tabMisc']['sliders']
-    def fov(index):
-        value = source.read(source.resolve(settings, sliders[index]))
-        return value['defValue'] * (value['valueMultipler'] if value['valueMultipler'] else 1.0)
     result = dict(
         posture=dict(capsule_membership=1 << capsule_layer, capsule_filter=matrix[capsule_layer], standing_head=stand_pose, prone_head=prone_pose,
             minimum_radius=data['minBodyRadius'], maximum_radius=data['maxBodyRadius'],
             ctrl_value=data['ctrlDuckValue'], scroll_step=data['duckSens'], rise_rate=data['FduckLerp'],
             feet=feet, clearance=clearance, sensor_hold_steps=3),
         view=dict(head_lerp=data['FHeadLerp'], lean_sensitivity=data['FsensLean'],
-            lean_distance=data['FleanDist'], height_limits=[-data['FminLook'], data['FmaxLook']],
-            foot_fov_degrees=fov(1), car_fov_degrees=fov(2), **VIEW_LITERALS),
+            lean_distance=data['FleanDist'], height_limits=[-data['FminLook'], data['FmaxLook']], **VIEW_LITERALS),
         prone_multiplier=data['FProneM'], duck_jump_multiplier=data['FduckJumpM'],
         inverse_duck_multiplier=data['FinverseDuck'], max_fall_speed=data['FmaxFall'],
         ladder_speed=data['FladderSpeed'], walk_bob_speed=data['walkBobSpeed'], walk_bob_speed_rb=data['walkBobSpeedRB'],
@@ -208,5 +202,5 @@ def validate_player_movement(value):
     for actual, expected in zip(view['height_limits'], [-0.1, 0.375]):
         same(actual, expected)
     for field, expected in dict(head_lerp=15.0, lean_sensitivity=0.15, lean_distance=0.6,
-                                foot_fov_degrees=65.0, car_fov_degrees=65.0, **VIEW_LITERALS).items():
+                                **VIEW_LITERALS).items():
         same(view[field], expected)

@@ -26,11 +26,18 @@ export function installMirrors(target,storage,toggle,slider,output){
   pending=true;
  });
  target.gameMirrors=out=>{if(!pending)return false;pending=false;out[0]=toggle.checked?1:0;out[1]=value;return true;};
+ const place=()=>{slider.value=String(mirrorPosition(value,config));show();pending=true;};
  return {range(range){
   config=range;
   let stored=NaN;try{stored=Number(storage().getItem(DISTANCE)??NaN);}catch{}
   value=Number.isFinite(stored)&&stored>=range.minimum&&stored<=range.maximum?stored:range.default;
-  Object.assign(slider,{min:'0',max:String(POSITIONS),step:'1',value:String(mirrorPosition(value,range))});show();
-  pending=true;
+  Object.assign(slider,{min:'0',max:String(POSITIONS),step:'1'});place();
+ },
+ // Graphics tab reset: on and the source default distance.
+ reset(){
+  toggle.checked=true;try{storage().setItem(ON,'on');}catch{}
+  if(!config)return;
+  value=config.default;try{storage().setItem(DISTANCE,String(value));}catch{}
+  place();
  }};
 }

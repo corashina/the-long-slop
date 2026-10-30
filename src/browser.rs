@@ -252,6 +252,12 @@ extern "C" {
     /// Pending `DrivingSettings` JSON, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameDrivingSettings)]
     pub fn game_driving_settings() -> Option<String>;
+    /// Pending `PlayerSettings` JSON, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gamePlayerSettings)]
+    pub fn game_player_settings() -> Option<String>;
+    /// Pending frame limit in frames per second, or none. 0 is no limit.
+    #[wasm_bindgen(js_namespace = window, js_name = gameFrameLimit)]
+    pub fn game_frame_limit() -> Option<f32>;
     /// Pending `Outfit` JSON, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameOutfit)]
     pub fn game_outfit() -> Option<String>;
@@ -281,6 +287,10 @@ extern "C" {
     /// False while the appearance screen is closed.
     #[wasm_bindgen(js_namespace = window, js_name = gameAppearancePreview)]
     pub fn game_appearance_preview(rect: &mut [f32]) -> bool;
+    /// Fills the start menu mouse: x and y in canvas fractions, held buttons and buttons pressed since the last call.
+    /// Bit 1 is the left button, bit 2 the right. False while the start menu is closed.
+    #[wasm_bindgen(js_namespace = window, js_name = gameMenuFigure)]
+    pub fn game_menu_figure(input: &mut [f32]) -> bool;
     /// Fills 4 pads × 8 axes and 4 pads × 32 button bits (`GamepadFrame`).
     #[wasm_bindgen(js_namespace = window, js_name = gameGamepad)]
     pub fn game_gamepad(axes: &mut [f32], buttons: &mut [u32]);

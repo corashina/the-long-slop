@@ -26,10 +26,8 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X03 | Creatures | XL | Ground UFO, EMP and green-eyed evil rabbits, human monster (attacks hurt the player), breakablescript `DamageFrom` for AI. Rabbits do not yet sense the player hum. |
-| X04b | Settings screen | M | Settings store and screen: sensitivities, invert, FOV, crosshair, head bob, help, always-show stats, volume, FPS limit, reset per tab. |
-| X04c | Rebinding | M | Original action list and default keys. Rebind on the Controls screen. HUD hints show bound keys. After X04b. |
+| X04c | Rebinding | M | Original action list and default keys. Rebind on the Controls screen. HUD hints show bound keys. |
 | X04d | Languages and help text | M | 10 language files, language dropdown, word table for all menu and HUD text. Help text follows the assists. After X04c. |
-| X04e | Menu figure IK | S | Start-menu figure turns its head, body and hands towards the mouse, as `menuIkScript`. |
 | X06c | Live reflection probes | M | Only 1 probe is live. Make every building and car probe live, with the 5 s disable distance check and the Reflections toggle. |
 | X06f | Depth of field and binocular lens | M | Main DoF with focus ray, night clamp and Dof toggle. Binocular DoF, lens distortion and chromatic aberration. |
 | X06g | Heat haze and LUT options | M | Heat haze pass weighted by temperature, old particle heat haze, LUT option (Default, C64, Sepia), grayscale. |
@@ -187,6 +185,31 @@ Prepare once:
 4. Peaceful on, then drive out: no big rabbit has evil eyes. No human monster spawns in new buildings.
 5. Toggles persist after a page reload. Load a save: the current toggles stay, the save does not change them.
 
+### Settings
+
+1. Start menu and pause menu: Settings opens tabs Graphics, Controls, Steering wheel and Misc. The display controls are on Graphics.
+2. Change values on each tab, then reload the page: they stay. Reset on a tab restores only that tab. In game, Reset keeps the menu-only sliders.
+3. Mouse sensitivity, X, Y and each Invert change the look. Scroll, item move and item rotate change carry, posture and slides.
+4. Key steer sensitivity changes the keyboard steering speed.
+5. Field of view on foot and in a car: walk, then sit in the Lada.
+6. Walk head bob off: the camera does not bob. Drive head bob off: the car camera does not bob.
+7. Crosshair off hides it. Old crosshair shows the source dot, tinted for E, F and MMB, with the carry bar. Crosshair scale changes its size.
+8. Help off hides the action hints and the item help.
+9. Always show health, food, water, bladder and bowel keep each bar visible.
+10. Sound volume 0 mutes the game. 50 is quieter.
+11. FPS limit 60 caps F3 near 60 while playing. Limit off lifts the cap. The menu runs at 30.
+12. Fresh profile: autosave on, no autosave in a car on, auto-load off. Autosave off locks no autosave in a car.
+13. Game mode biome, start car and options stay after a page reload.
+
+### Start menu figure
+
+1. The start menu shows the figure in the menu camera view, under the menu art. It wears the Appearance outfit. Change the outfit: the figure follows.
+2. Move the mouse: the head turns toward it. Hands and feet stay at their rest goals.
+3. Click and hold the left button on the figure, then move: the head and right hand follow the mouse. The right button kicks with the left leg. Both buttons slide the body. Release: the figure returns to rest.
+4. The right button opens no context menu on the start menu.
+5. The figure is gone in the pause menu, Appearance and in game. F3 on the start menu: frame time near the previous run.
+6. Compare with the original menu: pose, place, head turn speed. Note the port choices: no idle clip, no menu scenery, gray background.
+
 ### Player body and outfit
 
 1. Look down standing, crouching, walking forward and back. Carry a light and a heavy (>10 kg) item. Sit in the Lada (driver and passenger), on the WC and on the sled. Check legs, arms and hands on the wheel.
@@ -212,7 +235,7 @@ Prepare once:
 21. The dark lens (profile 0) dims the view by 2 stops.
 22. Bright highlights look untonemapped, like the original.
 23. Lenses with the flare flag hide the sun flare. Other lenses keep it.
-24. Turn off "Sunglasses effects" in the display controls: the tint goes away. The flare rule stays. Reload the page: the setting stays.
+24. Turn off "Sunglasses effects" in Settings > Graphics: the tint goes away. The flare rule stays. Reload the page: the setting stays.
 25. Take the glasses off: the tint clears. Die with them on: the tint clears and the death effect fades in.
 26. Save and load with the glasses worn: the tint comes back. Read the console for a warning about more than one active lens.
 
