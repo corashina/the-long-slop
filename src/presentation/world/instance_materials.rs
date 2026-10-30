@@ -101,7 +101,7 @@ impl InstanceMaterials<'_> {
         }
         Ok(ready)
     }
-    fn admit_binding(
+    pub(crate) fn admit_binding(
         &mut self,
         ledger: &mut crate::ownership::PresentationLedger,
         reference: &ReferenceManifest,

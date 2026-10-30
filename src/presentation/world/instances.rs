@@ -130,6 +130,8 @@ struct Instance {
     /// Structure slot of the placement in the simulation frame.
     slot: Option<u32>,
     sync_pending: bool,
+    /// A changed condition material waits for its textures. Sync visits the instance again.
+    material_pending: bool,
     session: u64,
     root: Entity,
     // Entity of each spawned glTF node. Static nodes have none.
@@ -1104,6 +1106,7 @@ impl SourceInstances {
                                 prototype: prototype_index,
                                 slot: None,
                                 sync_pending: true,
+                                material_pending: false,
                                 session: stream.frame().request.session,
                                 root,
                                 active_nodes,
@@ -1259,6 +1262,7 @@ impl SourceInstances {
         transforms: &mut super::runtime::WorldRoots,
         materials: &mut InstanceMaterials,
         screens: &crate::presentation::computer::ComputerScreens,
+        ledger: &mut PresentationLedger,
     ) -> Result<(), ReferenceError> {
         use simulation::boundary::{NodePoseRow, StructureRow};
         let origin = crate::world::WorldOrigin {
@@ -1512,6 +1516,7 @@ impl SourceInstances {
                 }
             }
             // partconditionscript renderers: a changed state binds its material on change.
+            let mut material_pending = false;
             for renderer in &mut instance.renderers {
                 let Some(rebind) = renderer.rebind.as_deref() else {
                     continue;
@@ -1540,21 +1545,33 @@ impl SourceInstances {
                             .find(|m| &m.source == source && m.asset == prototype.asset)
                             .map(|m| (m.asset, m.gltf_material))
                     });
-                    let row = matches!(renderer.target, Target::Row { .. });
-                    if let Some(mut binding) = materials.bind(
-                        instance.session,
+                    // The new material was not admitted with the instance. Admit it first.
+                    let admitted = materials.admit_binding(
+                        ledger,
+                        reference,
                         prototype,
                         &rebind.primitive,
-                        &rebind.record,
                         initial,
                         selected,
-                        rebind.layer,
-                        rebind.receive,
-                        rebind.reflected,
-                        rebind.source_position,
-                        Default::default(),
-                        row,
-                    )? {
+                    )?;
+                    material_pending |= !admitted;
+                    let row = matches!(renderer.target, Target::Row { .. });
+                    if admitted
+                        && let Some(mut binding) = materials.bind(
+                            instance.session,
+                            prototype,
+                            &rebind.primitive,
+                            &rebind.record,
+                            initial,
+                            selected,
+                            rebind.layer,
+                            rebind.receive,
+                            rebind.reflected,
+                            rebind.source_position,
+                            Default::default(),
+                            row,
+                        )?
+                    {
                         match &mut renderer.target {
                             Target::Entity(entity) => {
                                 if rebind.has_lod {
@@ -1600,6 +1617,7 @@ impl SourceInstances {
                     renderer.color = color;
                 }
             }
+            instance.material_pending = material_pending;
             for renderer in &instance.renderers {
                 // A row impostor shares its material. Its row holds the source position.
                 if renderer.entity().is_none() {
@@ -1617,7 +1635,10 @@ impl SourceInstances {
             }
         }
         for selected_index in 0..selected {
-            self.instances[self.selection.at(selected_index)].sync_pending = false;
+            let instance = &mut self.instances[self.selection.at(selected_index)];
+            instance.material_pending &= !instance.retirement.started();
+            instance.sync_pending = instance.material_pending;
+            self.bindings_dirty |= instance.material_pending;
         }
         self.selection.clear();
         Ok(())
