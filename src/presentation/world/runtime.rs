@@ -116,6 +116,7 @@ impl WorldPresentation<'_, '_> {
     ) -> Result<(), ReferenceError> {
         self.screens
             .sync(&reference.computer.computer, sim, &mut self.images);
+        let allocation = &mut *self.allocation;
         self.instances.sync(
             sim,
             reference,
@@ -123,7 +124,9 @@ impl WorldPresentation<'_, '_> {
             &mut self.roots,
             &mut self.materials,
             &self.screens,
-            &mut self.allocation.ledger,
+            &mut allocation.ledger,
+            allocation.world.as_deref(),
+            &mut self.pipelines,
         )
     }
     /// Updates the renderer copy of `stream`.

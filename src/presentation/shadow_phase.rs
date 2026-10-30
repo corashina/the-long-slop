@@ -1,5 +1,6 @@
 //! Persistent source shadow items use Bevy's mesh extraction and instance buffers.
 use super::caster::CasterViews;
+use super::lamp_shadows::{TILES, tile_bit};
 use bevy::ecs as bevy_ecs;
 use bevy::ecs::{query::ROQueryItem, system::SystemParamItem};
 use bevy::pbr::{DrawMesh, SetMeshBindGroup};
@@ -76,16 +77,30 @@ impl BinnedPhaseItem for SourceShadow {
     }
 }
 
-/// The atlas stage changes this selector between four draws. Uniform slots remain independent.
-#[derive(Component, Default)]
+/// The atlas stage changes this caster slot selector between draws. Uniform slots remain independent.
+#[derive(Component)]
 pub struct ShadowDrawState {
     cascade: AtomicU32,
     encoded_frame: AtomicU32,
     epoch: AtomicU32,
-    attempts: [AtomicU32; 4],
-    successes: [AtomicU32; 4],
-    instance_attempts: [AtomicU32; 4],
-    instance_successes: [AtomicU32; 4],
+    attempts: [AtomicU32; TILES],
+    successes: [AtomicU32; TILES],
+    instance_attempts: [AtomicU32; TILES],
+    instance_successes: [AtomicU32; TILES],
+}
+impl Default for ShadowDrawState {
+    fn default() -> Self {
+        let counts = || std::array::from_fn(|_| AtomicU32::new(0));
+        Self {
+            cascade: AtomicU32::new(0),
+            encoded_frame: AtomicU32::new(0),
+            epoch: AtomicU32::new(0),
+            attempts: counts(),
+            successes: counts(),
+            instance_attempts: counts(),
+            instance_successes: counts(),
+        }
+    }
 }
 impl ShadowDrawState {
     pub fn encoded_frame(&self) -> u32 {
@@ -108,10 +123,10 @@ impl ShadowDrawState {
         }
     }
     pub fn select(&self, cascade: usize) {
-        assert!(cascade < 4);
+        assert!(cascade < TILES);
         self.cascade.store(cascade as u32, Ordering::Relaxed);
     }
-    pub fn instance_counts(&self) -> [[u32; 4]; 2] {
+    pub fn instance_counts(&self) -> [[u32; TILES]; 2] {
         [
             self.instance_attempts
                 .each_ref()
@@ -121,7 +136,7 @@ impl ShadowDrawState {
                 .map(|v| v.load(Ordering::Relaxed)),
         ]
     }
-    pub fn counts(&self) -> (u32, [u32; 4], [u32; 4]) {
+    pub fn counts(&self) -> (u32, [u32; TILES], [u32; TILES]) {
         (
             self.epoch.load(Ordering::Relaxed),
             self.attempts.each_ref().map(|v| v.load(Ordering::Relaxed)),
@@ -142,7 +157,7 @@ impl RenderCommand<SourceShadow> for SelectCaster {
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let cascade = state.cascade.load(Ordering::Relaxed) as usize;
-        if item.key.split_mask & (1 << cascade) == 0 {
+        if item.key.split_mask & (1 << tile_bit(cascade)) == 0 {
             return RenderCommandResult::Skip;
         }
         pass.set_bind_group(1, views.binding(cascade), &[]);

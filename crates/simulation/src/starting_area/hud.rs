@@ -95,6 +95,12 @@ impl GarageRuntime {
         hud.surfaces = self.stream.frame().surfaces.len() as u32;
         hud.colliders = self.physics.collider_count() as u32;
         hud.rebases = self.rebases;
+        let view_body = self
+            .area
+            .player
+            .seat_body()
+            .unwrap_or_else(|| self.area.player.body_handle());
+        hud.view_speed_kmh = self.physics.rapier().bodies[view_body].linvel().length() * 3.6;
         // A new game has no selected car until the player sits in one.
         let car = self.vehicle.as_ref().map(|key| (key, &self.vehicles[key]));
         if let Some((key, current)) = car {

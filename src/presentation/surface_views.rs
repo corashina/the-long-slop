@@ -4,7 +4,7 @@ use super::{
     lighting_scene::{PROBE_COUNT, SourceSceneLighting},
     materials::MaterialLoading,
     readiness::RendererStateHandle,
-    render_targets::{HDR_FORMAT, MSAA_SAMPLES, ProbeTargets, PublishedProbes, SurfaceTargets},
+    render_targets::{HDR_FORMAT, ProbeTargets, PublishedProbes, SurfaceTargets},
     source_lighting::SourceViewLighting,
     stained_glass::{GlassViewUniform, SourceGlassView},
     surface_graph::SurfaceViewTargets,
@@ -68,11 +68,12 @@ impl SurfaceResources {
         queue: &RenderQueue,
         width: u32,
         height: u32,
+        samples: u32,
         atlas: u32,
     ) -> Result<Self, String> {
         let published = PublishedProbes::new(device, queue);
         Ok(Self {
-            targets: SurfaceTargets::new(device, width, height, atlas)?,
+            targets: SurfaceTargets::new(device, width, height, samples, atlas)?,
             probes: std::array::from_fn(|slot| ProbeTargets::new(device, &published, slot)),
             published,
             probe_sampler: device.create_sampler(&SamplerDescriptor {
@@ -115,10 +116,13 @@ pub(crate) fn prepare_views(
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
     status: Res<RendererStateHandle>,
+    antialiasing: Res<super::antialiasing::Antialiasing>,
+    lamps: Res<super::lamp_shadows::LampShadows>,
 ) {
     if status.failure().is_some() {
         return;
     }
+    let samples = antialiasing.samples();
     let (Some(assets), Some(scene), Some(capacity)) = (
         assets,
         scene.0,
@@ -135,7 +139,7 @@ pub(crate) fn prepare_views(
             || view.target_format != HDR_FORMAT
             || msaa.samples()
                 != if source.index < WORLD_VIEWS {
-                    MSAA_SAMPLES
+                    samples
                 } else {
                     1
                 }
@@ -162,11 +166,10 @@ pub(crate) fn prepare_views(
     {
         return;
     }
-    let Some(snapshot) = frame.views[0] else {
+    if frame.views[0].is_none() {
         return;
-    };
-    let native = snapshot.native_extent;
-    let Some(atlas) = crate::reference::shadows::source_atlas_size(native.x, native.y) else {
+    }
+    let Some(atlas) = frame.atlas_size(0) else {
         status.fail("Source world atlas extent is invalid".into());
         return;
     };
@@ -180,7 +183,7 @@ pub(crate) fn prepare_views(
             // Window resize does not invalidate the fixed-resolution published probe.
             match existing
                 .targets
-                .resize_world(&device, main.x, main.y, atlas)
+                .resize_world(&device, main.x, main.y, samples, atlas)
             {
                 Ok(()) => {}
                 Err(error) => {
@@ -189,7 +192,7 @@ pub(crate) fn prepare_views(
                 }
             }
         } else {
-            match SurfaceResources::new(&device, &queue, main.x, main.y, atlas) {
+            match SurfaceResources::new(&device, &queue, main.x, main.y, samples, atlas) {
                 Ok(value) => {
                     commands.insert_resource(value);
                 }
@@ -223,6 +226,11 @@ pub(crate) fn prepare_views(
             source.clip_from_world,
             Vec4::new(source.near, source.far, player_dist(source.index), 0.),
             sun_shadow.map_or_else(Default::default, |collector| collector.value),
+            if source.index < WORLD_VIEWS {
+                lamps.uniforms
+            } else {
+                Default::default()
+            },
         );
         let glass_value = match GlassViewUniform::new(
             source.clip_from_world,
@@ -284,6 +292,7 @@ pub(crate) fn prepare_views(
                     target.atlas.sampled.as_ref().unwrap(),
                     &resources.shadow_compare,
                 ),
+                resources.targets.lamp_atlas.sampled.as_ref().unwrap(),
             ),
             SourceTransparentPasses::new(capacity),
         ));

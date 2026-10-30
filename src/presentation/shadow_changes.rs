@@ -13,6 +13,7 @@ use bevy::{
         visibility::{InheritedVisibility, RenderLayers, ViewVisibility},
     },
     ecs::{query::QueryData, system::SystemParam},
+    mesh::skinning::SkinnedMesh,
     prelude::*,
 };
 
@@ -24,11 +25,19 @@ pub(super) struct ShadowMesh {
     pub inherited: &'static InheritedVisibility,
     pub record: &'static SourceRenderer,
     pub layers: Option<&'static RenderLayers>,
+    pub skinned: Has<SkinnedMesh>,
     pub material: Option<&'static MeshMaterial3d<SourceMaterial>>,
     pub specular: Option<&'static MeshMaterial3d<SpecularMaterial>>,
     pub terrain: Option<&'static MeshMaterial3d<TerrainMaterial>>,
     pub grass: Option<&'static MeshMaterial3d<GrassMaterial>>,
     pub impostor: Option<&'static MeshMaterial3d<ImpostorMaterial>>,
+}
+
+impl ShadowMeshItem<'_, '_> {
+    /// Grass sways with time and skinned meshes follow their joints. Their tiles draw each frame.
+    pub fn animated(&self) -> bool {
+        self.grass.is_some() || self.skinned
+    }
 }
 
 #[derive(SystemParam)]
@@ -38,6 +47,7 @@ pub(super) struct ShadowMaterials<'w> {
     terrain: Res<'w, Assets<TerrainMaterial>>,
     grass: Res<'w, Assets<GrassMaterial>>,
     impostors: Res<'w, Assets<ImpostorMaterial>>,
+    meshes: Res<'w, Assets<Mesh>>,
 }
 impl ShadowMaterials<'_> {
     pub fn changed(&self) -> bool {
@@ -46,6 +56,10 @@ impl ShadowMaterials<'_> {
             || self.terrain.is_changed()
             || self.grass.is_changed()
             || self.impostors.is_changed()
+    }
+    /// A mesh asset edit can change caster geometry without a component change.
+    pub fn meshes_changed(&self) -> bool {
+        self.meshes.is_changed()
     }
     /// Caster state of a GPU prop row material, as `has_caster` gives it for an entity.
     pub fn row_caster(&self, id: bevy::asset::UntypedAssetId) -> Result<bool, &'static str> {
@@ -126,6 +140,7 @@ pub(super) struct ShadowChanges<'w, 's> {
                 Changed<InheritedVisibility>,
                 Changed<SourceRenderer>,
                 Changed<RenderLayers>,
+                Changed<Mesh3d>,
                 Added<ViewVisibility>,
                 Changed<MeshMaterial3d<SourceMaterial>>,
                 Changed<MeshMaterial3d<SpecularMaterial>>,

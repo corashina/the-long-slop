@@ -2,7 +2,7 @@
 use simulation::boundary::{SimInit, encode_startup};
 use simulation::reference::ReferenceManifest;
 use simulation::session::Session;
-use simulation::world::GameMode;
+use simulation::world::{GameMode, GameOptions};
 use std::cell::RefCell;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
@@ -19,13 +19,16 @@ pub fn start(
     draw_distance: f32,
     biome: u32,
     start_car: i32,
+    seed: i32,
+    options: u32,
 ) -> Result<Vec<u8>, JsValue> {
     console_error_panic_hook::set_once();
     let error = |e: &dyn std::fmt::Display| JsValue::from_str(&e.to_string());
     let reference =
         Arc::new(ReferenceManifest::from_runtime_json(manifest).map_err(|e| error(&e))?);
     let init = SimInit {
-        mode: GameMode::from_menu(&reference.world, biome, start_car),
+        mode: GameMode::from_menu(&reference.world, biome, start_car, seed),
+        options: GameOptions::from_bits(options),
         draw_distance,
         manifest_sha256,
     };

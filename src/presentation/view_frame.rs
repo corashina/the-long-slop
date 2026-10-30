@@ -178,6 +178,7 @@ pub struct SourceViewFrame {
     pub session: u64,
     pub selection_revision: u64,
     pub(crate) scale: crate::render_scale::SceneScale,
+    pub(crate) shadow_quality: super::shadow_quality::ShadowQuality,
     pub preparation_warmup: bool,
     pub motion_revision: u32,
     pub scene: u32,
@@ -193,8 +194,20 @@ pub struct SourceViewFrame {
     pub probe_token: u32,
     pub probe_job: Option<ProbeJob>,
     pub views: [Option<ViewSnapshot>; VIEW_COUNT],
+    /// Main-view motion state. None when antialiasing and motion blur are off.
+    pub main_motion: Option<super::temporal::MainMotion>,
 }
 impl SourceViewFrame {
+    /// Shadow atlas side of a view. The shadow quality shrinks only world views.
+    pub fn atlas_size(&self, index: usize) -> Option<u32> {
+        let native = self.views[index]?.native_extent;
+        let source = crate::reference::shadows::source_atlas_size(native.x, native.y)?;
+        Some(if index < WORLD_VIEWS {
+            self.shadow_quality.atlas_size(source)
+        } else {
+            source
+        })
+    }
     pub fn skip_probe_preparation(&self, index: usize) -> bool {
         index >= PROBE_START && self.views[index].is_none()
     }
@@ -303,16 +316,28 @@ pub(crate) fn snapshot(
     mut clock: ResMut<SourceViewClock>,
     mut frame: ResMut<SourceViewFrame>,
     status: Res<RendererStateHandle>,
-    scale: Res<crate::render_scale::SceneScaleSetting>,
+    settings: (
+        Res<crate::render_scale::SceneScaleSetting>,
+        Res<super::shadow_quality::ShadowQuality>,
+    ),
     views: Query<(&SourceSurfaceView, &Camera, &GlobalTransform)>,
     sky_view: Query<(&Camera, &GlobalTransform), With<super::frame_graph::SourceSkyCamera>>,
+    (antialiasing, blur, mut temporal, origin): (
+        Res<super::antialiasing::Antialiasing>,
+        Res<super::motion_blur::MotionBlur>,
+        ResMut<super::temporal::TemporalView>,
+        Res<super::lighting_scene::SourceWorldOrigin>,
+    ),
 ) {
     frame.session = sim.frame.state.session;
     frame.selection_revision = sim.frame.state.selection_revision;
+    let (scale, shadow_quality) = settings;
     frame.scale = scale.0;
+    frame.shadow_quality = *shadow_quality;
     frame.scene = epoch.0;
     frame.probe_job = None;
     frame.views = [None; VIEW_COUNT];
+    frame.main_motion = None;
     frame.sky_clip_from_world = None;
     frame.skybox_clip_from_world = None;
     if sim.frame.state.flags & StateBlock::WORLD_FAILED != 0 {
@@ -407,7 +432,7 @@ pub(crate) fn snapshot(
     let warmup = !clock.preparation_ready;
     let job = probe_job;
     let fov_degrees = sim.frame.state.fov_degrees;
-    let snapshots = std::array::from_fn(|index| {
+    let mut snapshots: [Option<ViewSnapshot>; VIEW_COUNT] = std::array::from_fn(|index| {
         if index >= PROBE_START && !prepare_probe_face(job, index - PROBE_START, warmup) {
             return None;
         }
@@ -440,6 +465,22 @@ pub(crate) fn snapshot(
         }
         Some(snapshot)
     });
+    let main_motion = (antialiasing.0 || blur.0).then(|| {
+        temporal.advance(
+            snapshots[0].as_mut().unwrap(),
+            antialiasing.0.then_some(&assets.record.postprocessing.taa),
+            origin.0,
+            sim.frame.state.motion_revision,
+            epoch.0,
+        )
+    });
+    if main_motion.is_none() {
+        // A later start has no valid history.
+        temporal.clear();
+    }
+    let jitter = main_motion.map_or(Mat4::IDENTITY, |motion| {
+        super::temporal::jitter_clip(motion.jitter)
+    });
     let sky_clips = Some(sky_pose).map(|pose| {
         let sky = &assets.record.cameras[0];
         let projection = Mat4::perspective_rh_gl(
@@ -454,12 +495,16 @@ pub(crate) fn snapshot(
                 projection.to_cols_array_2d(),
                 sky.near,
             ));
-        (gpu_projection(projection) * view, skybox_projection * view)
+        (
+            jitter * gpu_projection(projection) * view,
+            jitter * skybox_projection * view,
+        )
     });
     *frame = SourceViewFrame {
         session: sim.frame.state.session,
         selection_revision: sim.frame.state.selection_revision,
         scale: scale.0,
+        shadow_quality: *shadow_quality,
         preparation_warmup: warmup,
         scene: epoch.0,
         motion_revision: sim.frame.state.motion_revision,
@@ -475,6 +520,7 @@ pub(crate) fn snapshot(
         probe_token: clock.probe_token,
         probe_job: job,
         views: snapshots,
+        main_motion,
     };
     let decision = {
         let mut state = graph.lock();
@@ -538,6 +584,7 @@ pub fn install(app: &mut App) {
         .init_resource::<super::lighting_scene::ProbeActivation>()
         .init_resource::<super::reflections::Reflections>()
         .init_resource::<SourceViewFrame>()
+        .init_resource::<super::temporal::TemporalView>()
         .add_plugins(bevy::render::extract_resource::ExtractResourcePlugin::<
             SourceViewFrame,
         >::default())

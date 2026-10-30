@@ -1,5 +1,5 @@
 //! Source procedural sky. All seven view bindings are allocated during loading.
-use super::render_targets::{DEPTH_FORMAT, HDR_FORMAT, MSAA_SAMPLES};
+use super::render_targets::{DEPTH_FORMAT, HDR_FORMAT};
 use crate::reference::{lighting_scene::LightingRecord, sky::source_sky_vertices};
 use bevy::mesh::VertexBufferLayout;
 use bevy::render::{
@@ -34,6 +34,7 @@ impl SkyPass {
         cache: &PipelineCache,
         shader: Handle<Shader>,
         record: &LightingRecord,
+        samples: u32,
     ) -> Self {
         let layout = BindGroupLayoutDescriptor::new(
             "source_sky",
@@ -104,7 +105,7 @@ impl SkyPass {
                 }),
                 multisample: MultisampleState {
                     // Native probe scratch inherits its one-sample destination descriptor.
-                    count: if index == 0 { MSAA_SAMPLES } else { 1 },
+                    count: if index == 0 { samples } else { 1 },
                     ..default()
                 },
                 ..default()
@@ -244,6 +245,7 @@ pub(crate) fn prepare_sky(
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
     status: Res<super::readiness::RendererStateHandle>,
+    antialiasing: Res<super::antialiasing::Antialiasing>,
 ) {
     if status.failure().is_some() {
         return;
@@ -272,6 +274,7 @@ pub(crate) fn prepare_sky(
         &cache,
         assets.shaders.sky.clone(),
         &assets.record,
+        antialiasing.samples(),
     ));
 }
 

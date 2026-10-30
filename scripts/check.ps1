@@ -25,7 +25,7 @@ $root = Split-Path $PSScriptRoot -Parent
 try {
     if ($Full -or $WebTest) {
         $suites = if ($Full) {
-            @('loading', 'save-storage', 'save-session', 'save-bridge', 'save-screen', 'autosave', 'world-assets', 'simulation')
+            @('loading', 'save-storage', 'save-session', 'save-bridge', 'save-screen', 'autosave', 'world-assets', 'simulation', 'game-mode')
         } else { $WebTest }
         $webFiles = @(foreach ($suite in $suites) {
             $file = "$root/tests/web/$suite.test.mjs"

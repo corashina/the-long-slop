@@ -154,12 +154,14 @@ impl SurvivalState {
         }
     }
 
+    /// `survival` false keeps food and water full, as `survivalscript.Update`.
     pub fn advance(
         &mut self,
         reference: &SurvivalReference,
         dt: f32,
         temperature: f32,
         need_scale: f32,
+        survival: bool,
     ) -> NeedsOutput {
         if !dt.is_finite()
             || dt < 0.
@@ -174,33 +176,39 @@ impl SurvivalState {
             self.death_elapsed += f64::from(dt);
         }
         let step = dt.min(1.);
-        let cold = inverse_lerp(reference.def_temp, reference.cold_temp, temperature);
-        let hot = inverse_lerp(reference.def_temp, reference.hot_temp, temperature);
-        let food_loss = reference.food_loss
-            * need_scale
-            * lerp(
-                1.,
-                reference.cold_food_loss_modifier,
-                cold * lerp(1., reference.hot_food_loss_modifier, hot),
-            );
-        // The recovered update uses foodLoss for water as well.
-        let water_loss = reference.food_loss
-            * need_scale
-            * lerp(
-                1.,
-                reference.cold_water_loss_modifier,
-                cold * lerp(1., reference.hot_water_loss_modifier, hot),
-            );
-        self.needs.food = (self.needs.food - food_loss * step).clamp(0., reference.maximum.food);
-        self.needs.bowel += food_loss * reference.food_to_shit_ratio * step;
-        self.convert_water_to_bladder(reference, water_loss * step);
-        if !self.food_hurt && self.needs.food <= 0. {
-            self.food_hurt = true;
-            self.show_stats();
-        }
-        if !self.water_hurt && self.needs.water <= 0. {
-            self.water_hurt = true;
-            self.show_stats();
+        if survival {
+            let cold = inverse_lerp(reference.def_temp, reference.cold_temp, temperature);
+            let hot = inverse_lerp(reference.def_temp, reference.hot_temp, temperature);
+            let food_loss = reference.food_loss
+                * need_scale
+                * lerp(
+                    1.,
+                    reference.cold_food_loss_modifier,
+                    cold * lerp(1., reference.hot_food_loss_modifier, hot),
+                );
+            // The recovered update uses foodLoss for water as well.
+            let water_loss = reference.food_loss
+                * need_scale
+                * lerp(
+                    1.,
+                    reference.cold_water_loss_modifier,
+                    cold * lerp(1., reference.hot_water_loss_modifier, hot),
+                );
+            self.needs.food =
+                (self.needs.food - food_loss * step).clamp(0., reference.maximum.food);
+            self.needs.bowel += food_loss * reference.food_to_shit_ratio * step;
+            self.convert_water_to_bladder(reference, water_loss * step);
+            if !self.food_hurt && self.needs.food <= 0. {
+                self.food_hurt = true;
+                self.show_stats();
+            }
+            if !self.water_hurt && self.needs.water <= 0. {
+                self.water_hurt = true;
+                self.show_stats();
+            }
+        } else {
+            self.needs.food = reference.maximum.food;
+            self.needs.water = reference.maximum.water;
         }
         if self.hp_hurt {
             if self.needs.hp > reference.maximum.hp * 0.25 {
@@ -211,15 +219,17 @@ impl SurvivalState {
             self.show_stats();
         }
         let mut damage = 0.;
-        if self.needs.water <= 0. {
-            damage += reference.water_damage;
-        } else {
-            self.water_hurt = false;
-        }
-        if self.needs.food <= 0. {
-            damage += reference.food_damage;
-        } else {
-            self.food_hurt = false;
+        if survival {
+            if self.needs.water <= 0. {
+                damage += reference.water_damage;
+            } else {
+                self.water_hurt = false;
+            }
+            if self.needs.food <= 0. {
+                damage += reference.food_damage;
+            } else {
+                self.food_hurt = false;
+            }
         }
         let fullness = inverse_lerp(reference.maximum.bowel, 0., self.needs.bowel).min(
             inverse_lerp(self.bladder.capacity_liters, 0., self.bladder.total()),

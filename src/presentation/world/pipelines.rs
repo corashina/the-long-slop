@@ -174,16 +174,6 @@ impl WorldPipelines {
         Ok(true)
     }
 
-    pub fn request<M: Material>(
-        &mut self,
-        stream: &RendererWorld,
-        ledger: &mut PresentationLedger,
-        mesh: &Handle<Mesh>,
-        material: &Handle<M>,
-        shadows: bool,
-    ) -> Result<Option<PipelineTicket>, ReferenceError> {
-        self.request_owned(stream, ledger, None, mesh, material, shadows)
-    }
     pub(crate) fn request_continuation<M: Material>(
         &mut self,
         stream: &RendererWorld,
@@ -193,9 +183,10 @@ impl WorldPipelines {
         material: &Handle<M>,
         shadows: bool,
     ) -> Result<Option<PipelineTicket>, ReferenceError> {
-        self.request_owned(stream, ledger, Some(parent), mesh, material, shadows)
+        self.request(stream, ledger, Some(parent), mesh, material, shadows)
     }
-    fn request_owned<M: Material>(
+    /// Without a parent, the request is an independent operation.
+    pub(crate) fn request<M: Material>(
         &mut self,
         stream: &RendererWorld,
         ledger: &mut PresentationLedger,

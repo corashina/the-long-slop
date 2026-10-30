@@ -132,6 +132,8 @@ impl SceneLighting {
         clip_from_world: Mat4,
         near_far: Vec4,
         sun_shadow: super::shadow_collector::SunShadowUniform,
+        lamp_shadows: [super::lamp_shadows::LampShadowUniform;
+            crate::reference::lamp_shadows::LAMP_SLOTS],
     ) -> LightingUniform {
         LightingUniform {
             ambient_sh: self.ambient_sh,
@@ -147,6 +149,7 @@ impl SceneLighting {
             clip_from_world,
             near_far,
             sun_shadow,
+            lamp_shadows,
         }
     }
 }

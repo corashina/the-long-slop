@@ -110,6 +110,8 @@ impl ExposureSettings {
 pub struct PostprocessingRecord {
     pub main_layer: super::SourceId,
     pub stop_nan: bool,
+    pub taa: TaaSettings,
+    pub motion_blur: MotionBlurSettings,
     pub exposure: ExposureSettings,
     pub bloom: BloomSettings,
     pub occlusion: OcclusionSettings,
@@ -128,6 +130,62 @@ pub struct BinocularVignette {
     /// `tavcsoscript.defVignette`. The shader reads its alpha.
     pub mask: super::SourceId,
 }
+/// `pplayermelle.TurnOn` temporal antialiasing settings.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaaSettings {
+    pub jitter_spread: f32,
+    pub stationary_blending: f32,
+    pub motion_blending: f32,
+    pub sharpness: f32,
+}
+impl TaaSettings {
+    pub fn validate(&self) -> bool {
+        [
+            self.jitter_spread,
+            self.stationary_blending,
+            self.motion_blending,
+        ]
+        .iter()
+        .all(|value| value.is_finite() && (0. ..=1.).contains(value))
+            && self.sharpness.is_finite()
+            && self.sharpness >= 0.
+    }
+}
+/// Main `MotionBlur` effect and the `postprocesscontrol` shutter controller.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MotionBlurSettings {
+    pub samples: u32,
+    /// Degrees at the low and high speed.
+    pub shutter_range: [f32; 2],
+    /// km/h.
+    pub speed_range: [f32; 2],
+    pub shutter_lerp: f32,
+}
+impl MotionBlurSettings {
+    pub fn validate(&self) -> bool {
+        let [low, high] = self.shutter_range;
+        self.samples > 0
+            && [low, high, self.shutter_lerp]
+                .iter()
+                .chain(&self.speed_range)
+                .all(|v| v.is_finite())
+            && 0. <= low
+            && low <= high
+            && high <= 360.
+            && self.speed_range[0] < self.speed_range[1]
+            && self.shutter_lerp >= 0.
+    }
+    /// Source `postprocesscontrol.Update`: lerp from the current angle to the speed target.
+    pub fn shutter(&self, current: f32, speed_kmh: f32, delta_seconds: f32) -> f32 {
+        let [min_speed, max_speed] = self.speed_range;
+        let t = ((speed_kmh - min_speed) / (max_speed - min_speed)).clamp(0., 1.);
+        let target = self.shutter_range[0] + (self.shutter_range[1] - self.shutter_range[0]) * t;
+        current + (target - current) * (self.shutter_lerp * delta_seconds).clamp(0., 1.)
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BloomSettings {
@@ -182,6 +240,8 @@ impl PostprocessingRecord {
             !self.main_layer.file.is_empty() && self.main_layer.path_id != 0,
             "postprocessing main layer",
         )?;
+        require(self.taa.validate(), "postprocessing temporal antialiasing")?;
+        require(self.motion_blur.validate(), "postprocessing motion blur")?;
         require(self.exposure.validate(), "postprocessing exposure")?;
         let bloom = &self.bloom;
         require(
@@ -971,5 +1031,26 @@ impl DeadGrading {
             let value = &mut *values[*index];
             *value += (target - *value) * weight;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MotionBlurSettings;
+
+    #[test]
+    fn shutter_follows_speed_and_lerps() {
+        let blur = MotionBlurSettings {
+            samples: 10,
+            shutter_range: [0., 180.],
+            speed_range: [50., 150.],
+            shutter_lerp: 2.,
+        };
+        // Below the speed range, a full lerp step reaches the low angle.
+        assert_eq!(blur.shutter(90., 20., 0.5), 0.);
+        // Half the speed range, a quarter step: 0 + (90 - 0) * 0.25.
+        assert_eq!(blur.shutter(0., 100., 0.125), 22.5);
+        // Above the range, the target clamps to the high angle.
+        assert_eq!(blur.shutter(0., 400., 1.), 180.);
     }
 }

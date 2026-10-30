@@ -1,9 +1,11 @@
 //! GPU prop rows in the render world: upload, cull per view, and indirect draws.
-//! Pass 0 is the camera. Passes 1-4 are the shadow cascades.
+//! Pass 0 is the camera. Passes 1-4 are the shadow cascades, 5-8 the lamp shadow slots.
 use super::{
     caster::CasterPasses,
     lighting_assets::LightingRenderAssets,
     readiness::RendererStateHandle,
+    render_bundles::{BundleTarget, DrawBundle},
+    render_targets::{DEPTH_FORMAT, HDR_FORMAT, SHADOW_FORMAT},
     shadow_cache::SpecializationKey,
     shadow_scene::ShadowScene,
     surface_pass::SurfacePasses,
@@ -38,18 +40,18 @@ use std::any::TypeId;
 use std::num::NonZeroU64;
 use std::ops::Range;
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicU8, AtomicU32, Ordering},
 };
 
-const PASSES: usize = 5;
+const PASSES: usize = 9;
 const ALIGN: u64 = 256;
 const ROW_BYTES: u64 = ROW_WORDS as u64 * 4;
 const ARGS_BYTES: u64 = 20;
 /// Planes, counts and view index of `CullView` in source_props_cull.wgsl.
 const CULL_WORDS: usize = 32;
-/// Visible rows per pass. Eight words per view.
-const TOTAL_WORDS: usize = 8;
+/// Visible rows per pass. Sixteen words per view.
+const TOTAL_WORDS: usize = 16;
 /// More dirty ranges than this upload all rows. Fading rows give one range per few rows.
 const UPLOAD_RANGES: usize = 256;
 
@@ -144,11 +146,13 @@ struct Specialization {
 struct ViewState {
     specializations: Vec<Option<Specialization>>,
     pipelines: Vec<BatchPipelines>,
-    /// Rows of each batch in each cascade. Empty cascades draw nothing.
-    cascades: Vec<[u32; 4]>,
+    /// Rows of each batch in each caster mask bit. Empty bits draw nothing.
+    cascades: Vec<[u32; 8]>,
     masks: Option<(u64, u64, u64, u64, u32)>,
     /// Draw attempts and issued draws in this frame.
     draws: [AtomicU32; 2],
+    /// Draws of the camera, then of each caster slot. Batches change rarely, so the same bundle runs each frame.
+    bundles: [Mutex<DrawBundle>; 1 + super::lamp_shadows::TILES],
 }
 /// Batch draw data from the mesh allocator.
 #[derive(Clone, Copy, PartialEq)]
@@ -648,7 +652,7 @@ impl PropDraws {
             self.mask_bytes.clear();
             self.mask_bytes.resize(buffers.mask_region as usize, 0);
             view.cascades.clear();
-            view.cascades.resize(batches, [0; 4]);
+            view.cascades.resize(batches, [0; 8]);
             for (item, key) in scene.caster_data.entities.iter().enumerate() {
                 let CasterKey::Row(slot) = *key else {
                     continue;
@@ -659,8 +663,8 @@ impl PropDraws {
                 if batch == NO_BATCH {
                     continue;
                 }
-                for cascade in 0..4 {
-                    view.cascades[batch as usize][cascade] += u32::from(mask >> cascade & 1);
+                for bit in 0..8 {
+                    view.cascades[batch as usize][bit] += u32::from(mask >> bit & 1);
                 }
             }
             queue.write_buffer(
@@ -879,8 +883,19 @@ fn material_group(world: &World, id: bevy::asset::UntypedAssetId) -> Option<&Bin
         .get(material.binding.group)?
         .bind_group()
 }
-fn count(state: &ViewState, issued: bool) {
-    state.draws[usize::from(issued)].fetch_add(1, Ordering::Relaxed);
+/// Count the draws of one bundle. A failed bundle fails the renderer.
+fn bundle_counts(
+    world: &World,
+    state: &ViewState,
+    counts: Result<(u32, u32), String>,
+) -> (u32, u32) {
+    let (attempted, issued) = counts.unwrap_or_else(|error| {
+        world.resource::<RendererStateHandle>().fail(error);
+        (0, 0)
+    });
+    state.draws[0].fetch_add(attempted, Ordering::Relaxed);
+    state.draws[1].fetch_add(issued, Ordering::Relaxed);
+    (attempted, issued)
 }
 
 /// Base and additive draws of each shown batch, after the Bevy phases of the camera pass.
@@ -890,6 +905,7 @@ pub(crate) fn draw_camera<'w>(
     pass: &mut TrackedRenderPass<'w>,
     entity: Entity,
     index: usize,
+    samples: u32,
 ) -> (u32, u32) {
     let draws = world.resource::<PropDraws>();
     let Some(buffers) = &draws.buffers else {
@@ -902,68 +918,81 @@ pub(crate) fn draw_camera<'w>(
         .bind_group();
     let offset = world.get::<ViewUniformOffset>(entity);
     let lighting = world.get::<super::source_lighting::SourceViewLighting>(entity);
-    let mut counts = (0, 0);
-    for (batch, entry) in draws.batches.iter().enumerate() {
-        if entry.shown == 0 {
-            continue;
-        }
-        let pipelines = state.pipelines.get(batch).copied().unwrap_or_default();
-        let template = draws.templates.get(batch).copied().flatten();
-        let ids = std::iter::once(pipelines.base).chain(pipelines.partner.map(Some));
-        for id in ids {
-            counts.0 += 1;
-            count(state, false);
-            let pipeline = id.and_then(|id| cache.get_render_pipeline(id));
-            let (
-                Some(pipeline),
-                Some(camera),
-                Some(offset),
-                Some(lighting),
-                Some(template),
-                Some(material),
-            ) = (
-                pipeline,
-                camera,
-                offset,
-                lighting,
-                template,
-                material_group(world, entry.key.material),
-            )
-            else {
-                continue;
-            };
-            pass.set_render_pipeline(pipeline);
-            pass.set_bind_group(0, camera, &[offset.offset]);
-            pass.set_bind_group(1, lighting.bind_group(), &[]);
-            pass.set_bind_group(3, material, &[]);
-            if !bind_batch(
-                world,
-                pass,
-                buffers,
-                buffers.list_offset(index, 0),
-                batch,
-                entry.key.mesh,
-                template.format,
-            ) {
-                continue;
+    let target = BundleTarget {
+        color: Some(HDR_FORMAT),
+        depth: DEPTH_FORMAT,
+        samples,
+    };
+    let counts = state.bundles[0].lock().unwrap().draw(
+        world.resource::<RenderDevice>(),
+        target,
+        pass,
+        |pass| {
+            let mut counts = (0, 0);
+            for (batch, entry) in draws.batches.iter().enumerate() {
+                if entry.shown == 0 {
+                    continue;
+                }
+                let pipelines = state.pipelines.get(batch).copied().unwrap_or_default();
+                let template = draws.templates.get(batch).copied().flatten();
+                let ids = std::iter::once(pipelines.base).chain(pipelines.partner.map(Some));
+                for id in ids {
+                    counts.0 += 1;
+                    let pipeline = id.and_then(|id| cache.get_render_pipeline(id));
+                    let (
+                        Some(pipeline),
+                        Some(camera),
+                        Some(offset),
+                        Some(lighting),
+                        Some(template),
+                        Some(material),
+                    ) = (
+                        pipeline,
+                        camera,
+                        offset,
+                        lighting,
+                        template,
+                        material_group(world, entry.key.material),
+                    )
+                    else {
+                        continue;
+                    };
+                    pass.set_render_pipeline(pipeline);
+                    pass.set_bind_group(0, camera, &[offset.offset]);
+                    pass.set_bind_group(1, lighting.bind_group(), &[]);
+                    pass.set_bind_group(3, material, &[]);
+                    if !bind_batch(
+                        world,
+                        pass,
+                        buffers,
+                        buffers.list_offset(index, 0),
+                        batch,
+                        entry.key.mesh,
+                        template.format,
+                    ) {
+                        continue;
+                    }
+                    pass.draw_indexed_indirect(
+                        &buffers.args,
+                        buffers.args_offset(index, 0, batch, draws.batches.len()),
+                    );
+                    counts.1 += 1;
+                }
             }
-            pass.draw_indexed_indirect(
-                &buffers.args,
-                buffers.args_offset(index, 0, batch, draws.batches.len()),
-            );
-            counts.1 += 1;
-            count(state, true);
-        }
-    }
-    counts
+            counts
+        },
+    );
+    bundle_counts(world, state, counts)
 }
-/// Caster draws of each batch with rows in this cascade, after the caster phase.
+/// Caster draws of each batch with rows in this caster mask bit, after the caster phase.
+/// `tile` is the caster slot: a cascade or a lamp face.
 pub(crate) fn draw_cascade<'w>(
     world: &'w World,
     pass: &mut TrackedRenderPass<'w>,
     entity: Entity,
     index: usize,
     cascade: usize,
+    tile: usize,
 ) -> (u32, u32) {
     let draws = world.resource::<PropDraws>();
     let Some(buffers) = &draws.buffers else {
@@ -977,63 +1006,74 @@ pub(crate) fn draw_cascade<'w>(
     let offset = world.get::<ViewUniformOffset>(entity);
     let caster = world.get::<super::caster::CasterViews>(entity);
     let materials = world.resource::<super::caster_material::CasterMaterials>();
-    let mut counts = (0, 0);
-    for (batch, entry) in draws.batches.iter().enumerate() {
-        let pipelines = state.pipelines.get(batch).copied().unwrap_or_default();
-        if pipelines.caster.is_none()
-            || state
-                .cascades
-                .get(batch)
-                .is_none_or(|rows| rows[cascade] == 0)
-        {
-            continue;
-        }
-        counts.0 += 1;
-        count(state, false);
-        let pipeline = pipelines
-            .caster
-            .and_then(|id| cache.get_render_pipeline(id));
-        let template = draws.templates.get(batch).copied().flatten();
-        // The primary caster has its own material group. Other casters read the surface group.
-        let material = if entry.key.material.type_id() == TypeId::of::<SourceMaterial>() {
-            materials.group(entry.key.material.typed())
-        } else {
-            material_group(world, entry.key.material)
-        };
-        let (
-            Some(pipeline),
-            Some(camera),
-            Some(offset),
-            Some(caster),
-            Some(template),
-            Some(material),
-        ) = (pipeline, camera, offset, caster, template, material)
-        else {
-            continue;
-        };
-        pass.set_render_pipeline(pipeline);
-        pass.set_bind_group(0, camera, &[offset.offset]);
-        pass.set_bind_group(1, caster.binding(cascade), &[]);
-        pass.set_bind_group(3, material, &[]);
-        if !bind_batch(
-            world,
-            pass,
-            buffers,
-            buffers.list_offset(index, 1 + cascade),
-            batch,
-            entry.key.mesh,
-            template.format,
-        ) {
-            continue;
-        }
-        pass.draw_indexed_indirect(
-            &buffers.args,
-            buffers.args_offset(index, 1 + cascade, batch, draws.batches.len()),
-        );
-        counts.1 += 1;
-        count(state, true);
-    }
-    counts
+    let target = BundleTarget {
+        color: None,
+        depth: SHADOW_FORMAT,
+        samples: 1,
+    };
+    let counts = state.bundles[1 + tile].lock().unwrap().draw(
+        world.resource::<RenderDevice>(),
+        target,
+        pass,
+        |pass| {
+            let mut counts = (0, 0);
+            for (batch, entry) in draws.batches.iter().enumerate() {
+                let pipelines = state.pipelines.get(batch).copied().unwrap_or_default();
+                if pipelines.caster.is_none()
+                    || state
+                        .cascades
+                        .get(batch)
+                        .is_none_or(|rows| rows[cascade] == 0)
+                {
+                    continue;
+                }
+                counts.0 += 1;
+                let pipeline = pipelines
+                    .caster
+                    .and_then(|id| cache.get_render_pipeline(id));
+                let template = draws.templates.get(batch).copied().flatten();
+                // The primary caster has its own material group. Other casters read the surface group.
+                let material = if entry.key.material.type_id() == TypeId::of::<SourceMaterial>() {
+                    materials.group(entry.key.material.typed())
+                } else {
+                    material_group(world, entry.key.material)
+                };
+                let (
+                    Some(pipeline),
+                    Some(camera),
+                    Some(offset),
+                    Some(caster),
+                    Some(template),
+                    Some(material),
+                ) = (pipeline, camera, offset, caster, template, material)
+                else {
+                    continue;
+                };
+                pass.set_render_pipeline(pipeline);
+                pass.set_bind_group(0, camera, &[offset.offset]);
+                pass.set_bind_group(1, caster.binding(tile), &[]);
+                pass.set_bind_group(3, material, &[]);
+                if !bind_batch(
+                    world,
+                    pass,
+                    buffers,
+                    buffers.list_offset(index, 1 + cascade),
+                    batch,
+                    entry.key.mesh,
+                    template.format,
+                ) {
+                    continue;
+                }
+                pass.draw_indexed_indirect(
+                    &buffers.args,
+                    buffers.args_offset(index, 1 + cascade, batch, draws.batches.len()),
+                );
+                counts.1 += 1;
+            }
+            counts
+        },
+    );
+    bundle_counts(world, state, counts)
 }
 
 pub fn install(app: &mut SubApp) {
