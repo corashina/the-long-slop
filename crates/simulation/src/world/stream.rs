@@ -1969,6 +1969,52 @@ impl WorldStream {
         }
         Ok(placements)
     }
+    /// Adds a fixed startup placement of world prototype `prototype` at `pose`. The sandbox uses it.
+    /// It spawns like the startup list when the player is within the item spawn distance.
+    pub fn add_startup_placement(
+        &mut self,
+        prototype: &SourceId,
+        pose: super::AbsolutePose,
+    ) -> Result<(), ReferenceError> {
+        if self.startup.is_none() {
+            return Err(ReferenceError("The startup area is not ready".into()));
+        }
+        let scale = self
+            .reference
+            .prototypes
+            .iter()
+            .find(|p| &p.source == prototype)
+            .ok_or_else(|| ReferenceError("Missing startup prototype".into()))?
+            .prefab_pose
+            .scale;
+        let radius = self.contents.rules.radius(prototype).unwrap_or(0.);
+        let ordinal = (self.reference.startup.len() + self.startup_items.len()) as u32
+            + self
+                .startup_placements
+                .iter()
+                .filter(|p| &p.id.generator == prototype)
+                .count() as u32;
+        self.startup_placements.push(Placement {
+            id: super::GeneratedId {
+                layer: WorldLayer::Startup,
+                generator: prototype.clone(),
+                unit: [0, 0],
+                ordinal,
+                children: Vec::new(),
+            },
+            prototype: prototype.clone(),
+            pose,
+            scale,
+            bounds: WorldBounds {
+                min: pose.position.map(|v| v - radius),
+                max: pose.position.map(|v| v + radius),
+            },
+            object_seed: 0,
+        });
+        // The next request refreshes the wanted structures.
+        self.structure_focus = [[f64::INFINITY; 3]; 2];
+        Ok(())
+    }
     /// Fixed startup placements request their contents within the item spawn distance.
     /// A changed placement returns through the changed destination replay instead.
     fn refresh_startup_placements(&mut self) {
@@ -3725,6 +3771,10 @@ impl WorldStream {
         }
     }
     pub fn supports(&self, swept: WorldBounds) -> bool {
+        self.support_gap(swept).is_none()
+    }
+    /// The first missing part of the world in `swept`, or None when it is loaded.
+    pub fn support_gap(&self, swept: WorldBounds) -> Option<&'static str> {
         if !self.initial_generation_ready
             || self.plan_revision != self.request.revision
             || self.next_road != self.road_candidates.len()
@@ -3732,7 +3782,7 @@ impl WorldStream {
                 .into_iter()
                 .all(f64::is_finite)
         {
-            return false;
+            return Some("plan");
         }
         if self.selected_roads.iter().any(|r| {
             self.wanted_roads.contains(&r.segment.index)
@@ -3743,14 +3793,14 @@ impl WorldStream {
                         && s.collider.is_some()
                 })
         }) {
-            return false;
+            return Some("road");
         }
         if self.wanted_structures.iter().any(|p| {
             [0, 2].into_iter().all(|axis| {
                 p.bounds.min[axis] <= swept.max[axis] && p.bounds.max[axis] >= swept.min[axis]
             }) && !self.structures.iter().any(|s| s.placement.id == p.id)
         }) {
-            return false;
+            return Some("structure");
         }
         if self.lights.iter().any(|light| {
             light.influences(swept)
@@ -3759,7 +3809,7 @@ impl WorldStream {
                     .iter()
                     .any(|s| light.owned_by(&s.placement.id))
         }) {
-            return false;
+            return Some("light");
         }
         let size = self.tiles[0].size as f64;
         let x0 = ((swept.min[0] + size * 0.5) / size).floor() as i64;
@@ -3770,9 +3820,9 @@ impl WorldStream {
             || z1 < z0
             || (x1 - x0 + 1).saturating_mul(z1 - z0 + 1) > self.limits.tiles[0] as i64
         {
-            return false;
+            return Some("tile count");
         }
-        (x0..=x1).all(|x| {
+        let loaded = (x0..=x1).all(|x| {
             (z0..=z1).all(|z| {
                 self.surfaces.iter().any(|s| {
                     s.key
@@ -3783,7 +3833,8 @@ impl WorldStream {
                         && s.collider.is_some()
                 })
             })
-        })
+        });
+        (!loaded).then_some("terrain")
     }
     fn refresh_helper_context(&mut self, bounds: WorldBounds) {
         let required = self.placements.foundation_count()

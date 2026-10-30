@@ -82,12 +82,7 @@ impl InstanceMaterials<'_> {
                     let source = stream.lamp_materials(&prototype.source, &source_node.source)?
                         [index]
                         .clone();
-                    let primary = reference
-                        .rendering
-                        .materials
-                        .iter()
-                        .find(|m| m.source == source && m.asset == prototype.asset)
-                        .map(|m| (m.asset, m.gltf_material));
+                    let primary = source_primary(reference, prototype, &source);
                     ready &= self.admit_binding(
                         ledger,
                         reference,
@@ -540,6 +535,19 @@ impl InstanceMaterial {
         }
     }
 }
+/// The primary material of `source`. A material exported with another asset only is found there.
+pub fn source_primary(
+    reference: &ReferenceManifest,
+    prototype: &WorldPrototypeReference,
+    source: &crate::reference::SourceId,
+) -> Option<(crate::reference::AssetId, u32)> {
+    let materials = &reference.rendering.materials;
+    materials
+        .iter()
+        .find(|m| m.source == *source && m.asset == prototype.asset)
+        .or_else(|| materials.iter().find(|m| m.source == *source))
+        .map(|m| (m.asset, m.gltf_material))
+}
 pub fn ready(ticket: &Option<PipelineTicket>) -> Result<bool, ReferenceError> {
     match ticket.as_ref().map(PipelineTicket::state) {
         Some(RenderingState::Ready) => Ok(true),
@@ -602,15 +610,7 @@ pub fn selected_material<'a>(
                                             .and_then(|r| r.fields.get("m_GameObject"));
                                         matches!((owner,node_owner), (Some(crate::reference::WorldValue::Link(a)),Some(crate::reference::WorldValue::Link(b))) if a == b)
                                     }).map(|(_,material)| material));
-    let selected_primary = selected
-        .and_then(|id| {
-            reference
-                .rendering
-                .materials
-                .iter()
-                .find(|m| m.source == *id && m.asset == prototype.asset)
-        })
-        .map(|m| (m.asset, m.gltf_material));
+    let selected_primary = selected.and_then(|id| source_primary(reference, prototype, id));
     let initial = stream
         .appearance(&placement.id)
         .iter()
@@ -682,11 +682,6 @@ pub fn biome_material<'a>(
     let Some(variant) = current.and_then(|current| stream.biome_material(current, biome)) else {
         return (initial, selected);
     };
-    let primary = reference
-        .rendering
-        .materials
-        .iter()
-        .find(|m| m.source == *variant && m.asset == prototype.asset)
-        .map(|m| (m.asset, m.gltf_material));
+    let primary = source_primary(reference, prototype, variant);
     (primary, Some(variant))
 }

@@ -937,14 +937,9 @@ impl SourceInstances {
                                         gpu += extra_gpu;
                                     }
                                     for source in variant_ids {
-                                        let initial = reference
-                                            .rendering
-                                            .materials
-                                            .iter()
-                                            .find(|m| {
-                                                m.source == source && m.asset == prototype.asset
-                                            })
-                                            .map(|m| (m.asset, m.gltf_material));
+                                        let initial = super::instance_materials::source_primary(
+                                            reference, prototype, &source,
+                                        );
                                         let mut variant = materials
                                             .bind(
                                                 stream.frame().request.session,
@@ -1537,14 +1532,8 @@ impl SourceInstances {
                         .iter()
                         .any(|v| v.source.as_ref() == selected)
                 {
-                    // A condition material can be exported with another asset only.
                     let initial = selected.and_then(|source| {
-                        let materials = &reference.rendering.materials;
-                        materials
-                            .iter()
-                            .find(|m| &m.source == source && m.asset == prototype.asset)
-                            .or_else(|| materials.iter().find(|m| &m.source == source))
-                            .map(|m| (m.asset, m.gltf_material))
+                        super::instance_materials::source_primary(reference, prototype, source)
                     });
                     // The new material was not admitted with the instance. Admit it first.
                     let admitted = materials.admit_binding(

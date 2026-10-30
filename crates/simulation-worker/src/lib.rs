@@ -19,14 +19,11 @@ pub fn start(
     draw_distance: f32,
     biome: u32,
     start_car: i32,
-    sandbox_cars: Vec<String>,
 ) -> Result<Vec<u8>, JsValue> {
     console_error_panic_hook::set_once();
     let error = |e: &dyn std::fmt::Display| JsValue::from_str(&e.to_string());
-    let mut reference = ReferenceManifest::from_runtime_json(manifest).map_err(|e| error(&e))?;
-    simulation::sandbox::add_startup_cars(Arc::make_mut(&mut reference.world), &sandbox_cars)
-        .map_err(|e| error(&e))?;
-    let reference = Arc::new(reference);
+    let reference =
+        Arc::new(ReferenceManifest::from_runtime_json(manifest).map_err(|e| error(&e))?);
     let init = SimInit {
         mode: GameMode::from_menu(&reference.world, biome, start_car),
         draw_distance,

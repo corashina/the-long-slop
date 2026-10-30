@@ -1,9 +1,9 @@
 // Test sandbox of `?sandbox`. Claude runs the ROADMAP test pass with it in the browser.
-// URL flags `cars=Bus02,Bike01` and `date=MM-DD` apply at page load. Each call resolves with its reply.
+// URL flag `date=MM-DD` applies at page load. Each call resolves with its reply.
 export function readSandbox(search){
  const params=new URLSearchParams(search);if(!params.has('sandbox'))return null;
  const date=/^(\d\d)-(\d\d)$/.exec(params.get('date')??'');
- return {cars:(params.get('cars')??'').split(',').filter(Boolean),calendar:date?Number(date[1])*100+Number(date[2]):null};
+ return {calendar:date?Number(date[1])*100+Number(date[2]):null};
 }
 // Source `fluidenum` indices. Other fluids go by number.
 const FLUIDS={petrol:0,diesel:5};
