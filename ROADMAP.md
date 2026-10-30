@@ -37,7 +37,7 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | X06d | Motion vectors and TAA | L | Velocity buffer and TAA with the source jitter, blend and sharpness. The Antialiasing toggle switches 4x MSAA and TAA together. Off is 1 sample and no TAA. WebGPU has no 8x. |
 | X06e | Motion blur | M | Needs X06d motion vectors. Shutter angle follows car speed. Off where the source turns it off. |
 | X06f | Depth of field and binocular lens | M | Main DoF with focus ray, night clamp and Dof toggle. Binocular DoF, lens distortion and chromatic aberration. |
-| X06g | Heat haze and LUT options | M | Heat haze pass weighted by temperature, old particle heat haze, LUT option (Default, C64, Sepia), grayscale. |
+| X06g | Old particle heat haze | S | Player `HeatHaze` particle system with the `heatvalami` BumpDistort material. Old heat haze toggle, default off. |
 
 Not planned: multiplayer, VR, stereo 3D, mod events, Steam features.
 

@@ -1,6 +1,6 @@
 #import source_float_store::{half4, source_max, source_sat}
-// Installed Uber4653 (main) and Uber4251 (far/foreground), Linear project.
-struct Params { extent: vec4<f32>, noise: vec4<f32>, bloom: vec4<f32>, tint: vec4<f32>, dirt: vec4<f32>, grading: vec4<f32>, vignette: vec4<f32> }
+// Installed Uber4653 (main HDR), Uber4641 (main LDR) and Uber4251 (far/foreground), Linear project.
+struct Params { extent: vec4<f32>, noise: vec4<f32>, bloom: vec4<f32>, tint: vec4<f32>, dirt: vec4<f32>, grading: vec4<f32>, vignette: vec4<f32>, strip: vec4<f32> }
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var source_color: texture_2d<f32>;
 @group(0) @binding(2) var noise_texture: texture_2d<f32>;
@@ -13,6 +13,7 @@ struct Params { extent: vec4<f32>, noise: vec4<f32>, bloom: vec4<f32>, tint: vec
 @group(0) @binding(8) var lut_texture: texture_3d<f32>;
 @group(0) @binding(9) var linear_repeat: sampler;
 @group(0) @binding(10) var vignette_mask: texture_2d<f32>;
+@group(0) @binding(11) var strip_lut: texture_2d<f32>;
 #endif
 fn f(bits:u32)->f32 { return bitcast<f32>(bits); }
 fn sat3(x:vec3<f32>)->vec3<f32> { return vec3(source_sat(x.x),source_sat(x.y),source_sat(x.z)); }
@@ -49,10 +50,23 @@ fn srgb_to_linear(c:vec3<f32>)->vec3<f32> {
   let masked=color.rgb*mix(params.vignette.rgb,vec3(1.),mask);
   color=vec4(mix(color.rgb,masked,params.vignette.w),mix(1.,color.a,mask));
  }
+#ifdef SOURCE_UBER_LDR
+ // Installed Uber4641 COLOR_GRADING_LDR_2D: ApplyLut2D on the sRGB color, then back to linear.
+ color=vec4(sat3(color.rgb),source_sat(color.a));
+ let srgb=linear_to_srgb(color.rgb);
+ let scaled=srgb*params.strip.z;
+ let shift=floor(scaled.b);
+ let strip_uv=fma(scaled.rg,params.strip.xy,params.strip.xy*.5);
+ let first=vec2(fma(shift,params.strip.y,strip_uv.x),strip_uv.y);
+ let a=textureSampleLevel(strip_lut,linear_clamp,first,0.).rgb;
+ let b=textureSampleLevel(strip_lut,linear_clamp,first+vec2(params.strip.y,0.),0.).rgb;
+ color=vec4(srgb_to_linear(fma(vec3(fma(srgb.b,params.strip.z,-shift)),b-a,a)),color.a);
+#else
  color=color*params.grading.z;
  let encoded=sat3(fma(log2(fma(color.rgb,vec3(f(0x40b1c71du)),vec3(f(0x3d449774u)))),vec3(f(0x3d96870eu)),vec3(f(0x3ec5a683u))));
  let lut_uv=fma(encoded*params.grading.y,vec3(params.grading.x),vec3(params.grading.x*.5));
  color=vec4(textureSampleLevel(lut_texture,linear_clamp,lut_uv,0.).rgb,color.a);
+#endif
 #endif
  // Lighting image loading preserves the source Alpha8 channel in RGBA8 alpha.
  let noise=textureSampleLevel(noise_texture,point_repeat,fma(uv,params.noise.xy,params.noise.zw),0.).a;

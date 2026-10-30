@@ -8,7 +8,9 @@ pub mod chain;
 pub mod copy;
 pub mod dither;
 pub mod exposure;
+pub mod heat_haze;
 pub mod lut;
+pub mod lut_ldr;
 pub mod uber;
 
 use super::render_targets::{HDR_FORMAT, HISTOGRAM_FORMAT};

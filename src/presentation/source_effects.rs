@@ -33,6 +33,10 @@ struct EffectInput {
     glasses: Option<u32>,
     binoculars: bool,
     ambient_occlusion: bool,
+    screen: super::screen_effects::ScreenEffects,
+    cycle: (simulation::lighting::CyclePhase, f32),
+    temperature: f32,
+    time: f32,
 }
 fn snapshot_input(
     frame: Res<SourceViewFrame>,
@@ -40,6 +44,7 @@ fn snapshot_input(
     sim: Res<super::sim_frame::SimFrameResource>,
     effects: Res<super::sunglasses::SunglassesEffects>,
     occlusion: Res<super::ambient_occlusion::AmbientOcclusion>,
+    screen: Res<super::screen_effects::ScreenEffects>,
     mut input: ResMut<EffectInput>,
 ) {
     if input.scene != frame.scene {
@@ -65,6 +70,11 @@ fn snapshot_input(
         .map(|g| g.profile);
     // The binocular `PP` volume holds the camera while the player uses binoculars.
     input.binoculars = sim.frame.state.flags & simulation::boundary::StateBlock::BINOCULARS != 0;
+    let cycle = &sim.frame.lighting.cycle;
+    input.screen = *screen;
+    input.cycle = (cycle.phase, cycle.progress);
+    input.temperature = cycle.ambient_temperature;
+    input.time = cycle.shader_time_seconds as f32;
     input.frame = frame.frame;
 }
 
@@ -131,10 +141,15 @@ pub fn install(app: &mut App) {
     app.init_resource::<EffectInput>()
         .init_resource::<super::sunglasses::SunglassesEffects>()
         .init_resource::<super::ambient_occlusion::AmbientOcclusion>()
+        .init_resource::<super::screen_effects::ScreenEffects>()
         .add_plugins(ExtractResourcePlugin::<EffectInput>::default())
         .add_systems(
             Update,
-            (super::sunglasses::poll, super::ambient_occlusion::poll),
+            (
+                super::sunglasses::poll,
+                super::ambient_occlusion::poll,
+                super::screen_effects::poll,
+            ),
         )
         .add_systems(
             PostUpdate,
@@ -172,7 +187,9 @@ fn shaders(assets: &LightingRenderAssets) -> PostShaders {
         exposure: s.exposure.clone(),
         bloom: s.bloom.clone(),
         lut: s.lut.clone(),
+        lut_ldr: s.lut_ldr.clone(),
         uber: s.uber.clone(),
+        heat_haze: s.heat_haze.clone(),
         ao_depth: s.ao_depth.clone(),
         ao_render: s.ao_render.clone(),
         ao_upsample: s.ao_upsample.clone(),
@@ -235,11 +252,19 @@ fn prepare(
             .get(id)
             .and_then(|handle| images.get(handle.id()))
     };
-    let (Some(dirt), Some(vignette_mask)) =
-        (image(&record.bloom.dirt), image(&record.binoculars.mask))
-    else {
+    let (Some(dirt), Some(vignette_mask), Some(c64), Some(sepia), Some(haze_noise)) = (
+        image(&record.bloom.dirt),
+        image(&record.binoculars.mask),
+        image(&record.luts.c64),
+        image(&record.luts.sepia),
+        image(&record.heat_haze.noise),
+    ) else {
         return;
     };
+    fn lut(image: &GpuImage) -> (&TextureView, [u32; 2]) {
+        let size = image.texture_descriptor.size;
+        (&image.texture_view, [size.width, size.height])
+    }
     if record.blue_noise.iter().any(|id| image(id).is_none()) {
         return;
     }
@@ -251,6 +276,9 @@ fn prepare(
             dirt.texture_descriptor.size.height,
         ],
         vignette_mask: &vignette_mask.texture_view,
+        luts: [lut(c64), lut(sepia)],
+        heat_haze_noise: &haze_noise.texture_view,
+        camera_depth: surfaces.targets.views[0].depth.sampled.as_ref().unwrap(),
     };
     let colors = surfaces.targets.world.clone();
     let extent = [colors.width, colors.height];
@@ -406,6 +434,11 @@ fn encode_post(
             dead_weight: input.dead_weight,
             glasses: input.glasses,
             binoculars: input.binoculars,
+            cycle: input.cycle,
+            lut: input.screen.lut,
+            grayscale: input.screen.grayscale,
+            heat_haze: input.screen.heat_haze.then_some(input.temperature),
+            time: input.time,
         },
         targets.colors.attachment(),
         targets.colors.resolve_target(),

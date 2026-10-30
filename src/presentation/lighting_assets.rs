@@ -190,7 +190,9 @@ pub struct LightingShaders {
     pub caster_math: Handle<Shader>,
     pub bloom: Handle<Shader>,
     pub lut: Handle<Shader>,
+    pub lut_ldr: Handle<Shader>,
     pub uber: Handle<Shader>,
+    pub heat_haze: Handle<Shader>,
     pub ao_depth: Handle<Shader>,
     pub ao_render: Handle<Shader>,
     pub ao_upsample: Handle<Shader>,
@@ -200,7 +202,7 @@ pub struct LightingShaders {
     pub props_cull: Handle<Shader>,
 }
 impl LightingShaders {
-    pub(crate) fn handles(&self) -> [&Handle<Shader>; 21] {
+    pub(crate) fn handles(&self) -> [&Handle<Shader>; 23] {
         [
             &self.lighting,
             &self.cloud,
@@ -215,7 +217,9 @@ impl LightingShaders {
             &self.caster_math,
             &self.bloom,
             &self.lut,
+            &self.lut_ldr,
             &self.uber,
+            &self.heat_haze,
             &self.ao_depth,
             &self.ao_render,
             &self.ao_upsample,

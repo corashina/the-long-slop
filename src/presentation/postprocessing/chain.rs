@@ -8,17 +8,22 @@ use super::{
     bloom::BloomPass,
     copy::CopyPass,
     exposure::ExposurePass,
+    heat_haze::HeatHazePass,
     lut::{CURVE_BYTES, LUT_BYTES, LutPass},
+    lut_ldr::{LDR_CURVE_BYTES, LutLdrPass, STRIP_BYTES},
     uber::{MainInputs, UberPass},
 };
+use crate::presentation::screen_effects::Lut;
 use crate::reference::postprocessing::{
-    DeadGrading, DeadProfile, GlassesProfile, GradingSettings, PostprocessingRecord, Tonemapper,
+    DeadGrading, DeadProfile, GlassesProfile, GradingSaturation, GradingSettings,
+    PostprocessingRecord, Tonemapper,
 };
 use bevy::prelude::*;
 use bevy::render::{
     render_resource::*,
     renderer::{RenderAdapter, RenderDevice, RenderQueue},
 };
+use simulation::lighting::CyclePhase;
 
 #[derive(Clone)]
 pub struct PostShaders {
@@ -27,7 +32,9 @@ pub struct PostShaders {
     pub exposure: Handle<Shader>,
     pub bloom: Handle<Shader>,
     pub lut: Handle<Shader>,
+    pub lut_ldr: Handle<Shader>,
     pub uber: Handle<Shader>,
+    pub heat_haze: Handle<Shader>,
     pub ao_depth: Handle<Shader>,
     pub ao_render: Handle<Shader>,
     pub ao_upsample: Handle<Shader>,
@@ -39,6 +46,12 @@ pub struct PostTextures<'a> {
     pub dirt_extent: [u32; 2],
     /// `BinocularVignette::mask`.
     pub vignette_mask: &'a TextureView,
+    /// `LdrLuts` c64 and sepia with their extents.
+    pub luts: [(&'a TextureView, [u32; 2]); 2],
+    /// `HeatHaze::noise`.
+    pub heat_haze_noise: &'a TextureView,
+    /// The main view depth.
+    pub camera_depth: &'a TextureView,
 }
 #[derive(Clone, Copy)]
 pub struct PostFrame {
@@ -52,6 +65,14 @@ pub struct PostFrame {
     pub glasses: Option<u32>,
     /// The binocular volume applies its masked vignette.
     pub binoculars: bool,
+    /// Day cycle phase and progress for the `postprocesscontrol` saturation.
+    pub cycle: (CyclePhase, f32),
+    pub lut: Lut,
+    pub grayscale: bool,
+    /// The ambient temperature while the heat haze setting is on.
+    pub heat_haze: Option<f32>,
+    /// Shader `_Time.y`.
+    pub time: f32,
 }
 struct ColorTarget {
     _texture: Texture,
@@ -86,7 +107,12 @@ struct MainChain {
     bloom: BloomPass,
     lut: LutPass,
     lut_baked: bool,
-    /// Main grading with the applied temperature.
+    ldr: LutLdrPass,
+    /// The user LUT in the baked LDR strip, and the one in flight.
+    ldr_baked: Option<usize>,
+    ldr_pending: Option<usize>,
+    saturation: GradingSaturation,
+    /// Main grading with the applied temperature and saturation.
     base: GradingSettings,
     dead: DeadGrading,
     /// `clothing.glasses_profiles`.
@@ -106,6 +132,7 @@ pub struct SourcePostChain {
     initial: ColorTarget,
     copy: CopyPass,
     uber: UberPass,
+    haze: HeatHazePass,
     main: MainChain,
     stop_nan: bool,
     completed: u32,
@@ -137,17 +164,18 @@ impl SourcePostChain {
         let resize_count = previous.as_ref().map_or(0, |old| old.resize_count + 1);
         let completed = previous.as_ref().map_or(0, |old| old.completed);
         let initial = ColorTarget::new(device, extent);
-        let (mut copy, old_main, old_uber) = match previous {
-            Some(old) => (old.copy, Some(old.main), Some(old.uber)),
+        let (mut copy, old_main, old_uber, old_haze) = match previous {
+            Some(old) => (old.copy, Some(old.main), Some(old.uber), Some(old.haze)),
             None => (
                 CopyPass::new(device, cache, shaders.copy.clone(), source),
+                None,
                 None,
                 None,
             ),
         };
         copy.rebind(device, cache, source);
         let main = {
-            let (old_histogram, old_exposure, old_bloom, old_lut, lut_baked, grading) =
+            let (old_histogram, old_exposure, old_bloom, old_lut, lut_baked, old_ldr, grading) =
                 match old_main {
                     Some(old) => (
                         Some(old.histogram),
@@ -155,6 +183,7 @@ impl SourcePostChain {
                         Some(old.bloom),
                         Some(old.lut),
                         old.lut_baked,
+                        Some((old.ldr, old.ldr_baked)),
                         (
                             old.base,
                             old.dead,
@@ -176,6 +205,7 @@ impl SourcePostChain {
                             None,
                             None,
                             false,
+                            None,
                             (
                                 record.grading,
                                 dead,
@@ -236,12 +266,30 @@ impl SourcePostChain {
                     &record.grading,
                 )?
             };
+            let (ldr, ldr_baked) = match old_ldr {
+                Some(old) => old,
+                None => (
+                    LutLdrPass::new(
+                        device,
+                        queue,
+                        cache,
+                        shaders.lut_ldr.clone(),
+                        textures.luts,
+                        &grading,
+                    )?,
+                    None,
+                ),
+            };
             MainChain {
                 histogram,
                 exposure,
                 bloom,
                 lut,
                 lut_baked,
+                ldr,
+                ldr_baked,
+                ldr_pending: None,
+                saturation: record.saturation,
                 base,
                 dead,
                 profiles,
@@ -258,6 +306,7 @@ impl SourcePostChain {
             dirt_extent: textures.dirt_extent,
             vignette_mask: textures.vignette_mask,
             lut: main.lut.output(),
+            strip: main.ldr.output(),
             sample_scale: main.bloom.layout.sample_scale,
         };
         let mut uber = UberPass::new(
@@ -274,13 +323,27 @@ impl SourcePostChain {
             old_uber,
         )?;
         uber.set_post_exposure(main.grading.post_exposure);
+        let haze = HeatHazePass::new(
+            device,
+            queue,
+            cache,
+            shaders.heat_haze.clone(),
+            textures.camera_depth,
+            textures.heat_haze_noise,
+            extent,
+            samples,
+            &record.heat_haze,
+            old_haze.as_ref(),
+        );
         let area = u64::from(extent[0]) * u64::from(extent[1]);
-        let logical_bytes = area * 8
+        let logical_bytes = area * 16
             + main.histogram.layout.logical_bytes()
             + 8
             + main.bloom.layout.logical_bytes()
             + LUT_BYTES
-            + CURVE_BYTES;
+            + CURVE_BYTES
+            + STRIP_BYTES
+            + LDR_CURVE_BYTES;
         Ok(Self {
             extent,
             logical_bytes,
@@ -289,6 +352,7 @@ impl SourcePostChain {
             initial,
             copy,
             uber,
+            haze,
             main,
             stop_nan,
             completed,
@@ -308,6 +372,8 @@ impl SourcePostChain {
             && self.main.exposure.ready(cache)
             && self.main.bloom.ready(cache)
             && self.main.lut.ready(cache)
+            && self.main.ldr.ready(cache)
+            && self.haze.ready(cache)
     }
     pub fn failure(&self, cache: &PipelineCache) -> Option<String> {
         self.copy
@@ -317,6 +383,8 @@ impl SourcePostChain {
             .or_else(|| self.main.exposure.failure(cache))
             .or_else(|| self.main.bloom.failure(cache))
             .or_else(|| self.main.lut.failure(cache))
+            .or_else(|| self.main.ldr.failure(cache))
+            .or_else(|| self.haze.failure(cache))
     }
     pub fn recreate(&mut self) {
         self.pending = None;
@@ -324,6 +392,8 @@ impl SourcePostChain {
         self.uber.recreate();
         self.main.exposure.recreate();
         self.main.lut_baked = false;
+        self.main.ldr_baked = None;
+        self.main.ldr_pending = None;
     }
     /// Noise index, exposure output/initialized.
     pub fn history(&self) -> [u32; 3] {
@@ -376,6 +446,14 @@ impl SourcePostChain {
             changed |= temperature != self.main.base.temperature;
             self.main.base.temperature = temperature;
         }
+        // `postprocesscontrol.Update`: grayscale, else the day or night saturation.
+        let saturation = if frame.grayscale {
+            -100.
+        } else {
+            self.main.saturation.at(frame.cycle.0, frame.cycle.1)
+        };
+        changed |= saturation != self.main.base.saturation;
+        self.main.base.saturation = saturation;
         if !(0. ..=1.).contains(&frame.dead_weight) {
             return Err("Invalid source dead weight".into());
         }
@@ -397,26 +475,60 @@ impl SourcePostChain {
                 self.main
                     .lut
                     .set_grading(device, queue, &grading, tonemapper);
+                self.main.ldr.set_grading(device, queue, &grading);
                 self.uber.set_post_exposure(grading.post_exposure);
                 self.main.grading = grading;
                 self.main.tonemapper = tonemapper;
                 self.main.lut_baked = false;
+                self.main.ldr_baked = None;
             }
         }
         if !self.main.lut_baked {
             self.main.lut.encode(encoder, cache);
         }
+        // ILUT 1 and 2 set LDR grading. The lens and `DeadV` override gradingMode with HDR.
+        let ldr = match frame.lut {
+            Lut::Default => None,
+            Lut::C64 => Some(0),
+            Lut::Sepia => Some(1),
+        }
+        .filter(|_| frame.glasses.is_none() && frame.dead_weight == 0.);
+        self.main.ldr_pending = None;
+        if let Some(index) = ldr
+            && self.main.ldr_baked != Some(index)
+        {
+            self.main.ldr.encode(encoder, cache, index);
+            self.main.ldr_pending = Some(index);
+        }
+        // The heat haze at weight 0 samples texel centers: the same image. Then it does not run.
+        let haze = frame
+            .heat_haze
+            .map(|temperature| self.haze.weight(temperature))
+            .filter(|weight| *weight > 0.);
         self.uber.set_vignette(frame.binoculars);
+        let (target, target_resolve) = match haze {
+            Some(_) => (&self.haze.input, None),
+            None => (output, resolve),
+        };
         if !self.uber.encode(
             encoder,
             device,
             queue,
             cache,
-            output,
-            resolve,
+            target,
+            target_resolve,
             exposure_index,
+            ldr.is_some(),
+            haze.is_some(),
         ) {
             return Err("Source Uber did not encode a ready pipeline".into());
+        }
+        if let Some(weight) = haze
+            && !self.haze.encode(
+                encoder, device, queue, cache, output, resolve, weight, frame.time,
+            )
+        {
+            return Err("Source heat haze did not encode a ready pipeline".into());
         }
         self.pending = Some(frame.token);
         Ok(true)
@@ -427,6 +539,9 @@ impl SourcePostChain {
         }
         self.main.exposure.completed();
         self.main.lut_baked = true;
+        if let Some(index) = self.main.ldr_pending.take() {
+            self.main.ldr_baked = Some(index);
+        }
         self.uber.completed();
         self.completed = token;
         self.pending = None;

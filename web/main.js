@@ -8,6 +8,8 @@ import {installGameMode,installStartCar} from './game-mode.js';
 installGameMode(window,document.querySelector('#biome'));
 import {installSunglassesEffects} from './sunglasses.js';
 installSunglassesEffects(window,()=>localStorage,document.querySelector('#sunglasses-effects'));
+import {installScreenEffects} from './screen-effects.js';
+installScreenEffects(window,()=>localStorage,{heatHaze:document.querySelector('#heat-haze'),lut:document.querySelector('#lut'),grayscale:document.querySelector('#grayscale')});
 import {installAntialiasing} from './antialiasing.js';
 installAntialiasing(window,()=>localStorage,document.querySelector('#antialiasing'));
 import {installAmbientOcclusion} from './ambient-occlusion.js';

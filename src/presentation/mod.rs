@@ -23,6 +23,7 @@ pub mod player_body;
 pub mod ragdoll;
 pub mod reference;
 pub mod save;
+pub mod screen_effects;
 mod shadow_batch;
 mod shadow_cache;
 pub mod shadow_quality;
