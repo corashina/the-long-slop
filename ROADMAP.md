@@ -52,7 +52,7 @@ Prepare once:
 2. Paste the acquisition hash that the export prints into `CONTRACT_SHA256` if it changed.
 3. Run all ignored tests: `cargo test --release --lib -- --ignored --nocapture`.
 4. In that output, note the `w02_` bytes per km and the 5,000 km estimate. Above 200 MB, compact spawn boundaries.
-5. Claude runs the steps in Chrome with the test sandbox: see `tests/sandbox/README.md`. First check the sandbox itself: `cars=Bus01,Bus02,Bus03` stand clear in front of the garage car, and `teleport`, `building`, `spawn`, `hand`, `fill` and `cycle` work. Use `tests/sandbox/buses.js` for More cars steps 16-20.
+5. Claude runs the steps in Chrome with the test sandbox: see `tests/sandbox/README.md`. First check the sandbox itself: `cars=Bus02Full` stands clear in front of the garage car (one extra car only: more exceed the prototype budget), and `teleport`, `building`, `spawn`, `hand`, `fill` and `cycle` work. Use `tests/sandbox/buses.js` for More cars steps 16-20.
 
 ### Starting area
 
