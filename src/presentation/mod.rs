@@ -30,6 +30,7 @@ pub mod player_body;
 pub mod ragdoll;
 pub mod reference;
 pub mod reflections;
+pub mod remote_players;
 pub mod save;
 mod shadow_batch;
 mod shadow_cache;

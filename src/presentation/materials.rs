@@ -671,7 +671,7 @@ pub(crate) fn bind_authored_materials(
     }
     let mut shared = HashMap::<String, Handle<SourceMaterial>>::new();
     let mut segments =
-        HashMap::<(source::AssetId, u8, u8, bool, u32), Handle<SourceMaterial>>::new();
+        HashMap::<(source::AssetId, u8, u8, u8, bool, u32), Handle<SourceMaterial>>::new();
     let mut requests = Vec::new();
     let mut variants = HashSet::new();
     let mut transparent_pass_capacity = 0;
@@ -745,6 +745,7 @@ pub(crate) fn bind_authored_materials(
             let handle = segments
                 .entry((
                     identity.asset,
+                    slot.figure,
                     slot.character,
                     slot.segment,
                     reflected,
@@ -858,6 +859,8 @@ fn shared_handle(
 /// Outfit segment slot of a player or ragdoll primitive.
 #[derive(Component)]
 pub struct OutfitSlot {
+    /// 0 for the local player and its ragdoll, else the remote figure slot plus 1. Each figure has its own colors.
+    pub figure: u8,
     pub character: u8,
     pub segment: u8,
     /// glTF material index of the segment `default_material`.

@@ -252,6 +252,10 @@ pub struct BodyState {
     head_target: usize,
     /// `LHTarget`, `RHTarget`, `LLTarget`, `RLTarget`.
     targets: [usize; 4],
+    /// `Pelvis`, the owner of the leg chains.
+    pelvis: usize,
+    /// `playeranimationscript.sendInterval`.
+    send_interval: f32,
     walk_paths: [Vec<usize>; 2],
     /// `LHSitPose`, `RHSitPose`, `LLSitPose`, `RLSitPose`.
     sit_poses: [Vec<usize>; 4],
@@ -411,6 +415,8 @@ impl BodyState {
             def_def_legs: [i(anchors[11]), i(anchors[12])],
             head_target,
             targets: [1, 2, 3, 4].map(|t| i(targets[t])),
+            pelvis: i(target("Pelvis")?),
+            send_interval: scalar(&p.animation_scalars, "sendInterval")?,
             walk_paths: p.walk_paths.clone().map(|w| w.into_iter().map(i).collect()),
             sit_poses: p.sit_poses.clone().map(|w| w.into_iter().map(i).collect()),
             walk_offsets: p.walk_offsets,
@@ -484,7 +490,51 @@ impl BodyState {
         self.reach.resolve(limbs, resolve);
         self.upd_hand_pos(input, dt);
         self.upd_v_hand_leg_targets(dt);
-        // IKscript.LateUpdate, in component order.
+        self.solve_chains();
+    }
+
+    /// Source `DoSend` targets relative to the Player: head, left hand, right hand, left leg, right leg,
+    /// then `Pelvis`. Position, then rotation.
+    pub fn sent_targets(&self) -> [[f32; 7]; 6] {
+        let mut nodes = [self.head_target, 0, 0, 0, 0, self.pelvis];
+        nodes[1..5].copy_from_slice(&self.targets);
+        nodes.map(|i| {
+            let (p, r) = self.rig.target(i);
+            [p.x, p.y, p.z, r.x, r.y, r.z, r.w]
+        })
+    }
+
+    /// Multiplayer period of `sent_targets`.
+    pub fn send_interval(&self) -> f32 {
+        self.send_interval
+    }
+
+    /// A remote body: takes the duck value and the `sent_targets` of a peer and runs the IK chains.
+    pub fn pose_remote(&mut self, duck: f32, targets: &[[f32; 7]; 6]) {
+        let mut nodes = [self.head_target, 0, 0, 0, 0, self.pelvis];
+        nodes[1..5].copy_from_slice(&self.targets);
+        let set = |rig: &mut Rig, i: usize, t: &[f32; 7]| {
+            let rotation = Rotation::from_xyzw(t[3], t[4], t[5], t[6]).normalize();
+            rig.set(i, Vector::new(t[0], t[1], t[2]), rotation);
+        };
+        // `UpdHandPos` duck, then `Pelvis`: the limb targets read their parents after `fk`.
+        let duck = duck.clamp(0., 1.);
+        let root = self.rig.world[self.character_root].rotation;
+        let position = self.rig.world[self.root_duck]
+            .position
+            .lerp(self.rig.world[self.root_stand].position, duck);
+        self.rig.set(self.character_root, position, root);
+        self.rig.fk();
+        set(&mut self.rig, nodes[5], &targets[5]);
+        self.rig.fk();
+        for (i, t) in nodes[..5].iter().zip(targets) {
+            set(&mut self.rig, *i, t);
+        }
+        self.solve_chains();
+    }
+
+    /// IKscript.LateUpdate, in component order.
+    fn solve_chains(&mut self) {
         self.rig.fk();
         for c in &self.chains {
             let count = c.ik.bone_count();

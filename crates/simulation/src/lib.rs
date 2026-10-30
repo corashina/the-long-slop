@@ -26,6 +26,7 @@ pub mod interaction;
 pub mod inventory;
 pub mod light_dither;
 pub mod lighting;
+pub mod net;
 pub mod particles;
 pub mod plates;
 pub mod player;
