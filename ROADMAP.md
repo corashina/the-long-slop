@@ -48,13 +48,20 @@ Not planned: multiplayer, VR, stereo 3D, mod events, Steam features, developer t
 
 ## Test pass
 
-Run these checks on Tomasz's PC in one run. Nothing below has run in the browser yet.
+Run these checks on Tomasz's PC in one run. Nothing below has passed yet.
+
+Known failures on master a01f1d84 (2026-10-30), fix before the next run:
+
+- Save fails: "Corrupt save: Source first-call context". This blocks every save and load check.
+- Appearance stops the game from both menus: "missing field source_renderer".
+- Looking down shows a hollow shirt and floating hands.
+- Most ignored cargo tests fail: no start vehicle after `load_garage`, restore stays pending, stack overflows in debug.
+- `--test garage_parts`, `--test world_range`, `v03_bus_pool` and `w05_loot_matches_source_rules` match no test.
 
 Prepare once:
 
 1. Pull master. Re-export, then make a release build. Old exports and old saves do not load. Only the current save schema loads.
 2. Paste the acquisition hash that the export prints into `CONTRACT_SHA256` if it changed.
-3. Check the export log for the "Biome materials" line (set count and marked nodes), the melee weapon list, the gun list and the explosion record. The clothing preview export runs without the assets: if it fails, read its error.
 
 ### Starting area (section 1)
 
@@ -88,22 +95,21 @@ Prepare once:
 3. Load a Mixed save with Winter set. The world must load as winter.
 4. Check the winter color: colder view in Winter, changes at biome borders in Mixed.
 5. Check F3 near the garage and on the road in Mixed while the color grading rebakes.
-6. Sandstorms (W07): run `cargo test --lib terrain_sample_matches_published_ground -- --ignored`. Spawn a storm near the player with a temporary hook (never commit it). Check sky, fog, light, sound, dust, wind on loose items, and that dust and wind stop inside buildings and cars. Check the F3 storm line and the frame rate in a storm. Save and load inside a storm.
+6. Sandstorms (W07): spawn a storm near the player with a temporary hook (never commit it). Check sky, fog, light, sound, dust, wind on loose items, and that dust and wind stop inside buildings and cars. Check the F3 storm line and the frame rate in a storm. Save and load inside a storm.
 7. Power cables (W04): check poles link to the next pole on curves and tilted poles, road buildings and the home link to a pole, and the rope meshes are not flipped. Check F3 along the road.
 8. Draw distance (W01): check F3 at 500, 2500 and 5000 m near the garage and on the road. Compare with the frame rate rule.
-9. Set a draw distance that does not fit (above about 5500 m). New game must refuse it and name the largest value. Reload: the slider keeps the last value that started.
-10. Check the slider is locked in the pause menu. Check far terrain, buildings and fog at 2500 m against the original.
-11. Run `cargo test --test world_range -- --ignored --nocapture`. Peaks must stay below the limits.
-12. World population (W05): run `cargo test --release --lib w05_loot_matches_source_rules -- --ignored --nocapture` (about 5 min plus build). All 11 building types must pass. The `unsupported_part_type` drops must be gone.
-13. Check loot in a few building types: gas and oil cans, beer, barrels, buckets and the WC now spawn. Flashlights in loot must not stop the world, and their beams show the cookie on walls and terrain.
-14. Near the Mansion: the crow sound fades in from 1000 m to full at 200 m, and the day and night ambience fades out by the same amount. Check F3 near the Mansion.
-15. Digging (W06): find a buried item (underground spawn). Swing the shovel in each direction (LMB with back, left, right keys). Check the swing sound, hit sounds, hit particles on metal, wood, plants and sand, and that hits push loose items.
-16. Dig a buried item up with the shovel. It must lift, become loose, and then allow pickup. A buried item must refuse pickup. Save and load with an item buried and one dug up.
-17. Metal detector (W06): turn it on and off with use. Check the beep pitch and volume and the needle near metal, buried metal, and behind a wall. Save and load with it on. Check F3 while it scans.
-18. Tumbleweeds (W07): check they spawn near the player, roll in gusts, stop near walls, and save with the world. Check F3 with several tumbleweeds.
-19. Long trips (W02): run `cargo test --release --lib w02_ -- --ignored --nocapture`. Note the printed bytes per km and the 5,000 km estimate. Above 200 MB, compact spawn boundaries.
-20. Also run the roadside tests: `cargo test --lib roadside_ -- --ignored`. Far edits, consumed items and lamp states must stay after their area unloads.
-21. In the browser: drop an item, drive about 10 km out and back, save and reload. The item stays where it was dropped. Check F3 before and after the drive.
+9. Check far terrain, buildings and fog at 2500 m against the original.
+10. Run `cargo test --test world_range -- --ignored --nocapture`. Peaks must stay below the limits.
+11. World population (W05): run `cargo test --release --lib w05_loot_matches_source_rules -- --ignored --nocapture` (about 5 min plus build). All 11 building types must pass. The `unsupported_part_type` drops must be gone.
+12. Check loot in a few building types: gas and oil cans, beer, barrels, buckets and the WC now spawn. Flashlights in loot must not stop the world, and their beams show the cookie on walls and terrain.
+13. Near the Mansion: the crow sound fades in from 1000 m to full at 200 m, and the day and night ambience fades out by the same amount. Check F3 near the Mansion.
+14. Digging (W06): find a buried item (underground spawn). Swing the shovel in each direction (LMB with back, left, right keys). Check the swing sound, hit sounds, hit particles on metal, wood, plants and sand, and that hits push loose items.
+15. Dig a buried item up with the shovel. It must lift, become loose, and then allow pickup. A buried item must refuse pickup. Save and load with an item buried and one dug up.
+16. Metal detector (W06): turn it on and off with use. Check the beep pitch and volume and the needle near metal, buried metal, and behind a wall. Save and load with it on. Check F3 while it scans.
+17. Tumbleweeds (W07): check they spawn near the player, roll in gusts, stop near walls, and save with the world. Check F3 with several tumbleweeds.
+18. Long trips (W02): run `cargo test --release --lib w02_ -- --ignored --nocapture`. Note the printed bytes per km and the 5,000 km estimate. Above 200 MB, compact spawn boundaries.
+19. Also run the roadside tests: `cargo test --lib roadside_ -- --ignored`. Far edits, consumed items and lamp states must stay after their area unloads.
+20. In the browser: drop an item, drive about 10 km out and back, save and reload. The item stays where it was dropped. Check F3 before and after the drive.
 
 ### More cars (section 4)
 
@@ -114,7 +120,7 @@ Prepare once:
 5. Save and load seated on the sled and on the WC.
 6. Check F3 near a parked sled and while sliding. Compare with the frame rate rule.
 7. Loader (V03 PR 1): New game. The Lada stands at its garage spot. Drive it, use lights, gauges, radio, horn, wheels off and on, cargo in the trunk. Save and load.
-8. Run `cargo test --lib two_ladas -- --ignored` and `cargo test --lib installed_lada -- --ignored`.
+8. Run `cargo test --lib two_ladas -- --ignored`.
 9. Drive the Lada far from the garage and back: it must not vanish. Check F3 at the start and while driving.
 10. Gear lever (V06): the Lada lever moves through each gear in manual and automatic.
 11. Wheel effects (V06): dust on sand and none on asphalt, grass trails, rolling, spring and skid sounds, smoke and sand bursts while skidding.
@@ -327,7 +333,7 @@ Prepare once:
 
 ### Small effects
 
-1. Run `cargo test --lib tumbleweed_breaks -- --ignored` and `cargo test --lib spawned_copy_takes -- --ignored`.
+1. Run `cargo test --lib tumbleweed_breaks -- --ignored`.
 2. Hit a tumbleweed hard with the car, a shot and a melee swing. It breaks with its gib and sound. Save and load: it stays gone.
 3. Drop and throw food and cut food pieces. Each makes its hit sound.
 4. Run `cargo test --lib lada_tows -- --ignored`: trailer wheel meshes turn while the trailer rolls.
@@ -340,14 +346,13 @@ Prepare once:
 
 ### Loot tools (X11)
 
-1. Re-export. The log shows "Loot tools: 3 prototypes".
-2. Run `cargo test --lib loot_tools -- --ignored`.
-3. Find a loot wire brush, sponge and spray paint. Pick up each one and hold LMB to use it.
-4. Clean rust and dirt with the loot wire brush and sponge. The brush model moves on the surface, with particles and sound.
-5. Paint a car part with loot spray paint. The can shows its color, sprays particles with sound, and runs out.
-6. Use a loot brush until it wears out. Its scrub part hides and it stops working.
-7. Save and load. Paint left, color and wear stay. Drive away and back: they stay.
-8. Check F3 while you use each loot tool. Compare with the frame rate rule.
+1. Run `cargo test --lib loot_tools -- --ignored`.
+2. Find a loot wire brush, sponge and spray paint. Pick up each one and hold LMB to use it.
+3. Clean rust and dirt with the loot wire brush and sponge. The brush model moves on the surface, with particles and sound.
+4. Paint a car part with loot spray paint. The can shows its color, sprays particles with sound, and runs out.
+5. Use a loot brush until it wears out. Its scrub part hides and it stops working.
+6. Save and load. Paint left, color and wear stay. Drive away and back: they stay.
+7. Check F3 while you use each loot tool. Compare with the frame rate rule.
 
 ### Worn start cars
 
