@@ -85,6 +85,9 @@ impl PreparedPresentation {
             &mut facts,
             &reference.file_catalog,
         )?;
+        // One pipeline cache serves both renderers. Each holds the reserve, `shared` counts it once.
+        let mut pipelines = WorldPipelines::default();
+        pipelines.reserve_cache(&mut ledger)?;
         let mut fixed_snapshot = crate::ownership::fixed::FixedAllocation::default();
         world
             .resource::<super::fixed_assets::SourceFixedAssets>()
@@ -131,7 +134,7 @@ impl PreparedPresentation {
             poses: CandidateImportedPoses(std::collections::HashMap::with_capacity(mesh_count)),
             surfaces: default(),
             prototypes,
-            pipelines: default(),
+            pipelines,
             instances: default(),
             grass: default(),
             writers: default(),
@@ -577,7 +580,10 @@ fn shared_bytes(
     materials: &materials::SourceMaterials,
 ) -> [usize; 2] {
     let (prototype, material) = (prototypes.shared_bytes(), materials.shared_bytes());
-    [prototype.0 + material.0, prototype.1 + material.1]
+    [
+        prototype.0 + material.0 + super::pipeline_ownership::CACHE_BYTES,
+        prototype.1 + material.1,
+    ]
 }
 fn shared_fixed(world: &World) -> [usize; 2] {
     let (cpu, gpu) = world
