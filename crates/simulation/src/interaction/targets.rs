@@ -105,6 +105,11 @@ impl InteractionState {
         }
     }
 
+    /// The use owner bound to a collider, such as a tank cap.
+    pub fn use_owner(&self, handle: ColliderHandle) -> Option<ItemId> {
+        self.collider_bindings.get(&handle)?.use_owner
+    }
+
     pub fn bind_surface(&mut self, handle: ColliderHandle, binding: ActionBinding) {
         if self.collider_bindings.get(&handle) == Some(&binding) {
             return;

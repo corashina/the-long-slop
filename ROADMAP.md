@@ -87,6 +87,7 @@ Prepare once:
 17. Save and load. Loot tool paint left, color and wear stay. Drive away and back: they stay.
 18. Start a new game. The Lada body is Used to Old, not 100%, and rust shows. Every new game draws the same state: the startup random is fixed.
 19. Pick two other start cars in the game mode menu. Each starts worn the same way.
+20. Look at the Lada oil cap and coolant cap. Each shows its name and level, like the fuel cap. E opens and closes it.
 
 ### World and terrain
 
