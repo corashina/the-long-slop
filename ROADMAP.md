@@ -30,7 +30,6 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | X04d | Languages and help text | M | 10 language files, language dropdown, word table for all menu and HUD text. Help text follows the assists. After X04c. |
 | X04e | Menu figure IK | S | Start-menu figure turns its head, body and hands towards the mouse, as `menuIkScript`. |
 | X06a | Live mirrors | L | Car mirror cameras render to textures. Only the 5 nearest run. FOV and far plane follow distance. Mirrors toggle and Mirror draw distance slider. |
-| X06b | Lamp shadows | L | Point and spot lights with a shadow mode cast shadows. |
 | X06c | Live reflection probes | M | Only 1 probe is live. Make every building and car probe live, with the 5 s disable distance check and the Reflections toggle. |
 | X06e | Motion blur | M | Uses the motion target of `motion_vectors.rs`. Shutter angle follows car speed. Off where the source turns it off. |
 | X06f | Depth of field and binocular lens | M | Main DoF with focus ray, night clamp and Dof toggle. Binocular DoF, lens distortion and chromatic aberration. |
@@ -298,3 +297,8 @@ Prepare once:
 4. Watch another moving car or a falling item from a standing view. It shows no trail.
 5. Teleport (sandbox `building`), load a save and switch the car camera with C. The first frame after each shows no smear.
 6. Turn Antialiasing off and reload. The image has hard edges and no TAA. Check F3 frame time with it on and off, standing and driving.
+7. Lamp shadows: at night, turn on the Lada headlights, a road lamp and a house lamp near the car. Objects cast shadows from each lamp. Compare with the original: hard and soft edges, strength, fade with distance.
+8. Look for shadow acne and gaps at contact points. Tune `BIAS_TEXELS` in `src/presentation/lamp_shadows.rs` if needed.
+9. Stand near 5 or more shadowed lamps: only the 4 nearest cast shadows. No shadow pops when two lamps swap order.
+10. Turn "Lamp shadows" off and on. Reload: the setting stays. Check the F3 cost with it on and off.
+11. Check the page log for "layout requires ... textures": the lamp atlas adds one texture to each surface pipeline.

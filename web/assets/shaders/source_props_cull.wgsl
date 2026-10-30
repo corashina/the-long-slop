@@ -1,4 +1,4 @@
-// GPU prop culling for one view. Pass 0 is the camera, passes 1-4 are the shadow cascades.
+// GPU prop culling for one view. Pass 0 is the camera, passes 1-4 are the shadow cascades, 5-8 the lamp shadow slots.
 // A row that passes appends its index to the visible list of its batch in that pass.
 struct PropRow {
     world_x: vec4<f32>,
@@ -34,24 +34,24 @@ struct CullView {
 // DrawIndexedIndirect arguments, 5 words per batch and pass.
 @group(0) @binding(2) var<storage, read_write> args: array<atomic<u32>>;
 @group(0) @binding(3) var<storage, read_write> visible: array<u32>;
-// Visible rows per view and pass, 8 words per view.
+// Visible rows per view and pass, 16 words per view.
 @group(0) @binding(4) var<storage, read_write> totals: array<atomic<u32>>;
 @group(0) @binding(5) var<uniform> view: CullView;
 // Shadow split masks, one byte per row.
 @group(0) @binding(6) var<storage> masks: array<u32>;
 
-const PASSES: u32 = 5u;
+const PASSES: u32 = 9u;
 const NO_BATCH: u32 = 0xffffffu;
 const HIDDEN: u32 = 32u;
 const SHADOW_ONLY: u32 = 64u;
 
-var<workgroup> counted: array<atomic<u32>, 5>;
+var<workgroup> counted: array<atomic<u32>, 9>;
 
 @compute @workgroup_size(64)
 fn reset(@builtin(global_invocation_id) id: vec3<u32>) {
     let i = id.x;
     if i < PASSES {
-        atomicStore(&totals[view.view.x * 8u + i], 0u);
+        atomicStore(&totals[view.view.x * 16u + i], 0u);
     }
     let count = view.counts.z;
     if i >= PASSES * count {
@@ -103,15 +103,15 @@ fn cull(@builtin(global_invocation_id) id: vec3<u32>, @builtin(local_invocation_
                 append(0u, i, batch);
             }
             let mask = masks[i / 4u] >> ((i % 4u) * 8u);
-            for (var cascade = 0u; cascade < 4u; cascade++) {
-                if (mask & (1u << cascade)) != 0u {
-                    append(1u + cascade, i, batch);
+            for (var bit = 0u; bit < 8u; bit++) {
+                if (mask & (1u << bit)) != 0u {
+                    append(1u + bit, i, batch);
                 }
             }
         }
     }
     workgroupBarrier();
     if local < PASSES {
-        atomicAdd(&totals[view.view.x * 8u + local], atomicLoad(&counted[local]));
+        atomicAdd(&totals[view.view.x * 16u + local], atomicLoad(&counted[local]));
     }
 }

@@ -273,6 +273,9 @@ extern "C" {
     /// Pending "Sunglasses effects" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameSunglassesEffects)]
     pub fn game_sunglasses_effects() -> Option<bool>;
+    /// Pending "Lamp shadows" setting, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameLampShadows)]
+    pub fn game_lamp_shadows() -> Option<bool>;
     /// Fills the appearance preview rect: x, y, width and height in canvas fractions.
     /// False while the appearance screen is closed.
     #[wasm_bindgen(js_namespace = window, js_name = gameAppearancePreview)]

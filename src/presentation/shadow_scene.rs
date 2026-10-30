@@ -54,6 +54,8 @@ pub struct ShadowScene {
     casters_ready: bool,
     views: [ShadowViewCache; VIEW_COUNT],
     mask_revisions: [u64; VIEW_COUNT],
+    /// Changes when a lamp bit of the world view masks changes.
+    lamp_revision: u64,
     /// Held sun rotation of the shadow fit. It follows the sun in steps of `SUN_STEP`.
     pub sun: Quat,
     /// Caster content counter of each view and cascade. It changes when the tile content would change.
@@ -109,6 +111,7 @@ pub(super) fn prepare_scene(
     camera: Res<super::renderer_visibility::CameraVisibility>,
     meshes: Query<ShadowMesh, (With<ViewVisibility>, Without<SourceMaterialWarmup>)>,
     mut instances: ResMut<SourceInstances>,
+    lamps: Res<super::lamp_shadows::LampShadows>,
 ) {
     scene.frame = 0;
     scene.fits = [None; VIEW_COUNT];
@@ -290,6 +293,17 @@ pub(super) fn prepare_scene(
             *content += u64::from(dirty >> cascade & 1);
         }
     }
+    // Lamp slots draw only in the world view atlas. Both revisions only grow, so their sum changes with either.
+    if frame.views[0].is_some()
+        && crate::reference::lamp_shadows::write_lamp_bits(
+            &scene.caster_data.casters,
+            &lamps.spheres,
+            &mut scene.masks[0],
+        )
+    {
+        scene.lamp_revision += 1;
+    }
+    scene.mask_revisions[0] = scene.views[0].revision() + scene.lamp_revision;
     drop(changes);
     let mut visibility = updates.p1();
     scene.shadow_only = 0;

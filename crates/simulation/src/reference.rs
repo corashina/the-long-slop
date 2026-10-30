@@ -22,6 +22,7 @@ pub mod reflections;
 pub mod render_lighting;
 pub mod world;
 pub use world::*;
+pub mod lamp_shadows;
 pub mod rendering;
 pub mod shadow_bounds;
 pub mod shadow_cadence;
