@@ -7,7 +7,7 @@ Rust, Bevy, and Rapier run the browser game through WebAssembly.
 
 ## Export, build, and run
 
-Start Docker Desktop. Install Node.js and Python 3.12 or later.
+Start Docker Desktop. Install Node.js and Python 3.12 or later. Run `npm ci` once for the web lint.
 Keep Steam build 11140890 installed.
 Prepare [host PowerShell and pinned ILSpy](tools/reference/README.md#host-managed-analysis-tools) before export.
 Build the toolchain image, then export the complete library and selected runtime:
@@ -41,7 +41,7 @@ Run selected native tests by integration target, name filter, or both:
 ```
 
 Native test commands also check formatting and WASM compilation.
-Run selected web suites by filename stem. This command skips Docker and Rust checks:
+Run the web lint and selected web suites by filename stem. This command skips Docker and Rust checks:
 
 ```powershell
 ./scripts/check.ps1 -WebTest loading,save-bridge
