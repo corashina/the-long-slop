@@ -156,7 +156,7 @@ fn apply(
     }
 }
 
-/// Moves the player body on foot. The stream follows the player; the step waits for the world.
+/// Moves the player body on foot and asks the stream for the new area. The step waits for the world.
 fn place_player(runtime: &mut GarageRuntime, absolute: [f64; 3]) -> Result<(), String> {
     if runtime.area.player.seated() {
         return Err("Get out of the seat first.".into());
@@ -174,6 +174,17 @@ fn place_player(runtime: &mut GarageRuntime, absolute: [f64; 3]) -> Result<(), S
         body.set_linvel(Vector::ZERO, true);
     });
     runtime.physics.refresh_queries();
+    // The step waits for a supported world, so the stream must ask for the new area here.
+    let car = runtime.vehicle.as_ref().map_or(absolute, |key| {
+        runtime.persistent_world.absolute_vehicle_position(
+            &runtime.physics,
+            &runtime.stream.origin,
+            key,
+        )
+    });
+    runtime.stream.request_at(absolute, car);
+    let focus = runtime.area.player.focus_position(&runtime.physics);
+    runtime.rebase_to(focus);
     Ok(())
 }
 

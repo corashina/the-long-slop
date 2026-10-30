@@ -1768,26 +1768,7 @@ impl GarageRuntime {
                 &mut self.physics,
             )
             .expect("persistent world bindings");
-        if self.stream.rebase(focus, &mut self.physics).is_some() {
-            let old_origin = self.area.origin;
-            self.area.sync_origin(self.stream.origin.offset);
-            self.weather.set_origin(self.stream.origin.offset);
-            let shift = rapier3d::math::Vector::from_array(std::array::from_fn(|i| {
-                (self.area.origin[i] - old_origin[i]) as f32
-            }));
-            self.urine.rebase(shift);
-            self.flyers.rebase(shift);
-            self.creatures.rebase(shift);
-            if let Some(audio) = &mut self.audio {
-                audio.rebase(std::array::from_fn(|i| {
-                    (self.area.origin[i] - old_origin[i]) as f32
-                }));
-            }
-            self.aim.rebase(std::array::from_fn(|i| {
-                (self.area.origin[i] - old_origin[i]) as f32
-            }));
-            self.rebases += 1;
-        }
+        self.rebase_to(focus);
         self.stream.capture_changes(
             reference,
             &mut self.area.items,
@@ -2871,6 +2852,30 @@ impl GarageRuntime {
                 .temperature = Some(part.state.temperature);
         }
     }
+    /// Moves the world origin near `focus` when it is far from the origin.
+    pub fn rebase_to(&mut self, focus: [f32; 3]) {
+        if self.stream.rebase(focus, &mut self.physics).is_some() {
+            let old_origin = self.area.origin;
+            self.area.sync_origin(self.stream.origin.offset);
+            self.weather.set_origin(self.stream.origin.offset);
+            let shift = rapier3d::math::Vector::from_array(std::array::from_fn(|i| {
+                (self.area.origin[i] - old_origin[i]) as f32
+            }));
+            self.urine.rebase(shift);
+            self.flyers.rebase(shift);
+            self.creatures.rebase(shift);
+            if let Some(audio) = &mut self.audio {
+                audio.rebase(std::array::from_fn(|i| {
+                    (self.area.origin[i] - old_origin[i]) as f32
+                }));
+            }
+            self.aim.rebase(std::array::from_fn(|i| {
+                (self.area.origin[i] - old_origin[i]) as f32
+            }));
+            self.rebases += 1;
+        }
+    }
+
     pub fn world_supported(&self) -> bool {
         if self.restore_pending()
             || !self.startup_aligned
