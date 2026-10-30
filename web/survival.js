@@ -36,5 +36,7 @@ export function createSurvival(ui,cooldownSeconds) {
  }
  function resize(){resizeSleep();for(const b of bars)for(const part of ['background','fill','icon']){const role='need-'+b.role+'-'+part;const layout=part==='fill'?b.fillLayout:ui.layouts[role];applyLayout(b[part],layout,ui.urls);b[part].style.backgroundColor=rgba(layout.image_color);if(ui.layoutUrls[role]){b[part].style.backgroundImage='url("'+ui.layoutUrls[role]+'")';b[part].style.backgroundColor='transparent';}}}
  window.addEventListener('resize',resize);resize();
- return {updateSleep,update(output){style(root,'opacity',String(output.opacity));style(death,'opacity',String(output.dead?1-output.lookScale/.8:0));for(const b of bars){const value=output[b.role];if(b.meter.value!==value)b.meter.value=value;style(b.fill,'clipPath',clip(b.direction,(value-b.meter.min)/(b.meter.max-b.meter.min)));}},setVisible(value){visible=value;show(root,value);show(death,value);show(sleepRoot,value&&sleepVisible);show(hint,value&&hintVisible);}};
+ return {updateSleep,update(output){style(root,'opacity',String(output.opacity));style(death,'opacity',String(output.dead?1-output.lookScale/.8:0));for(const b of bars){const value=output[b.role];if(b.meter.value!==value)b.meter.value=value;style(b.fill,'clipPath',clip(b.direction,(value-b.meter.min)/(b.meter.max-b.meter.min)));}},setVisible(value){visible=value;show(root,value);show(death,value);show(sleepRoot,value&&sleepVisible);show(hint,value&&hintVisible);},
+  // Survival off hides the food and water bars, as `mainscript` does with `GSettings.survival`.
+  setSurvival(value){for(const b of bars)if(b.role==='food'||b.role==='water')for(const part of ['background','fill','icon','meter'])show(b[part],value);}};
 }

@@ -200,9 +200,11 @@ pub struct LightingShaders {
     pub depth_resolve: Handle<Shader>,
     pub props: Handle<Shader>,
     pub props_cull: Handle<Shader>,
+    pub motion: Handle<Shader>,
+    pub taa: Handle<Shader>,
 }
 impl LightingShaders {
-    pub(crate) fn handles(&self) -> [&Handle<Shader>; 23] {
+    pub(crate) fn handles(&self) -> [&Handle<Shader>; 25] {
         [
             &self.lighting,
             &self.cloud,
@@ -227,6 +229,8 @@ impl LightingShaders {
             &self.depth_resolve,
             &self.props,
             &self.props_cull,
+            &self.motion,
+            &self.taa,
         ]
     }
 }

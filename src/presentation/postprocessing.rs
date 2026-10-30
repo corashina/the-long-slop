@@ -11,6 +11,7 @@ pub mod exposure;
 pub mod heat_haze;
 pub mod lut;
 pub mod lut_ldr;
+pub mod taa;
 pub mod uber;
 
 use super::render_targets::{HDR_FORMAT, HISTOGRAM_FORMAT};

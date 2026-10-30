@@ -11,6 +11,7 @@ use super::{
     heat_haze::HeatHazePass,
     lut::{CURVE_BYTES, LUT_BYTES, LutPass},
     lut_ldr::{LDR_CURVE_BYTES, LutLdrPass, STRIP_BYTES},
+    taa::TaaPass,
     uber::{MainInputs, UberPass},
 };
 use crate::presentation::screen_effects::Lut;
@@ -39,6 +40,14 @@ pub struct PostShaders {
     pub ao_render: Handle<Shader>,
     pub ao_upsample: Handle<Shader>,
     pub ao_composite: Handle<Shader>,
+    pub taa: Handle<Shader>,
+}
+/// TAA inputs. Present only when antialiasing is on.
+pub struct TaaInputs<'a> {
+    pub settings: crate::reference::postprocessing::TaaSettings,
+    /// Resolved camera depth.
+    pub depth: &'a TextureView,
+    pub motion: &'a TextureView,
 }
 pub struct PostTextures<'a> {
     pub noise: [&'a TextureView; 64],
@@ -73,6 +82,8 @@ pub struct PostFrame {
     pub heat_haze: Option<f32>,
     /// Shader `_Time.y`.
     pub time: f32,
+    /// TAA jitter and history reset. None when antialiasing is off.
+    pub motion: Option<(Vec2, bool)>,
 }
 struct ColorTarget {
     _texture: Texture,
@@ -131,6 +142,7 @@ pub struct SourcePostChain {
     pub resize_count: u32,
     initial: ColorTarget,
     copy: CopyPass,
+    taa: Option<TaaPass>,
     uber: UberPass,
     haze: HeatHazePass,
     main: MainChain,
@@ -153,6 +165,7 @@ impl SourcePostChain {
         dead: &DeadProfile,
         glasses: &[GlassesProfile],
         stop_nan: bool,
+        taa: Option<TaaInputs<'_>>,
         previous: Option<Self>,
     ) -> Result<Self, String> {
         if extent.contains(&0)
@@ -164,16 +177,40 @@ impl SourcePostChain {
         let resize_count = previous.as_ref().map_or(0, |old| old.resize_count + 1);
         let completed = previous.as_ref().map_or(0, |old| old.completed);
         let initial = ColorTarget::new(device, extent);
-        let (mut copy, old_main, old_uber, old_haze) = match previous {
-            Some(old) => (old.copy, Some(old.main), Some(old.uber), Some(old.haze)),
+        let (mut copy, old_main, old_uber, old_taa, old_haze) = match previous {
+            Some(old) => (
+                old.copy,
+                Some(old.main),
+                Some(old.uber),
+                old.taa,
+                Some(old.haze),
+            ),
             None => (
                 CopyPass::new(device, cache, shaders.copy.clone(), source),
+                None,
                 None,
                 None,
                 None,
             ),
         };
         copy.rebind(device, cache, source);
+        let taa = taa
+            .map(|inputs| {
+                TaaPass::new(
+                    device,
+                    queue,
+                    cache,
+                    shaders.taa.clone(),
+                    &initial.view,
+                    inputs.depth,
+                    inputs.motion,
+                    extent,
+                    inputs.settings,
+                    old_taa,
+                )
+            })
+            .transpose()?;
+        let scene = taa.as_ref().map_or(&initial.view, |taa| taa.output());
         let main = {
             let (old_histogram, old_exposure, old_bloom, old_lut, lut_baked, old_ldr, grading) =
                 match old_main {
@@ -224,7 +261,7 @@ impl SourcePostChain {
                 queue,
                 cache,
                 shaders.histogram.clone(),
-                &initial.view,
+                scene,
                 extent[0],
                 extent[1],
                 old_histogram.as_ref(),
@@ -248,7 +285,7 @@ impl SourcePostChain {
                 queue,
                 cache,
                 shaders.bloom.clone(),
-                &initial.view,
+                scene,
                 exposure.views(),
                 extent,
                 &record.bloom,
@@ -314,7 +351,7 @@ impl SourcePostChain {
             queue,
             cache,
             shaders.uber.clone(),
-            &initial.view,
+            scene,
             textures.noise,
             extent,
             samples,
@@ -343,7 +380,8 @@ impl SourcePostChain {
             + LUT_BYTES
             + CURVE_BYTES
             + STRIP_BYTES
-            + LDR_CURVE_BYTES;
+            + LDR_CURVE_BYTES
+            + taa.as_ref().map_or(0, |taa| taa.logical_bytes);
         Ok(Self {
             extent,
             logical_bytes,
@@ -351,6 +389,7 @@ impl SourcePostChain {
             resize_count,
             initial,
             copy,
+            taa,
             uber,
             haze,
             main,
@@ -367,6 +406,7 @@ impl SourcePostChain {
     }
     pub fn ready(&self, cache: &PipelineCache) -> bool {
         self.copy.ready(cache)
+            && self.taa.as_ref().is_none_or(|taa| taa.ready(cache))
             && self.uber.ready(cache)
             && self.main.histogram.ready(cache)
             && self.main.exposure.ready(cache)
@@ -378,6 +418,7 @@ impl SourcePostChain {
     pub fn failure(&self, cache: &PipelineCache) -> Option<String> {
         self.copy
             .failure(cache)
+            .or_else(|| self.taa.as_ref().and_then(|taa| taa.failure(cache)))
             .or_else(|| self.uber.failure(cache))
             .or_else(|| self.main.histogram.failure(cache))
             .or_else(|| self.main.exposure.failure(cache))
@@ -391,6 +432,9 @@ impl SourcePostChain {
         self.completed = 0;
         self.uber.recreate();
         self.main.exposure.recreate();
+        if let Some(taa) = self.taa.as_mut() {
+            taa.reset_history();
+        }
         self.main.lut_baked = false;
         self.main.ldr_baked = None;
         self.main.ldr_pending = None;
@@ -403,6 +447,9 @@ impl SourcePostChain {
     pub fn reset_history(&mut self) {
         self.pending = None;
         self.main.exposure.reset_history();
+        if let Some(taa) = self.taa.as_mut() {
+            taa.reset_history();
+        }
     }
     /// Image histories remain intact during floating-origin transport.
     pub fn rebase(&mut self, _delta: Vec3) {}
@@ -427,6 +474,13 @@ impl SourcePostChain {
         }
         self.copy
             .encode(encoder, cache, &self.initial.view, self.stop_nan);
+        match (self.taa.as_mut(), frame.motion) {
+            (Some(taa), Some((jitter, reset))) => {
+                taa.encode(encoder, device, queue, cache, jitter, reset)?
+            }
+            (None, None) => {}
+            _ => return Err("Source TAA state differs from the view".into()),
+        }
         self.main.histogram.encode(encoder, cache);
         self.main
             .exposure
@@ -538,6 +592,9 @@ impl SourcePostChain {
             return false;
         }
         self.main.exposure.completed();
+        if let Some(taa) = self.taa.as_mut() {
+            taa.completed();
+        }
         self.main.lut_baked = true;
         if let Some(index) = self.main.ldr_pending.take() {
             self.main.ldr_baked = Some(index);

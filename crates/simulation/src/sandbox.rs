@@ -3,7 +3,7 @@
 use crate::reference::{ReferenceManifest, WorldPrototypeReference};
 use crate::starting_area::GarageRuntime;
 use crate::vehicle::{VehiclePose, to_rapier};
-use crate::world::{ObjectKey, WorldLayer, stream::SupportGap};
+use crate::world::{ObjectKey, WorldLayer, WorldStream, stream::SupportGap};
 use rapier3d::math::{Rotation, Vector};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -379,7 +379,7 @@ fn state(runtime: &GarageRuntime, reference: &ReferenceManifest, radius: f32) ->
             min: center.map(|v| v - 8.),
             max: center.map(|v| v + 8.),
         });
-        gap.map_or(Value::Null, |gap| gap_json(reference, gap))
+        gap.map_or(Value::Null, |gap| gap_json(reference, &runtime.stream, gap))
     };
     let cars: Vec<_> = runtime
         .vehicles
@@ -421,6 +421,14 @@ fn state(runtime: &GarageRuntime, reference: &ReferenceManifest, radius: f32) ->
         "player": origin.absolute(player),
         "supported": runtime.world_supported(),
         "pending": runtime.stream.pending_parts(),
+        "required_ready": runtime.stream.required_ready(),
+        // Shared budgets with the renderer credit: [used, limit].
+        "budgets": runtime
+            .stream
+            .presentation_budgets(runtime.stream.presentation_credit())
+            .iter()
+            .map(|b| (b.name.to_owned(), json!([b.used, b.limit])))
+            .collect::<serde_json::Map<_, _>>(),
         "player_gap": gap(runtime.area.player.focus_position(&runtime.physics)),
         "seated": runtime.area.player.seated(),
         "cycle": runtime.lighting.cycle.capture_save().cycle_seconds,
@@ -431,7 +439,7 @@ fn state(runtime: &GarageRuntime, reference: &ReferenceManifest, radius: f32) ->
     })
 }
 
-fn gap_json(reference: &ReferenceManifest, gap: SupportGap) -> Value {
+fn gap_json(reference: &ReferenceManifest, stream: &WorldStream, gap: SupportGap) -> Value {
     match gap {
         SupportGap::Plan => json!("plan"),
         SupportGap::Road { index, surface } => json!({"road": index, "surface": surface}),
@@ -444,6 +452,7 @@ fn gap_json(reference: &ReferenceManifest, gap: SupportGap) -> Value {
                 .map_or("", prototype_name),
             "position": p.pose.position,
             "scale": p.scale,
+            "progress": stream.structure_audit(p),
         }),
         SupportGap::Light => json!("light"),
         SupportGap::TileCount => json!("tile count"),

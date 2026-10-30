@@ -355,14 +355,14 @@ impl GpuProps {
         self.set_hidden(slot, !(shown && visible));
         self.set_fade(slot, fade);
     }
-    /// LOD crossfade only. The shadow scene does not read it.
+    /// LOD crossfade. Casters dither with it, so the shadow tiles draw again.
     fn set_fade(&mut self, slot: u32, fade: f32) {
         let row = &mut self.rows[slot as usize];
         if row.fade.to_bits() == fade.to_bits() {
             return;
         }
         row.fade = fade;
-        self.mark(slot);
+        self.mark_shadow(slot);
     }
     pub fn set_world(&mut self, slot: u32, world: Mat4, bounds: Bounds) {
         let row = &mut self.rows[slot as usize];

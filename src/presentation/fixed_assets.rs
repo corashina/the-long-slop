@@ -911,6 +911,8 @@ impl SourceFixedAssets {
                 depth_resolve: shader("shaders/source_depth_resolve.wgsl"),
                 props: shader("shaders/source_props.wgsl"),
                 props_cull: shader("shaders/source_props_cull.wgsl"),
+                motion: shader("shaders/source_motion.wgsl"),
+                taa: shader("shaders/source_taa.wgsl"),
             };
             self.shaders_bound = true;
         }

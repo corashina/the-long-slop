@@ -44,6 +44,15 @@ def recover_grading(settings):
     }
 
 
+def recover_taa(controls):
+    # pplayermelle.Start -> TurnOn overwrites the layer's serialized settings.
+    return {target: controls[source] for target, source in (
+        ('jitter_spread', 'AntialiasingJitterSpread'),
+        ('stationary_blending', 'AntialiasingStationaryBlending'),
+        ('motion_blending', 'AntialiasingMotionBlending'),
+        ('sharpness', 'AntialiasingSharpness'))}
+
+
 def recover_postprocessing(source):
     """Recover the selected main-camera stack after startup settings and volume blending."""
     from .source import key, source_id
@@ -56,6 +65,7 @@ def recover_postprocessing(source):
             raise ValueError(f'Unexpected inactive source effect {pid}')
         return reader, data
     layer_reader, layer = read('level1', 68049)
+    _, controls = read('level1', 64919)
     bloom_reader, bloom = effect(1371)
     _, grading = effect(1375)
     _, ao = effect(1378)
@@ -97,6 +107,7 @@ def recover_postprocessing(source):
     return {
         'main_layer': source_id(layer_reader),
         'stop_nan': bool(layer['stopNaNPropagation']),
+        'taa': recover_taa(controls),
         'exposure': {'filtering_percent': [filtering['x'], filtering['y']],
                      'luminance_ev': [p(exposure, 'minLuminance'), p(exposure, 'maxLuminance')],
                      'key': p(exposure, 'keyValue'), 'speed_up': p(exposure, 'speedUp'),

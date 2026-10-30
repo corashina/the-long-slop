@@ -1,13 +1,11 @@
-//! Render bundles for own draw lists. A list re-records only when its commands change.
+//! Render bundles for draws that repeat each frame. A bundle re-records only when its commands change.
 //! Bevy resource IDs are never reused, so equal commands bind the same resources.
 use bevy::render::{
-    render_phase::TrackedRenderPass,
-    render_resource::{
-        BindGroup, BindGroupId, Buffer, BufferId, IndexFormat, RenderPipeline, RenderPipelineId,
-        TextureFormat,
-    },
+    render_phase::{CAPTURE_OFFSETS, PassCommand, TrackedRenderPass},
+    render_resource::{BindGroupId, BufferId, IndexFormat, RenderPipelineId, TextureFormat},
     renderer::RenderDevice,
 };
+use std::ops::Range;
 
 /// The attachments of the passes that execute a bundle.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -17,134 +15,129 @@ pub struct BundleTarget {
     pub samples: u32,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Command {
+/// A captured command without its resources.
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum Key {
     Pipeline(RenderPipelineId),
-    BindGroup(BindGroupId, [u32; 2], usize),
-    Vertex(BufferId),
-    Index(BufferId, IndexFormat),
+    BindGroup(u32, BindGroupId, [u32; CAPTURE_OFFSETS], usize),
+    VertexBuffer(u32, BufferId, u64, u64),
+    IndexBuffer(BufferId, u64, u64, IndexFormat),
+    Draw(Range<u32>, Range<u32>),
+    DrawIndexed(Range<u32>, i32, Range<u32>),
+    DrawIndirect(BufferId, u64),
     DrawIndexedIndirect(BufferId, u64),
 }
-/// State slots: pipeline, bind groups 0-3, vertex buffer, index buffer.
-const SLOTS: usize = 7;
-
-enum Sink<'a, 'b> {
-    Commands(&'b mut Vec<Command>),
-    Bundle(&'b mut wgpu::RenderBundleEncoder<'a>),
+fn key(command: &PassCommand) -> Key {
+    match command {
+        PassCommand::Pipeline(pipeline) => Key::Pipeline(pipeline.id()),
+        PassCommand::BindGroup(index, group, offsets, count) => {
+            Key::BindGroup(*index, group.id(), *offsets, *count)
+        }
+        PassCommand::VertexBuffer(slot, slice) => {
+            Key::VertexBuffer(*slot, slice.id(), slice.offset(), slice.size().get())
+        }
+        PassCommand::IndexBuffer(slice, format) => {
+            Key::IndexBuffer(slice.id(), slice.offset(), slice.size().get(), *format)
+        }
+        PassCommand::Draw(vertices, instances) => Key::Draw(vertices.clone(), instances.clone()),
+        PassCommand::DrawIndexed(indices, base, instances) => {
+            Key::DrawIndexed(indices.clone(), *base, instances.clone())
+        }
+        PassCommand::DrawIndirect(buffer, offset) => Key::DrawIndirect(buffer.id(), *offset),
+        PassCommand::DrawIndexedIndirect(buffer, offset) => {
+            Key::DrawIndexedIndirect(buffer.id(), *offset)
+        }
+    }
 }
-/// One run of a draw list. The first run collects the commands. A changed list runs again into a bundle.
-/// Both runs skip state that is already set.
-pub struct Encoder<'a, 'b> {
-    sink: Sink<'a, 'b>,
-    state: [Option<Command>; SLOTS],
+fn record<'a>(bundle: &mut wgpu::RenderBundleEncoder<'a>, command: &PassCommand<'a>) {
+    match command {
+        PassCommand::Pipeline(pipeline) => bundle.set_pipeline(pipeline),
+        PassCommand::BindGroup(index, group, offsets, count) => {
+            bundle.set_bind_group(*index, &***group, &offsets[..*count]);
+        }
+        PassCommand::VertexBuffer(slot, slice) => bundle.set_vertex_buffer(*slot, **slice),
+        PassCommand::IndexBuffer(slice, format) => bundle.set_index_buffer(**slice, *format),
+        PassCommand::Draw(vertices, instances) => bundle.draw(vertices.clone(), instances.clone()),
+        PassCommand::DrawIndexed(indices, base, instances) => {
+            bundle.draw_indexed(indices.clone(), *base, instances.clone());
+        }
+        PassCommand::DrawIndirect(buffer, offset) => bundle.draw_indirect(buffer, *offset),
+        PassCommand::DrawIndexedIndirect(buffer, offset) => {
+            bundle.draw_indexed_indirect(buffer, *offset);
+        }
+    }
 }
-impl<'a> Encoder<'a, '_> {
-    fn changed(&mut self, slot: usize, command: Command) -> bool {
-        let changed = self.state[slot] != Some(command);
-        self.state[slot] = Some(command);
-        if changed && let Sink::Commands(list) = &mut self.sink {
-            list.push(command);
-        }
-        changed
-    }
-    pub fn set_pipeline(&mut self, pipeline: &'a RenderPipeline) {
-        if self.changed(0, Command::Pipeline(pipeline.id()))
-            && let Sink::Bundle(bundle) = &mut self.sink
-        {
-            bundle.set_pipeline(pipeline);
-        }
-    }
-    /// Bind groups 0-3 with at most two dynamic offsets.
-    pub fn set_bind_group(&mut self, index: u32, group: &'a BindGroup, offsets: &[u32]) {
-        let mut words = [0; 2];
-        words[..offsets.len()].copy_from_slice(offsets);
-        let command = Command::BindGroup(group.id(), words, offsets.len());
-        if self.changed(1 + index as usize, command)
-            && let Sink::Bundle(bundle) = &mut self.sink
-        {
-            bundle.set_bind_group(index, &**group, offsets);
-        }
-    }
-    /// The whole buffer in vertex slot 0.
-    pub fn set_vertex_buffer(&mut self, buffer: &'a Buffer) {
-        if self.changed(5, Command::Vertex(buffer.id()))
-            && let Sink::Bundle(bundle) = &mut self.sink
-        {
-            bundle.set_vertex_buffer(0, *buffer.slice(..));
-        }
-    }
-    pub fn set_index_buffer(&mut self, buffer: &'a Buffer, format: IndexFormat) {
-        if self.changed(6, Command::Index(buffer.id(), format))
-            && let Sink::Bundle(bundle) = &mut self.sink
-        {
-            bundle.set_index_buffer(*buffer.slice(..), format);
-        }
-    }
-    pub fn draw_indexed_indirect(&mut self, buffer: &'a Buffer, offset: u64) {
-        match &mut self.sink {
-            Sink::Commands(list) => list.push(Command::DrawIndexedIndirect(buffer.id(), offset)),
-            Sink::Bundle(bundle) => bundle.draw_indexed_indirect(buffer, offset),
-        }
-    }
+/// Keep the allocation of a command list for the next frame. Its commands borrow one frame.
+fn reuse<'b>(mut commands: Vec<PassCommand<'_>>) -> Vec<PassCommand<'b>> {
+    commands.clear();
+    commands.into_iter().map(|_| unreachable!()).collect()
 }
 
 /// The bundle of one draw list and the commands it holds.
 #[derive(Default)]
 pub struct DrawBundle {
     target: Option<BundleTarget>,
-    commands: Vec<Command>,
-    next: Vec<Command>,
+    keys: Vec<Key>,
+    commands: Vec<PassCommand<'static>>,
     bundle: Option<wgpu::RenderBundle>,
 }
 impl DrawBundle {
-    /// Run `draws` and execute its commands as a bundle. Returns the result of the first run.
-    /// `draws` must give the same commands and result on each run in one call.
+    /// Capture the commands of `draws` and execute them as a bundle.
+    /// Fails when `draws` sends a command that a bundle cannot hold. Then nothing is drawn.
     pub fn draw<'w, R>(
         &mut self,
         device: &RenderDevice,
         target: BundleTarget,
         pass: &mut TrackedRenderPass<'w>,
-        mut draws: impl for<'b> FnMut(&mut Encoder<'w, 'b>) -> R,
-    ) -> R {
-        self.next.clear();
-        let result = draws(&mut Encoder {
-            sink: Sink::Commands(&mut self.next),
-            state: [None; SLOTS],
-        });
-        if self.next.is_empty() {
-            self.bundle = None;
-            self.commands.clear();
-            return result;
+        draws: impl FnOnce(&mut TrackedRenderPass<'w>) -> R,
+    ) -> Result<R, String> {
+        pass.begin_capture(reuse(std::mem::take(&mut self.commands)));
+        let result = draws(pass);
+        let capture = pass.end_capture().expect("render bundle capture");
+        if let Some(command) = capture.unsupported {
+            self.commands = reuse(capture.commands);
+            return Err(format!("Render bundle cannot hold {command}"));
         }
-        if self.bundle.is_none() || self.target != Some(target) || self.next != self.commands {
-            let colors = [target.color];
-            let mut encoder = device.wgpu_device().create_render_bundle_encoder(
-                &wgpu::RenderBundleEncoderDescriptor {
-                    label: Some("source_draw_bundle"),
-                    color_formats: if target.color.is_some() { &colors } else { &[] },
-                    depth_stencil: Some(wgpu::RenderBundleDepthStencil {
-                        format: target.depth,
-                        depth_read_only: false,
-                        // The source passes have no stencil operations.
-                        stencil_read_only: true,
-                    }),
-                    sample_count: target.samples,
-                    multiview: None,
-                },
-            );
-            draws(&mut Encoder {
-                sink: Sink::Bundle(&mut encoder),
-                state: [None; SLOTS],
-            });
-            self.bundle = Some(encoder.finish(&wgpu::RenderBundleDescriptor {
-                label: Some("source_draw_bundle"),
-            }));
+        let commands = capture.commands;
+        let same = self.target == Some(target)
+            && self.keys.len() == commands.len()
+            && self
+                .keys
+                .iter()
+                .zip(&commands)
+                .all(|(old, new)| *old == key(new));
+        if !same {
+            self.keys.clear();
+            self.keys.extend(commands.iter().map(key));
             self.target = Some(target);
-            std::mem::swap(&mut self.commands, &mut self.next);
+            self.bundle = (!commands.is_empty()).then(|| {
+                let colors = [target.color];
+                let mut encoder = device.wgpu_device().create_render_bundle_encoder(
+                    &wgpu::RenderBundleEncoderDescriptor {
+                        label: Some("source_draw_bundle"),
+                        color_formats: if target.color.is_some() { &colors } else { &[] },
+                        depth_stencil: Some(wgpu::RenderBundleDepthStencil {
+                            format: target.depth,
+                            depth_read_only: false,
+                            // The source passes have no stencil operations.
+                            stencil_read_only: true,
+                        }),
+                        sample_count: target.samples,
+                        multiview: None,
+                    },
+                );
+                for command in &commands {
+                    record(&mut encoder, command);
+                }
+                encoder.finish(&wgpu::RenderBundleDescriptor {
+                    label: Some("source_draw_bundle"),
+                })
+            });
         }
-        // This also resets the pass tracking. A bundle clears the pass state after it runs.
-        pass.wgpu_pass()
-            .execute_bundles(std::iter::once(self.bundle.as_ref().unwrap()));
-        result
+        self.commands = reuse(commands);
+        if let Some(bundle) = &self.bundle {
+            pass.wgpu_pass().execute_bundles(std::iter::once(bundle));
+        }
+        Ok(result)
     }
 }

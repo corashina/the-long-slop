@@ -458,26 +458,30 @@ impl SourceInstances {
         view: GrassView,
     ) -> Result<(), ReferenceError> {
         self.rebase(stream.origin, commands);
+        let required_ready = stream.required_ready();
+        // Descriptors are requested only for these placements. See `request_descriptors`.
+        let selectable = |p: &crate::world::Placement| {
+            stream.contents_initialized(&p.id)
+                && (stream.structure_required(&p.id)
+                    || stream.structure_replay_required(&p.id)
+                    || required_ready)
+        };
+        // A new required structure clears required_ready. A pick that is not selectable then
+        // never gets its descriptor and would block the required structure.
         if self.pending.as_ref().is_some_and(|p| {
-            !stream
-                .pending_structures()
-                .iter()
-                .any(|wanted| wanted.id == p.id)
+            !selectable(p)
+                || !stream
+                    .pending_structures()
+                    .iter()
+                    .any(|wanted| wanted.id == p.id)
         }) {
             self.pending = None;
         }
         if self.pending.is_none() {
-            let required_ready = stream.required_ready();
             self.pending = stream
                 .pending_structures()
                 .iter()
-                .filter(|p| {
-                    stream.contents_initialized(&p.id)
-                        && (stream.structure_required(&p.id)
-                            || stream.structure_replay_required(&p.id)
-                            || required_ready)
-                        && !self.instances.iter().any(|i| i.placement.id == p.id)
-                })
+                .filter(|p| selectable(p) && !self.instances.iter().any(|i| i.placement.id == p.id))
                 .min_by(|a, b| {
                     stream
                         .focus_distance_squared(a.pose.position)
