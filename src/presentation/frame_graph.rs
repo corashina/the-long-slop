@@ -167,6 +167,7 @@ impl Plugin for SourceFramePlugin {
         );
         super::view_frame::install(app);
         super::shadow_queue::install(app);
+        super::lamp_shadows::install(app);
         super::caster_material::install(app);
         super::shadow_atlas::install(app);
         super::shadow_collector::install(app);
@@ -1009,9 +1010,9 @@ struct ViewAudit {
     surface: [u32; 5],
     surface_instances: [u32; 4],
     shadow_epoch: u32,
-    shadow_attempts: [u32; 4],
-    shadow_issued: [u32; 4],
-    shadow_instances: [[u32; 4]; 2],
+    shadow_attempts: [u32; super::lamp_shadows::TILES],
+    shadow_issued: [u32; super::lamp_shadows::TILES],
+    shadow_instances: [[u32; super::lamp_shadows::TILES]; 2],
     /// GPU prop rows, camera-visible rows and issued indirect draws.
     props: [u32; 3],
     collector_frame: u32,

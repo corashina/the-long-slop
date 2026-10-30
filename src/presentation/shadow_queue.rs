@@ -3,7 +3,6 @@ use super::shadow_cache::SpecializationKey;
 use super::surface_views::{PROBE_START, VIEW_COUNT};
 use super::{
     caster::{CasterPasses, CasterUniform, CasterViews},
-    lighting_scene::SourceSceneLighting,
     readiness::RendererStateHandle,
     shadow_phase::{self, ShadowBatchKey, ShadowDrawState, SourceShadow},
     shadow_scene::ShadowScene,
@@ -59,7 +58,8 @@ pub struct ShadowQueues {
     idle_probe_phases: [Option<BinnedRenderPhase<SourceShadow>>; 6],
     epoch: Option<(u64, u32)>,
     revision: u64,
-    pub instances: [[u32; 4]; VIEW_COUNT],
+    /// Queued instances of each caster mask bit: 4 cascades, then 4 lamp slots.
+    pub instances: [[u32; 8]; VIEW_COUNT],
     pub ready: [bool; VIEW_COUNT],
     pub frame: u32,
 }
@@ -73,7 +73,7 @@ impl FromWorld for ShadowQueues {
             idle_probe_phases: std::array::from_fn(|_| None),
             epoch: None,
             revision: 0,
-            instances: [[0; 4]; VIEW_COUNT],
+            instances: [[0; 8]; VIEW_COUNT],
             ready: [false; VIEW_COUNT],
             frame: 0,
         }
@@ -188,7 +188,7 @@ fn base_pipeline(
 pub fn queue(world: &mut World) {
     world.resource_scope(|world, mut state: Mut<ShadowQueues>| {
         state.ready = [false; VIEW_COUNT];
-        state.instances = [[0; 4]; VIEW_COUNT];
+        state.instances = [[0; 8]; VIEW_COUNT];
         state.revision += 1;
         let revision = state.revision;
         state.frame = 0;
@@ -375,9 +375,8 @@ pub fn queue(world: &mut World) {
                             } else {
                                 state.queued[index].insert(main, next);
                             }
-                            for cascade in 0..4 {
-                                state.instances[index][cascade] +=
-                                    u32::from(mask & (1 << cascade) != 0);
+                            for bit in 0..8 {
+                                state.instances[index][bit] += u32::from(mask & (1 << bit) != 0);
                             }
                         }
                         state.queued[index].retain(|main, queued| {
@@ -443,7 +442,6 @@ fn cascade_world_from_view(
 pub fn write_cascades(
     scene: Res<ShadowScene>,
     frame: Res<SourceViewFrame>,
-    live: Res<SourceSceneLighting>,
     assets: Option<Res<super::lighting_assets::LightingRenderAssets>>,
     mut views: Query<(
         &mut SourceSurfaceView,
@@ -456,11 +454,11 @@ pub fn write_cascades(
     if scene.frame == 0 || scene.frame != frame.frame {
         return;
     }
-    let (Some(assets), Some(live)) = (assets, live.0) else {
+    let Some(assets) = assets else {
         return;
     };
     let light = &assets.record.lights[0];
-    let rotation = live.sun_rotation;
+    let rotation = scene.sun;
     let h = |v: Vec3| Vec3::new(v.x, v.y, -v.z);
     let basis = [
         h(rotation * Vec3::X),
@@ -499,7 +497,7 @@ pub fn write_cascades(
         slots.shadow_key = Some(key);
         for (index, cascade) in fit.cascades.iter().enumerate() {
             // A stale slot keeps the values of its atlas tile.
-            if !cadence.render[index] {
+            if !cadence.plan.render[index] {
                 continue;
             }
             let (projection, device_e22) = cascade_projection(cascade, basis);

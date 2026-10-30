@@ -38,6 +38,7 @@ pub struct GpuLight {
     pub direction_kind: Vec4,
     pub color: Vec4,
     pub cookie_rect: Vec4,
+    /// x: culling mask, y: spot cotangent bits, z: lamp shadow slot + 1 (0: no shadow).
     pub mask: UVec4,
     pub cookie_size: f32,
 }
@@ -58,7 +59,7 @@ impl Default for LightingUniform {
         }
     }
 }
-/// Pose holder for one source light. Lamps light receivers but cast no shadows.
+/// Pose holder for one source light. Shadowed lamps get a slot in `lamp_shadows`.
 #[derive(Component, Clone, Copy)]
 pub struct SourceLight;
 #[derive(Clone)]
@@ -796,6 +797,18 @@ pub(crate) fn sync_control_visuals(
         }
     }
 }
+/// The source record of a bound light.
+pub(crate) fn record_of<'a>(
+    reference: &'a RuntimeReference,
+    bound: &'a BoundLight,
+) -> &'a crate::reference::LightReference {
+    bound
+        .world
+        .as_ref()
+        .map_or(&reference.0.lighting.lights[bound.source_index], |w| {
+            &w.record
+        })
+}
 pub(crate) fn sync_lighting(
     reference: Res<RuntimeReference>,
     sim: Res<SimFrameResource>,
@@ -824,12 +837,7 @@ pub(crate) fn sync_lighting(
             .item
             .map(|id| active(PoseKey::Item(id)))
             .unwrap_or_else(|| bound.body.is_none_or(|id| active(PoseKey::Body(id))));
-        let record = bound
-            .world
-            .as_ref()
-            .map_or(&reference.0.lighting.lights[bound.source_index], |w| {
-                &w.record
-            });
+        let record = record_of(&reference, bound);
         let output = if let Some(world) = &bound.world {
             &world.output
         } else if bound.road {

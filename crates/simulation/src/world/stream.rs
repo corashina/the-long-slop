@@ -791,6 +791,10 @@ impl WorldStream {
         self.request.player
     }
 
+    /// Spawn context of later source spawns. Spawned content keeps its own context.
+    pub fn set_peaceful_enemies(&mut self, value: i32) {
+        self.contents.state.context.peaceful_enemies = value;
+    }
     pub fn mode(&self) -> super::GameMode {
         self.mode
     }
@@ -1092,12 +1096,39 @@ impl WorldStream {
         })
     }
 
+    /// Takes the other world use. Growth that fits only without unused renderer credit
+    /// waits: the old use stays, and the renderer gives back that credit.
     pub fn set_overlap(&mut self, overlap: WorldMetrics) -> Result<(), ReferenceError> {
         let previous = std::mem::replace(&mut self.overlap, overlap);
-        if let Err(error) = self.set_presentation_allocation(self.presentation) {
-            self.overlap = previous;
-            return Err(error);
+        let Err(error) = self.set_presentation_allocation(self.presentation) else {
+            return Ok(());
+        };
+        let used = self.presentation.zip(self.presentation_used, usize::min);
+        let mut fields = 0;
+        let credit = self.presentation_budgets(self.presentation);
+        for (index, (credit, used)) in credit
+            .iter()
+            .zip(self.presentation_budgets(used))
+            .enumerate()
+        {
+            if credit.used <= credit.limit {
+                continue;
+            }
+            let field = match index {
+                2 => Reclaim::PROTOTYPE_CPU,
+                5 => Reclaim::PENDING,
+                6 | 7 => Reclaim::STAGING,
+                9 => Reclaim::JOBS,
+                _ => 0,
+            };
+            if field == 0 || used.used > used.limit {
+                self.overlap = previous;
+                return Err(error);
+            }
+            fields |= field;
         }
+        self.overlap = previous;
+        self.wait_for_room(false, fields);
         Ok(())
     }
     pub(crate) fn set_presentation_allocation(

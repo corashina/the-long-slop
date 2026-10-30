@@ -136,7 +136,7 @@ struct ImpostorFragment {
 
 #ifndef PREPASS_PIPELINE
 #import "shaders/source_lighting.wgsl"::{lamp_lighting, receiver, cookie_uv_gradient, cookies, cookie_sampler, attenuation, default_cookie, default_sampler, attenuation_sampler}
-#import source_view_lighting::{lighting, diffuse_sh, direct_attenuation, fog_factor, sun_cookie, sun_cookie_sampler}
+#import source_view_lighting::{lighting, diffuse_sh, direct_attenuation, lamp_shadow, fog_factor, sun_cookie, sun_cookie_sampler}
 
 
 fn pow5(value: f32) -> f32 { let square = value * value; return square * square * value; }
@@ -245,6 +245,7 @@ fn fragment(in:ImpostorOutput)->ImpostorFragment {
             if d2 >= range2 { continue; }
             direction = delta * inverseSqrt(max(d2, 0.000001));
             weight = textureSampleLevel(attenuation, attenuation_sampler, vec2(d2 / range2, 0.5), 0.0).r;
+            weight *= lamp_shadow(lamp.mask.z, lamp.position_range.xyz, pbr.world_position.xyz, pbr.N, depth, impostor.renderer.z != 0u);
         }
         if lamp.cookie_rect.x > 0.0 {
             var cookie_uv = vec2(0.0);

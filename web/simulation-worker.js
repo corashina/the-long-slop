@@ -14,8 +14,8 @@ self.addEventListener('message',async({data})=>{
   await ready;
   if(data.cpuProfile!==undefined){cpu_profile(data.cpuProfile);return;}
   if(data.start){
-   const {manifest,hash,drawDistance,biome,startCar}=data.start;
-   const startup=start(manifest,hash,drawDistance,biome,startCar);
+   const {manifest,hash,drawDistance,biome,startCar,seed,options}=data.start;
+   const startup=start(manifest,hash,drawDistance,biome,startCar,seed,options);
    self.postMessage({startup},[startup.buffer]);return;
   }
   const started=performance.now(),frame=tick(data.command),tickMs=performance.now()-started;
