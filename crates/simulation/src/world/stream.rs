@@ -23,6 +23,22 @@ const STRUCTURE_REFRESH_DISTANCE: f32 = 1.0;
 pub const STAGING: usize = 32 * MIB;
 pub const CHECKPOINTS: usize = 16 * MIB;
 pub const PROTOTYPE_CPU: usize = 512 * MIB;
+/// The first part of the world that a supported area still waits for.
+#[derive(Clone, Copy, Debug)]
+pub enum SupportGap<'a> {
+    /// The plan or road list is not complete.
+    Plan,
+    /// A wanted road segment has no collider. `surface` tells if its surface exists.
+    Road { index: u32, surface: bool },
+    /// A wanted structure is not built.
+    Structure(&'a Placement),
+    /// A light influences the area but its structure is not built.
+    Light,
+    /// The area has more terrain tiles than the limit.
+    TileCount,
+    /// A terrain tile has no collider.
+    Terrain([i64; 2]),
+}
 pub const PROTOTYPE_GPU: usize = 1024 * MIB;
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
@@ -1354,17 +1370,24 @@ impl WorldStream {
         self.dependency_metadata = metadata;
         Ok(())
     }
+    /// The pending work parts, for the sandbox: replay, contents, props, ready structures,
+    /// prepared surface, terrain, road and renderer.
+    pub fn pending_parts(&self) -> [usize; 8] {
+        [
+            self.replay_roots
+                .len()
+                .max(usize::from(self.contents.has_replay())),
+            self.contents.pending_requests(),
+            self.props.pending_requests(),
+            self.ready_structures.len(),
+            usize::from(self.ready.is_some()),
+            usize::from(self.terrain_execution.has_pending()),
+            usize::from(self.road_work.is_some()),
+            self.presentation.pending,
+        ]
+    }
     fn pending_work(&self) -> usize {
-        self.replay_roots
-            .len()
-            .max(usize::from(self.contents.has_replay()))
-            + self.contents.pending_requests()
-            + self.props.pending_requests()
-            + self.ready_structures.len()
-            + usize::from(self.ready.is_some())
-            + usize::from(self.terrain_execution.has_pending())
-            + usize::from(self.road_work.is_some())
-            + self.presentation.pending
+        self.pending_parts().iter().sum()
     }
     pub(crate) fn can_request_independent(&self, claims: usize) -> bool {
         let fits = self
@@ -3802,7 +3825,7 @@ impl WorldStream {
         self.support_gap(swept).is_none()
     }
     /// The first missing part of the world in `swept`, or None when it is loaded.
-    pub fn support_gap(&self, swept: WorldBounds) -> Option<&'static str> {
+    pub fn support_gap(&self, swept: WorldBounds) -> Option<SupportGap<'_>> {
         if !self.initial_generation_ready
             || self.plan_revision != self.request.revision
             || self.next_road != self.road_candidates.len()
@@ -3810,9 +3833,9 @@ impl WorldStream {
                 .into_iter()
                 .all(f64::is_finite)
         {
-            return Some("plan");
+            return Some(SupportGap::Plan);
         }
-        if self.selected_roads.iter().any(|r| {
+        if let Some(road) = self.selected_roads.iter().find(|r| {
             self.wanted_roads.contains(&r.segment.index)
                 && intersects(r.segment.bounds, swept)
                 && !self.surfaces.iter().any(|s| {
@@ -3821,14 +3844,19 @@ impl WorldStream {
                         && s.collider.is_some()
                 })
         }) {
-            return Some("road");
+            let index = road.segment.index;
+            let surface = self
+                .surfaces
+                .iter()
+                .any(|s| s.key.layer == WorldLayer::Road && s.key.unit[0] == i64::from(index));
+            return Some(SupportGap::Road { index, surface });
         }
-        if self.wanted_structures.iter().any(|p| {
+        if let Some(placement) = self.wanted_structures.iter().find(|p| {
             [0, 2].into_iter().all(|axis| {
                 p.bounds.min[axis] <= swept.max[axis] && p.bounds.max[axis] >= swept.min[axis]
             }) && !self.structures.iter().any(|s| s.placement.id == p.id)
         }) {
-            return Some("structure");
+            return Some(SupportGap::Structure(placement));
         }
         if self.lights.iter().any(|light| {
             light.influences(swept)
@@ -3837,7 +3865,7 @@ impl WorldStream {
                     .iter()
                     .any(|s| light.owned_by(&s.placement.id))
         }) {
-            return Some("light");
+            return Some(SupportGap::Light);
         }
         let size = self.tiles[0].size as f64;
         let x0 = ((swept.min[0] + size * 0.5) / size).floor() as i64;
@@ -3848,21 +3876,21 @@ impl WorldStream {
             || z1 < z0
             || (x1 - x0 + 1).saturating_mul(z1 - z0 + 1) > self.limits.tiles[0] as i64
         {
-            return Some("tile count");
+            return Some(SupportGap::TileCount);
         }
-        let loaded = (x0..=x1).all(|x| {
-            (z0..=z1).all(|z| {
-                self.surfaces.iter().any(|s| {
+        (x0..=x1)
+            .flat_map(|x| (z0..=z1).map(move |z| [x, z]))
+            .find(|&unit| {
+                !self.surfaces.iter().any(|s| {
                     s.key
                         == SurfaceKey {
                             layer: WorldLayer::Terrain,
-                            unit: [x, z],
+                            unit,
                         }
                         && s.collider.is_some()
                 })
             })
-        });
-        (!loaded).then_some("terrain")
+            .map(SupportGap::Terrain)
     }
     fn refresh_helper_context(&mut self, bounds: WorldBounds) {
         let required = self.placements.foundation_count()

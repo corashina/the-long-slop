@@ -332,6 +332,19 @@ impl Plugin for SourceLightingPlugin {
                         .chain()
                         .in_set(RenderSystems::Prepare),
                 )
+                // WebGPU creates queued pipelines in the same frame. Inspect them before the
+                // graph runs, so a new base waits for its partner instead of skipping its draw.
+                .add_systems(
+                    Render,
+                    (
+                        super::surface_pass::inspect_created_surface_passes,
+                        super::caster::inspect_created_passes,
+                    )
+                        .chain()
+                        .in_set(RenderSystems::Render)
+                        .after(PipelineCache::process_pipeline_queue_system)
+                        .before(bevy::render::renderer::render_system),
+                )
                 .add_render_command::<Opaque3d, DrawSourceWorld>()
                 .add_render_command::<AlphaMask3d, DrawSourceWorld>()
                 .add_render_command::<Transmissive3d, DrawSourceWorld>()

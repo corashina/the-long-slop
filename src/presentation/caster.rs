@@ -337,6 +337,16 @@ pub(crate) fn prepare_views(
     }
 }
 
+/// The same caster inspection after the pipeline queue.
+pub(crate) fn inspect_created_passes(
+    passes: ResMut<CasterPasses>,
+    assets: Option<Res<super::lighting_assets::LightingRenderAssets>>,
+    cache: Res<PipelineCache>,
+    status: Res<RendererStateHandle>,
+    owners: Res<super::pipeline_ownership::PipelineOwners>,
+) {
+    prepare_passes(passes, assets, cache, status, owners);
+}
 pub(crate) fn prepare_passes(
     mut passes: ResMut<CasterPasses>,
     assets: Option<Res<super::lighting_assets::LightingRenderAssets>>,

@@ -124,7 +124,9 @@ impl StructureRecipe {
         scale: [f32; 3],
         appearance: &[super::spawn_appearance::NodeAppearance],
     ) -> Result<Self, ReferenceError> {
-        let nonuniform = scale[0] != scale[1] || scale[1] != scale[2];
+        // Source scales carry float noise, such as [100, 99.99994, 99.99994].
+        let near = |a: f32, b: f32| (a - b).abs() <= 1e-5 * a.abs().max(b.abs());
+        let nonuniform = !near(scale[0], scale[1]) || !near(scale[1], scale[2]);
         let checked_nonuniform = fixed_decoration_source(&prototype.source)
             && prototype
                 .bodies
@@ -144,9 +146,10 @@ impl StructureRecipe {
                     )
                 });
         if scale.iter().any(|v| !v.is_finite() || *v <= 0.) || (nonuniform && !checked_nonuniform) {
-            return Err(ReferenceError(
-                "Unresolved source structure collision scale or rotated body".into(),
-            ));
+            return Err(ReferenceError(format!(
+                "Unresolved source structure collision scale or rotated body: {}:{} scale {scale:?}",
+                prototype.source.file, prototype.source.path_id
+            )));
         }
         let active = |mut node: usize| {
             for _ in 0..prototype.nodes.len() {

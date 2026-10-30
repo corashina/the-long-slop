@@ -3,7 +3,7 @@
 use crate::reference::{ReferenceManifest, WorldPrototypeReference};
 use crate::starting_area::GarageRuntime;
 use crate::vehicle::{VehiclePose, to_rapier};
-use crate::world::{ObjectKey, WorldLayer};
+use crate::world::{ObjectKey, WorldLayer, stream::SupportGap};
 use rapier3d::math::{Rotation, Vector};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -375,10 +375,11 @@ fn state(runtime: &GarageRuntime, reference: &ReferenceManifest, radius: f32) ->
     // The step waits while the player or an active car has a gap: the same 8 m test as the step.
     let gap = |p: [f32; 3]| {
         let center = origin.absolute(p);
-        runtime.stream.support_gap(crate::world::WorldBounds {
+        let gap = runtime.stream.support_gap(crate::world::WorldBounds {
             min: center.map(|v| v - 8.),
             max: center.map(|v| v + 8.),
-        })
+        });
+        gap.map_or(Value::Null, |gap| gap_json(reference, gap))
     };
     let cars: Vec<_> = runtime
         .vehicles
@@ -393,7 +394,7 @@ fn state(runtime: &GarageRuntime, reference: &ReferenceManifest, radius: f32) ->
                 "name": prototype_name(&reference.world.prototypes[car.prototype]),
                 "position": origin.absolute(position),
                 "near": near(position),
-                "gap": if active { gap(position) } else { None },
+                "gap": if active { gap(position) } else { Value::Null },
             })
         })
         .collect();
@@ -419,6 +420,7 @@ fn state(runtime: &GarageRuntime, reference: &ReferenceManifest, radius: f32) ->
     json!({
         "player": origin.absolute(player),
         "supported": runtime.world_supported(),
+        "pending": runtime.stream.pending_parts(),
         "player_gap": gap(runtime.area.player.focus_position(&runtime.physics)),
         "seated": runtime.area.player.seated(),
         "cycle": runtime.lighting.cycle.capture_save().cycle_seconds,
@@ -427,6 +429,26 @@ fn state(runtime: &GarageRuntime, reference: &ReferenceManifest, radius: f32) ->
         "cars": cars,
         "items": items,
     })
+}
+
+fn gap_json(reference: &ReferenceManifest, gap: SupportGap) -> Value {
+    match gap {
+        SupportGap::Plan => json!("plan"),
+        SupportGap::Road { index, surface } => json!({"road": index, "surface": surface}),
+        SupportGap::Structure(p) => json!({
+            "structure": reference
+                .world
+                .prototypes
+                .iter()
+                .find(|w| w.source == p.prototype)
+                .map_or("", prototype_name),
+            "position": p.pose.position,
+            "scale": p.scale,
+        }),
+        SupportGap::Light => json!("light"),
+        SupportGap::TileCount => json!("tile count"),
+        SupportGap::Terrain(unit) => json!({"terrain": unit}),
+    }
 }
 
 /// The name of the prototype root node.
