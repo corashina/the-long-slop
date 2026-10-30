@@ -16,6 +16,11 @@ struct Params {
     grading: Vec4,
     /// Masked vignette: linear color, then opacity. Opacity 0 is off.
     vignette: Vec4,
+    /// Post stack v2 `_Distortion_Amount` and `_Distortion_CenterScale`.
+    distortion: Vec4,
+    distortion_center: Vec4,
+    /// Chromatic aberration amount, binoculars, distortion. 0 is off.
+    lens: Vec4,
     /// LDR `_Lut2D_Params`.
     strip: Vec4,
 }
@@ -38,6 +43,8 @@ pub struct UberPass {
     sequence: DitherSequence,
     pending: Option<DitherSequence>,
     extent: [u32; 2],
+    /// The binocular `lens` row.
+    binocular_lens: Vec4,
     vignette_opacity: f32,
 }
 impl UberPass {
@@ -139,8 +146,34 @@ impl UberPass {
             dirt: Vec4::new(1., 1., 0., 0.),
             grading: Vec4::new(1. / 33., 32., record.grading.post_exposure.exp2(), 0.),
             vignette: Vec4::ZERO,
+            distortion: Vec4::ZERO,
+            distortion_center: Vec4::ZERO,
+            lens: Vec4::ZERO,
             strip: super::lut_ldr::STRIP_PARAMS,
         };
+        // LensDistortionRenderer.Render.
+        let d = record.binoculars.distortion;
+        let theta = (1.6 * d.intensity.abs().max(1.)).min(160.).to_radians();
+        params.distortion = Vec4::new(
+            if d.intensity >= 0. { theta } else { 1. / theta },
+            2. * (theta * 0.5).tan(),
+            1. / d.scale,
+            d.intensity,
+        );
+        params.distortion_center = Vec4::new(
+            d.center[0],
+            d.center[1],
+            d.intensity_xy[0].max(1e-4),
+            d.intensity_xy[1].max(1e-4),
+        );
+        // IsEnabledAndSupported of each effect.
+        let distortion_on = d.intensity != 0. && (d.intensity_xy[0] > 0. || d.intensity_xy[1] > 0.);
+        let binocular_lens = Vec4::new(
+            record.binoculars.chromatic_intensity * 0.05,
+            1.,
+            f32::from(u8::from(distortion_on)),
+            0.,
+        );
         if input.dirt_extent.contains(&0) {
             return Err("Source bloom dirt extent is invalid".into());
         }
@@ -228,6 +261,7 @@ impl UberPass {
             sequence: previous.map_or_else(DitherSequence::default, |old| old.sequence),
             pending: None,
             extent,
+            binocular_lens,
             vignette_opacity: record.binoculars.opacity,
         })
     }
@@ -240,8 +274,10 @@ impl UberPass {
         self.uniform.get_mut().grading.z = post_exposure.exp2();
     }
     /// The binocular volume applies with weight 1, or not at all. `encode` writes it.
-    pub fn set_vignette(&mut self, on: bool) {
-        self.uniform.get_mut().vignette.w = if on { self.vignette_opacity } else { 0. };
+    pub fn set_binoculars(&mut self, on: bool) {
+        let params = self.uniform.get_mut();
+        params.vignette.w = if on { self.vignette_opacity } else { 0. };
+        params.lens = if on { self.binocular_lens } else { Vec4::ZERO };
     }
     pub fn noise_index(&self) -> u32 {
         self.sequence.noise_index()

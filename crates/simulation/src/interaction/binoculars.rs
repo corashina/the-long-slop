@@ -18,6 +18,8 @@ pub struct BinocularUse {
     pub item: ItemId,
     pub camera: Pose,
     pub fov_degrees: f32,
+    /// `tavcso` DepthOfField focus distance.
+    pub focus: f32,
 }
 
 pub struct Binoculars {
@@ -80,6 +82,7 @@ impl Binoculars {
                     item: b.item,
                     camera: b.camera,
                     fov_degrees: r.min_fov + (r.max_fov - r.min_fov) * t,
+                    focus: b.focus,
                 }
             });
         self.active

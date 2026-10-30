@@ -29,7 +29,6 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | X04c | Rebinding | M | Original action list and default keys. Rebind on the Controls screen. HUD hints show bound keys. |
 | X04d | Languages and help text | M | 10 language files, language dropdown, word table for all menu and HUD text. Help text follows the assists. After X04c. |
 | X06c | Building reflection probes | S | Car probes are live. Check the original building prefabs for realtime `ReflectionProbe`s. Export any as prototype probes. The live probe slots then take them. |
-| X06f | Depth of field and binocular lens | M | Main DoF with focus ray, night clamp and Dof toggle. Binocular DoF, lens distortion and chromatic aberration. |
 | X06g | Old particle heat haze | S | Player `HeatHaze` particle system with the `heatvalami` BumpDistort material. Old heat haze toggle, default off. |
 
 ### Multiplayer
@@ -328,6 +327,11 @@ Prepare once:
 18. Turn Mirrors off, or walk more than 4 m from the car. The mirrors show the glass material.
 19. Move the Mirror draw distance slider. Far objects appear and disappear in the mirrors. Reload: the setting stays.
 20. Stand among several cars. Check F3 with 5 live mirrors against the frame rate rule.
+21. Depth of field is off by default. Turn it on. Look at the dashboard from the driver seat: it stays sharp and the far road softens a little. Look out of the window: the focus moves out over a short time.
+22. At night and at dusk with Depth of field on: the focus stays closer than by day.
+23. Check F3 frame time with Depth of field on and off, with Antialiasing on and off. With Antialiasing on, the soft edges do not flicker. Drive with Motion blur on: the blur still works.
+24. Use the binoculars with Depth of field off: near and far things blur with the focus, and scroll moves the sharp distance. The image bulges at the center and edges show color fringes.
+25. Release the binoculars: the lens effects stop, and DoF returns to the setting.
 
 ### Multiplayer
 

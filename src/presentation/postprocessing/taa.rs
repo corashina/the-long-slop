@@ -215,6 +215,8 @@ impl TaaPass {
         cache: &PipelineCache,
         jitter: Vec2,
         reset: bool,
+        // DoF input instead of `output`. The history stays in the pair.
+        output: Option<&TextureView>,
     ) -> Result<(), String> {
         if !jitter.is_finite() {
             return Err("Invalid source TAA jitter".into());
@@ -235,7 +237,10 @@ impl TaaPass {
             encoder,
             cache.get_render_pipeline(self.pipelines[1]).unwrap(),
             &self.bindings[history],
-            &[&self.views[2], &self.views[self.next_output]],
+            &[
+                output.unwrap_or(&self.views[2]),
+                &self.views[self.next_output],
+            ],
         );
         self.pending = true;
         Ok(())

@@ -93,6 +93,7 @@ def recover_postprocessing(source):
     mask = source.resolve(binoculars_reader, binoculars['defVignette']['value'])
     if mask is None or mask.type.name != 'Texture2D':
         raise ValueError('Binocular vignette mask is missing')
+    depth_of_field, lens = recover_depth_of_field(source, profile_reader)
     filtering = p(exposure, 'filtering')
     # postprocesscontrol on the main camera. Update picks the LDR LUT and the day and night saturation.
     control_reader, control = read('level1', 80667)
@@ -132,7 +133,8 @@ def recover_postprocessing(source):
         'grading': recover_grading(grading), 'blue_noise': blue_noise,
         'binoculars': {'profile': source_id(profile_reader),
                        'color': [p(vignette, 'color')[c] for c in ('r', 'g', 'b', 'a')],
-                       'opacity': p(vignette, 'opacity'), 'mask': source_id(mask)},
+                       'opacity': p(vignette, 'opacity'), 'mask': source_id(mask), **lens},
+        'depth_of_field': depth_of_field,
         'saturation': {'day': control['daySaturation'], 'night': control['nightSaturation']},
         'luts': luts,
         'heat_haze': recover_heat_haze(source),
@@ -175,6 +177,82 @@ def recover_heat_haze(source):
             'up_offset_scale': vector('_UpOffsetScale'),
             'down_speed': [floats['_DownSpeed'], floats['_DownSpeed2']], 'down_strength': floats['_DownStrength'],
             'down_offset_scale': vector('_DownOffsetScale')}
+
+
+# postprocesscontrol.Update: the focus ray, the night clamp and `dof.enabled = BDof`.
+FOCUS_LINES = [
+    'if (h != null && Physics.Raycast(h.position, h.forward, out var hitInfo, maxFocusDistanceRay, LM))',
+    'focusDistance = Mathf.Lerp(minFocusDistance, maxFocusDistance, Mathf.InverseLerp(minFocusDistanceRay, maxFocusDistanceRay, hitInfo.distance));',
+    'focusDistance = Mathf.Clamp(focusDistance, minFocusDistance, nightFocusDistance);',
+    'focusDistance = Mathf.Clamp(focusDistance, minFocusDistance, Mathf.Lerp(maxFocusDistance, nightFocusDistance, mainscript.M.napszak.lerp));',
+    'focusDistance = Mathf.Clamp(focusDistance, minFocusDistance, Mathf.Lerp(nightFocusDistance, maxFocusDistance, mainscript.M.napszak.lerp));',
+    'outcucc = Mathf.Lerp(dof.focusDistance.value, focusDistance, focusLerp * Time.deltaTime);',
+    'dof.enabled.value = settingsscript.s.S.BDof;',
+    'dof.focusDistance.value = outcucc;',
+]
+
+
+def recover_depth_of_field(source, tavcso_reader):
+    """The `DOF` volume with its focus control, and the binocular lens of the `tavcso` profile."""
+    from .source import key
+    from .survival import managed_evidence
+    p = effective_parameter
+    control_reader = source.get('level1', 80667)
+    control = source.read(control_reader)
+    if source.class_name(control_reader) != 'postprocesscontrol' or not control['m_Enabled']:
+        raise ValueError('Source focus control differs')
+    camera = source.resolve(control_reader, control['h'])
+    if key(camera) != ('level1', 37616):
+        raise ValueError('Source focus ray origin differs')
+    dof_reader = source.resolve(control_reader, control['PDOF'])
+    if key(dof_reader) != ('sharedassets0.assets', 1367) or key(source.resolve(control_reader, control['PTAVCSO'])) != key(tavcso_reader):
+        raise ValueError('Source focus profiles differ')
+    volume_reader = source.get('level1', 69260)
+    volume = source.read(volume_reader)
+    binocular_reader = source.get('level1', 71134)
+    binocular = source.read(binocular_reader)
+    if (key(source.resolve(volume_reader, volume['sharedProfile'])) != key(dof_reader) or not volume['isGlobal']
+            or volume['weight'] != 1 or not volume['m_Enabled']
+            or not MAIN_VOLUME_MASK >> source.read(source.resolve(volume_reader, volume['m_GameObject']))['m_Layer'] & 1):
+        raise ValueError('Source DOF volume differs')
+    if (key(source.resolve(binocular_reader, binocular['sharedProfile'])) != key(tavcso_reader)
+            or binocular['priority'] <= volume['priority'] or binocular['weight'] != 1 or binocular['blendDistance'] != 0):
+        raise ValueError('The binocular volume must override the DOF volume')
+    def effect(profile_reader, kind):
+        found = [source.resolve(profile_reader, s) for s in source.read(profile_reader)['settings']]
+        found = [r for r in found if source.class_name(r) == kind]
+        if len(found) != 1:
+            raise ValueError(f'Source {kind} count differs')
+        data = source.read(found[0])
+        if not data['active'] or not data['enabled']['overrideState'] or not data['enabled']['value']:
+            raise ValueError(f'Unexpected inactive source {kind}')
+        return data
+    def lens(data):
+        if any(not data[name]['overrideState'] for name in ('aperture', 'focalLength', 'kernelSize', 'focusDistance')):
+            raise ValueError('Source DepthOfField fields must override')
+        if p(data, 'kernelSize') != 0:
+            raise ValueError('Source DepthOfField requires the Small kernel')
+        return {'aperture': p(data, 'aperture'), 'focal_length': p(data, 'focalLength')}
+    main = effect(dof_reader, 'DepthOfField')
+    distortion = effect(tavcso_reader, 'LensDistortion')
+    aberration = effect(tavcso_reader, 'ChromaticAberration')
+    if not p(aberration, 'fastMode') or aberration['spectralLut']['overrideState'] or aberration['spectralLut']['value']['m_PathID'] != 0:
+        raise ValueError('Binocular chromatic aberration requires the fast internal spectrum')
+    managed_evidence(source, FOCUS_LINES)
+    return {
+        'lens': lens(main), 'focus_distance': p(main, 'focusDistance'),
+        'layer_mask': control['LM']['m_Bits'],
+        'focus': [control['minFocusDistance'], control['maxFocusDistance']],
+        'night_focus': control['nightFocusDistance'], 'focus_lerp': control['focusLerp'],
+        'ray': [control['minFocusDistanceRay'], control['maxFocusDistanceRay']],
+    }, {
+        'depth_of_field': lens(effect(tavcso_reader, 'DepthOfField')),
+        'distortion': {'intensity': p(distortion, 'intensity'),
+                       'intensity_xy': [p(distortion, 'intensityX', 1.), p(distortion, 'intensityY', 1.)],
+                       'center': [p(distortion, 'centerX', 0.), p(distortion, 'centerY', 0.)],
+                       'scale': p(distortion, 'scale', 1.)},
+        'chromatic_intensity': p(aberration, 'intensity'),
+    }
 
 
 def recover_camera_stack(source):
