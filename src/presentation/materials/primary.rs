@@ -354,9 +354,8 @@ impl SourceMaterials {
                 let claim = ledger.can_request_independent(1);
                 let input = ledger.request_staging(staging);
                 let decoded = texture_cpu_reservation(texture);
-                let prototype = ledger.request_prototype(decoded, 0)
-                    || !(self.textures.iter().any(|t| pending_texture_cpu(t) != 0)
-                        || self.world_primary.jobs < ledger.allocation().jobs);
+                // Without credit the load waits. Retired prototypes give their credit back.
+                let prototype = ledger.request_prototype(decoded, 0);
                 if !job {
                     break;
                 }
