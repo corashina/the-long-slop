@@ -4,12 +4,16 @@
 // `storage` returns the Storage. The browser throws on access when storage is blocked.
 import {actionName} from './bindings.js';
 const KEY='the-long-slop.settings';
+// Source `QualitySettings.vSyncCount` 1 makes Unity ignore `targetFrameRate`. The source VSync default is on.
+// A browser always runs on the display refresh, so the FPS limit starts off. The setting still works.
+const TOGGLE_DEFAULTS={BEnableFpsLimit:false};
+const toggleDefault=(name,t)=>TOGGLE_DEFAULTS[name]??t.default;
 const round=(value,digits)=>{const scale=10**digits;return Math.round(value*scale)/scale;};
 export function defaultSettings(reference,fields={}){
  const values={};
  for(const [name,f] of Object.entries(fields))values[name]=f.default;
  for(const [name,s] of Object.entries(reference.sliders))values[name]=s.default*s.multiplier;
- for(const [name,t] of Object.entries(reference.toggles))values[name]=t.default;
+ for(const [name,t] of Object.entries(reference.toggles))values[name]=toggleDefault(name,t);
  return values;
 }
 function valid(reference,fields,name,value){
@@ -39,7 +43,7 @@ export function createSettings(storage,reference,fields={}){
   // Source `tab.PressedReset`: sliders reset when they are interactable, toggles always.
   reset(tab,inMenu){
    for(const [name,s] of Object.entries(reference.sliders))if(s.tab===tab&&(inMenu||!s.menu_only))values[name]=s.default*s.multiplier;
-   for(const [name,t] of Object.entries(reference.toggles))if(t.tab===tab)values[name]=t.default;
+   for(const [name,t] of Object.entries(reference.toggles))if(t.tab===tab)values[name]=toggleDefault(name,t);
    changed();
   },
   listen(listener){listeners.add(listener);},
