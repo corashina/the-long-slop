@@ -54,7 +54,7 @@ Not measured in a browser unless the row says so.
 
 | Change | PR |
 | --- | --- |
-| F3 shows GPU ms per world view stage | this PR |
+| F3 shows GPU ms per world view stage | #276 |
 | Body descendant node lists are built once per prototype, not per moved body per frame | #273 |
 | Release build uses fat LTO | #273 |
 | Survival and sleep HUD write to the DOM only on change | #273 |
