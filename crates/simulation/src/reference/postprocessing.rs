@@ -117,9 +117,61 @@ pub struct PostprocessingRecord {
     pub occlusion: OcclusionSettings,
     pub grading: GradingSettings,
     pub blue_noise: Vec<super::SourceId>,
-    pub heat_haze_weight: f32,
     pub binoculars: BinocularProfile,
     pub depth_of_field: FocusControl,
+    /// `postprocesscontrol` day and night saturation.
+    pub saturation: GradingSaturation,
+    /// `postprocesscontrol` LDR LUT strips.
+    pub luts: LdrLuts,
+    pub heat_haze: HeatHaze,
+}
+/// `postprocesscontrol.Update` sets the main grading saturation by the time of day.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GradingSaturation {
+    pub day: f32,
+    pub night: f32,
+}
+impl GradingSaturation {
+    /// `postprocesscontrol.Update`: night (`este`), Lerp toward night at dusk and toward day at dawn.
+    pub fn at(&self, phase: crate::lighting::CyclePhase, progress: f32) -> f32 {
+        use crate::lighting::CyclePhase;
+        let lerp = |a: f32, b: f32| a + (b - a) * progress.clamp(0., 1.);
+        match phase {
+            CyclePhase::Night => self.night,
+            CyclePhase::Dusk => lerp(self.day, self.night),
+            CyclePhase::Dawn => lerp(self.night, self.day),
+            CyclePhase::Day => self.day,
+        }
+    }
+}
+/// `LutC64` and `LutSepia`: linear strips with width = height * height.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LdrLuts {
+    pub c64: super::SourceId,
+    pub sepia: super::SourceId,
+}
+/// The main camera `Custom/heathazeshader` material.
+/// `napszakvaltakozas` sets `_Weight` = InverseLerp(temperature[0], temperature[1], temp).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeatHaze {
+    pub material: super::SourceId,
+    pub noise: super::SourceId,
+    pub temperature: [f32; 2],
+    pub min_dist: f32,
+    pub distance_m: f32,
+    /// `_UpSpeed` and `_UpSpeed2`.
+    pub up_speed: [f32; 2],
+    pub up_strength: f32,
+    /// Offset in xy, scale in zw.
+    pub up_offset_scale: [f32; 4],
+    /// `_DownSpeed` and `_DownSpeed2`.
+    pub down_speed: [f32; 2],
+    pub down_strength: f32,
+    /// Offset in xy, scale in zw.
+    pub down_offset_scale: [f32; 4],
 }
 /// The binocular volume profile `tavcso`. It overrides the `DOF` volume.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -385,8 +437,27 @@ impl PostprocessingRecord {
             "postprocessing focus control",
         )?;
         require(
-            self.heat_haze_weight == 0.,
-            "postprocessing startup heat haze interval",
+            finite(&[self.saturation.day, self.saturation.night])
+                && textures.contains(&self.luts.c64)
+                && textures.contains(&self.luts.sepia),
+            "postprocessing LDR LUTs and saturation",
+        )?;
+        let haze = &self.heat_haze;
+        require(
+            textures.contains(&haze.noise)
+                && haze.temperature[0] < haze.temperature[1]
+                && finite(&haze.temperature)
+                && finite(&[
+                    haze.min_dist,
+                    haze.distance_m,
+                    haze.up_strength,
+                    haze.down_strength,
+                ])
+                && finite(&haze.up_speed)
+                && finite(&haze.down_speed)
+                && finite(&haze.up_offset_scale)
+                && finite(&haze.down_offset_scale),
+            "postprocessing heat haze",
         )
     }
 }

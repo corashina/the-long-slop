@@ -33,6 +33,7 @@ pub mod reference;
 pub mod reflections;
 pub mod remote_players;
 pub mod save;
+pub mod screen_effects;
 mod shadow_batch;
 mod shadow_cache;
 pub mod shadow_quality;

@@ -28,7 +28,7 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | X03 | Creatures | XL | Ground UFO, EMP and green-eyed evil rabbits, human monster (attacks hurt the player), breakablescript `DamageFrom` for AI. Rabbits do not yet sense the player hum. |
 | X04d | Languages and help text | M | 10 language files, language dropdown, word table for all menu and HUD text. Help text follows the assists. |
 | X06c | Building reflection probes | S | Car probes are live. Check the original building prefabs for realtime `ReflectionProbe`s. Export any as prototype probes. The live probe slots then take them. |
-| X06g | Heat haze and LUT options | M | Heat haze pass weighted by temperature, old particle heat haze, LUT option (Default, C64, Sepia), grayscale. |
+| X06g | Old particle heat haze | S | Player `HeatHaze` particle system with the `heatvalami` BumpDistort material. Old heat haze toggle, default off. |
 
 ### Multiplayer
 

@@ -293,6 +293,9 @@ extern "C" {
     /// Pending "Sunglasses effects" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameSunglassesEffects)]
     pub fn game_sunglasses_effects() -> Option<bool>;
+    /// Pending `ScreenEffects` JSON, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameScreenEffects)]
+    pub fn game_screen_effects() -> Option<String>;
     /// Pending "Lamp shadows" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameLampShadows)]
     pub fn game_lamp_shadows() -> Option<bool>;

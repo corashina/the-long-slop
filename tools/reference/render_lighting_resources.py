@@ -137,7 +137,7 @@ def recover_sky_resources(source, output):
         readers[key(reader)]=reader
         return source_id(reader)
     cookie=texture(control_reader,controls['cloudShadowCookie'])
-    for identity in [post['bloom']['dirt'],*post['blue_noise'],post['binoculars']['mask']]:
+    for identity in [post['bloom']['dirt'],*post['blue_noise'],post['binoculars']['mask'],*post['luts'].values(),post['heat_haze']['noise']]:
         reader=source.get(identity['file'],identity['path_id']);readers[key(reader)]=reader
     clouds=[]
     mesh_reader=None
