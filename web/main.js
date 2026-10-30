@@ -4,6 +4,8 @@ import {installGameMode,installStartCar} from './game-mode.js';
 installGameMode(window,document.querySelector('#biome'));
 import {installSunglassesEffects} from './sunglasses.js';
 installSunglassesEffects(window,()=>localStorage,document.querySelector('#sunglasses-effects'));
+import {installMirrors} from './mirrors.js';
+const mirrors=installMirrors(window,()=>localStorage,document.querySelector('#mirrors'),document.querySelector('#mirror-draw-distance'),document.querySelector('#mirror-draw-distance-value'));
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
 import {manifestStamp,createSaveStorage,AUTOSAVE} from './save-storage.js';
@@ -210,6 +212,7 @@ async function load(){
  const outfit=installOutfit(window,()=>localStorage,manifest.clothing.characters);
  const range=manifest.world.draw_distance;
  slider=installDrawDistance(()=>localStorage,document.querySelector('#draw-distance'),document.querySelector('#draw-distance-value'),{minimum:range.minimum.drawDistance,maximum:range.maximum.drawDistance,fallback:range.default});
+ mirrors.range(manifest.world.mirrors.draw_distance);
  // The simulation parses its own manifest copy while this thread loads the interface.
  worldDrawDistance=slider.value();
  const simulationStarted=simulation.start(bytes.slice(),manifestHash,worldDrawDistance,window.gameBiome(),window.gameStartCar());

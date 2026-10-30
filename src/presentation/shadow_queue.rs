@@ -55,8 +55,8 @@ pub struct ShadowQueues {
     specializations: Vec<CachedSpecialization>,
     queued: [MainEntityHashMap<QueuedShadow>; VIEW_COUNT],
     retained: [Option<RetainedViewEntity>; VIEW_COUNT],
-    // Keep idle face bins out of Bevy's per-frame instance preparation.
-    idle_probe_phases: [Option<BinnedRenderPhase<SourceShadow>>; 6],
+    // Keep idle face and mirror bins out of Bevy's per-frame instance preparation.
+    idle_probe_phases: [Option<BinnedRenderPhase<SourceShadow>>; VIEW_COUNT - PROBE_START],
     epoch: Option<(u64, u32)>,
     revision: u64,
     pub instances: [[u32; 4]; VIEW_COUNT],
@@ -238,10 +238,7 @@ pub fn queue(world: &mut World) {
                         state.epoch = Some(epoch);
                     }
                     for index in PROBE_START..VIEW_COUNT {
-                        if world
-                            .resource::<SourceViewFrame>()
-                            .skip_probe_preparation(index)
-                        {
+                        if world.resource::<SourceViewFrame>().skip_preparation(index) {
                             if let Some(phase) =
                                 state.retained[index].and_then(|retained| phases.remove(&retained))
                             {
@@ -468,7 +465,7 @@ pub fn write_cascades(
         h(rotation * -Vec3::Z),
     ];
     for (mut view, mut slots, cadence) in &mut views {
-        if frame.skip_probe_preparation(view.index) {
+        if frame.skip_preparation(view.index) {
             continue;
         }
         let key = super::shadow_preparation::CascadeKey {

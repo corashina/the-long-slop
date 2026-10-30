@@ -184,7 +184,7 @@ Startup conditions use a fixed build-based seed and original source ranges.
 Rims and tires use the matching source material variants.
 The exporter selects the highest source LOD and retains all transform IDs.
 
-Mirror glass uses the source disabled-mirror material. The export has no live mirror records.
+Mirror glass uses the source disabled-mirror material. Vehicle `mirrors` records each live mirror with its camera and mirror material.
 Plate text is omitted because serialized glyphs contain obsolete editor text.
 The exporter maps supported Unity materials to glTF PBR and retains source properties and keywords.
 The source renderer ports the approved lighting, cookie, shadow, sky, cloud, and flare paths.

@@ -9,7 +9,7 @@ from .library.types import ObjectId
 from .gltf import GltfExporter, convert_bind_poses, converted_transform
 from .collision import geometry, step_surface, collider_tag, world_pose
 from .triggers import recover_trigger_role
-from . import draw_distance
+from . import draw_distance, mirrors
 from .sled import centers_of_mass, recover_sled
 from .actions import recover_world_pushes
 from .towing import recover_hitches, recover_trailer
@@ -541,7 +541,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     draw_settings=source.get('level0',16865)
     from .vehicles import vehicle_globals
     world={'library':provenance(reader.receipt),
-        'spawn_context':SPAWN_CONTEXT,'vehicle_globals':vehicle_globals(source),'generation_frame':IDENTITY,'magnetic_field':magnetic_field,'electronics_cutoff':0.2,'draw_distance':draw_distance.record(selected.receipt(draw_settings),source.read(draw_settings)),'source_hashes':[],
+        'spawn_context':SPAWN_CONTEXT,'vehicle_globals':vehicle_globals(source),'generation_frame':IDENTITY,'magnetic_field':magnetic_field,'electronics_cutoff':0.2,'draw_distance':draw_distance.record(selected.receipt(draw_settings),source.read(draw_settings)),'mirrors':mirrors.record(source,selected),'source_hashes':[],
         'road':{'source':source_id(road_owner),'prototypes':road_roots,**generation_counts(road),**{k:road[k] for k in road_fields}},
         'terrain':{'source':source_id(settings_owner),'prefabs':terrain_prefabs,'materials':terrain_materials,'textures':list(terrain_source.lighting_textures.values()),'game_settings':{'source':source_id(main_owner),'homesickMode':main['GSettings']['homesickMode']},
             'tiles':[{k:settings[t][k] for k in ('tileSize','resolution','drawDistance','YCoord')} for t in ('Terrain','DistantTerrain','DistantTerrain2')],

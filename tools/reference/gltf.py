@@ -123,6 +123,10 @@ class GltfExporter(GltfBuilder):
                         for field in ('mON','mOFF'): add(component,row[field])
                 elif name == 'radioscript':
                     for field in ('SOn','SOff','MutatoOn','MutatoOff'): add(component, data[field])
+                elif name == 'mirrorscript' and data['M']['R']['m_PathID'] and data['M']['C']['m_PathID']:
+                    # mirrorscript.FStart: a live mirror shows a copy of defMirrorMaterial.
+                    main = self.source.get('level1', 64919)
+                    add(main, self.source.read(main)['defMirrorMaterial'])
         from .world_biome_materials import used_sets
         sets = self.source.biome_material_sets
         self.biome_sets = used_sets(self.source, records, sets)

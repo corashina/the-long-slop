@@ -271,7 +271,8 @@ fn transparent(
     }
     glass.completed(
         frame.frame,
-        if source_view.index < super::surface_views::WORLD_VIEWS {
+        // Mirror views draw in the main submission. Probe faces have their own.
+        if !super::surface_views::probe_view(source_view.index) {
             frame.main_token
         } else {
             frame.probe_token

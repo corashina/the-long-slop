@@ -27,7 +27,6 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | --- | --- | --- | --- |
 | X03 | Creatures | XL | Ground UFO, EMP and green-eyed evil rabbits, human monster (attacks hurt the player), breakablescript `DamageFrom` for AI. Rabbits do not yet sense the player hum. |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. |
-| X06a | Live mirrors | L | Car mirror cameras render to textures. Only the 5 nearest run. FOV and far plane follow distance. Mirrors toggle and Mirror draw distance slider. |
 | X06b | Lamp shadows | L | Point and spot lights with a shadow mode cast shadows. |
 | X06c | Live reflection probes | M | Only 1 probe is live. Make every building and car probe live, with the 5 s disable distance check and the Reflections toggle. |
 | X06d | Motion vectors and TAA | L | Velocity buffer and TAA with the source jitter, blend and sharpness. The Antialiasing toggle switches 4x MSAA and TAA together. Off is 1 sample and no TAA. WebGPU has no 8x. |
@@ -264,3 +263,11 @@ Prepare once:
 2. Eat each food. Crumbs, meat, turd and chocolate bits fall from the food. Smoke a cigarette: ash falls now and then.
 3. Stay up at night for a few nights. The horror sound plays for 5 to 15 s on the first night, then every 1 to 5 nights. It stops at day.
 4. New game between 15 October and 15 November: the start pumpkin glows and flickers at night. Hold it and wear it: the light follows.
+
+### Advanced rendering
+
+1. Re-export first: the export now has the live mirror records.
+2. Sit in the Lada with Mirrors on. The side and front mirrors show the world behind the car, not flipped.
+3. Turn Mirrors off, or walk more than 4 m from the car. The mirrors show the glass material.
+4. Move the Mirror draw distance slider. Far objects appear and disappear in the mirrors. Reload: the setting stays.
+5. Stand among several cars. Check F3 with 5 live mirrors against the frame rate rule.

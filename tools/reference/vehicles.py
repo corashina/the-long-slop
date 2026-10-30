@@ -330,6 +330,27 @@ def probe_record(source, proto):
     return {'source':source_id(reader),'node':node,**probe_settings(key(reader),source.read(reader))}
 
 
+def mirror_records(source, proto, asset, material_indices):
+    """Live mirrors: each mirrorscript with a renderer and a camera. Nodes are prototype node indices."""
+    main=source.get('level1',64919)
+    material=source.read(main)['defMirrorMaterial']
+    records=[]
+    for _,reader in proto.scripts('mirrorscript'):
+        m=source.read(reader)['M']
+        if not (m['R']['m_PathID'] and m['C']['m_PathID']):continue
+        camera=source.resolve(reader,m['C']);c=source.read(camera)
+        # FStart sets T to the script transform when it is null. MirrorsUpdate moves CT.
+        plane=proto.link(reader,m['T']) if m['T']['m_PathID'] else proto.node(reader)
+        if not m['CT']['m_PathID'] or key(source.transform_for(source.resolve(camera,c['m_GameObject'])))!=key(source.resolve(reader,m['CT'])):
+            raise ValueError(f'{key(reader)} mirror CT is not the camera transform')
+        if c['orthographic'] or c['m_NormalizedViewPortRect']!={'height':1.0,'width':1.0,'x':0.0,'y':0.0} or c['m_ClearFlags']!=1:
+            raise ValueError(f'{key(camera)} mirror camera differs')
+        records.append({'source':source_id(reader),'renderer':proto.link(reader,m['R']),'plane':plane,
+            'camera':proto.link(reader,m['CT']),'near':c['near clip plane'],'mask':c['m_CullingMask']['m_Bits'],
+            'material':material_link(source,main,material,asset,material_indices)})
+    return records
+
+
 def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices, output):
     """`vehicle` record of a world prototype whose root has carscript, else None.
 
@@ -410,4 +431,5 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         'reach':reach_record(proto,car_reader,car),'lights':lights,'light_switch':light_switch,'instruments':instruments,
         'gauge_limits':gauge_limits(source,car_reader),'kmh_meters':kmh_meters(source,proto,car_reader,car),
         'plates':prototype_plates(source,proto),'probe':probe_record(source,proto),
+        'mirrors':mirror_records(source,proto,asset,material_indices),
         'high_beams':[i for i,lamp in enumerate(instruments['lamps']) if lamp['signal']=='headlight2'] if instruments else []}

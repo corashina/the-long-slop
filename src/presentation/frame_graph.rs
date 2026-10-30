@@ -1,6 +1,8 @@
 //! Source world camera. GPU tokens are acknowledged after the render queue submission.
 use super::lighting_scene::PROBE_COUNT;
-use super::surface_views::{PROBE_START, VIEW_COUNT, WORLD_VIEWS};
+use super::surface_views::{
+    MIRROR_EXTENT, MIRROR_START, PROBE_START, VIEW_COUNT, WORLD_VIEWS, mirror_view, probe_view,
+};
 use super::{
     frame_copy::FrameCopy,
     lighting_assets::LightingRenderAssets,
@@ -166,6 +168,7 @@ impl Plugin for SourceFramePlugin {
             cpu_boundaries.after(super::materials::bind_authored_materials),
         );
         super::view_frame::install(app);
+        super::mirrors::install(app);
         super::shadow_queue::install(app);
         super::caster_material::install(app);
         super::shadow_atlas::install(app);
@@ -180,7 +183,12 @@ impl Plugin for SourceFramePlugin {
             .add_systems(Render, release_canvas_texture.after(RenderSystems::Render))
             .add_systems(
                 Render,
-                (update_sky_extras, prepare_frame, prepare_probe)
+                (
+                    update_sky_extras,
+                    prepare_frame,
+                    prepare_probe,
+                    prepare_mirror_copy,
+                )
                     .after(RenderSystems::PrepareResources)
                     .before(RenderSystems::Render),
             )
@@ -287,6 +295,24 @@ pub fn spawn_cameras(
     );
     image.texture_descriptor.usage |= TextureUsages::RENDER_ATTACHMENT;
     let capture = images.add(image);
+    // Mirror views draw into their own scratch. Their slot images take a copy.
+    let mut image = Image::new_fill(
+        Extent3d {
+            width: MIRROR_EXTENT,
+            height: MIRROR_EXTENT,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0; 8],
+        TextureFormat::Rgba16Float,
+        bevy::asset::RenderAssetUsages::default(),
+    );
+    image.texture_descriptor.usage |= TextureUsages::RENDER_ATTACHMENT;
+    let mirror_capture = images.add(image);
+    commands.insert_resource(super::mirrors::MirrorFrame {
+        views: [None; super::surface_views::MIRROR_COUNT],
+        images: super::mirrors::slot_images(images),
+    });
     for index in 0..VIEW_COUNT {
         let (near, far, fov, mask, order, samples) = if index < WORLD_VIEWS {
             let world = super::camera::world_camera_settings(fov_degrees, far);
@@ -298,16 +324,23 @@ pub fn spawn_cameras(
                 record.cameras[2].order as isize,
                 Msaa::from_samples(super::render_targets::MSAA_SAMPLES),
             )
-        } else {
+        } else if probe_view(index) {
             let p = &record.probes[0];
             (p.near, p.far, 90., p.mask, 10 + index as isize, Msaa::Off)
+        } else {
+            // The mirror selection sets the pose, projection, mask and activity each frame.
+            (0.1, 1., 60., 0, 10 + index as isize, Msaa::Off)
         };
         let mut entity = commands.spawn((
             Camera3d::default(),
             bevy::render::view::NoIndirectDrawing,
             bevy::light::cluster::ClusterConfig::Single,
             bevy::camera::Hdr,
-            Camera { order, ..default() },
+            Camera {
+                order,
+                is_active: !mirror_view(index),
+                ..default()
+            },
             CameraRenderGraph::new(SourceSurface),
             (0..32)
                 .filter(|layer| mask & (1u32 << layer) != 0)
@@ -337,8 +370,10 @@ pub fn spawn_cameras(
         if index == 0 {
             entity.insert(super::camera::DriveCamera);
         }
-        if index >= PROBE_START {
+        if probe_view(index) {
             entity.insert(RenderTarget::Image(capture.clone().into()));
+        } else if mirror_view(index) {
+            entity.insert(RenderTarget::Image(mirror_capture.clone().into()));
         }
     }
 }
@@ -460,6 +495,27 @@ fn prepare_frame(
             );
         }
     }
+    if let Some(sky) = sky.as_mut() {
+        for index in MIRROR_START..VIEW_COUNT {
+            let Some(snapshot) = frame.views[index] else {
+                continue;
+            };
+            let projection =
+                Mat4::from_cols_array_2d(&crate::reference::sky::source_sky_gpu_projection(
+                    snapshot.implicit_projection.to_cols_array_2d(),
+                    snapshot.near,
+                ));
+            sky.write_live(
+                index,
+                &scene,
+                snapshot.view_from_world.inverse().w_axis.truncate(),
+                snapshot.far,
+                projection * snapshot.view_from_world,
+                &device,
+                &queue,
+            );
+        }
+    }
     if let Some(clouds) = clouds.as_mut() {
         if sky_views.single().is_ok() {
             clouds.write_live(Vec3::ZERO, sky_clip, &scene, &device, &queue);
@@ -502,6 +558,7 @@ fn prepare_frame(
         assets.shaders.copy.clone(),
         colors.resolved.sampled.as_ref().unwrap(),
         format,
+        "display_copy",
     );
     commands.insert_resource(FrameResources {
         colors,
@@ -509,6 +566,41 @@ fn prepare_frame(
         sky_depth: depth,
         display,
         display_format: format,
+    });
+}
+/// Copies the mirror scratch color into a slot image. Rows stay bottom-up, as source textures.
+#[derive(Resource)]
+pub(crate) struct MirrorCopy {
+    copy: FrameCopy,
+}
+fn prepare_mirror_copy(
+    mut commands: Commands,
+    resources: Option<Res<SurfaceResources>>,
+    assets: Option<Res<LightingRenderAssets>>,
+    existing: Option<Res<MirrorCopy>>,
+    device: Res<RenderDevice>,
+    cache: Res<PipelineCache>,
+    status: Res<RendererStateHandle>,
+) {
+    if let Some(existing) = existing {
+        if let Some(error) = existing.copy.failure(&cache) {
+            status.fail(error);
+        }
+        return;
+    }
+    let (Some(resources), Some(assets)) = (resources, assets) else {
+        return;
+    };
+    // The mirror scratch keeps its storage across window resizes.
+    commands.insert_resource(MirrorCopy {
+        copy: FrameCopy::new(
+            &device,
+            &cache,
+            assets.shaders.copy.clone(),
+            resources.targets.mirror.resolved.sampled.as_ref().unwrap(),
+            TextureFormat::Rgba8Unorm,
+            "copy",
+        ),
     });
 }
 fn sky_depth(device: &RenderDevice, width: u32, height: u32) -> Texture {
@@ -537,6 +629,7 @@ pub(crate) fn surface_ready(
     cache: Res<PipelineCache>,
     effects: Option<Res<super::source_effects::SourceEffects>>,
     preprocess: Res<bevy::pbr::PreprocessPipelines>,
+    mirrors: Option<Res<MirrorCopy>>,
 ) -> bool {
     let index = view.into_inner().index;
     let state = progress.lock();
@@ -551,7 +644,11 @@ pub(crate) fn surface_ready(
         && preprocess_ready(&preprocess, &cache)
         && state.audit.sky
         && (index < WORLD_VIEWS
+            || (mirror_view(index)
+                && state.audit.presented
+                && mirrors.is_some_and(|m| m.copy.ready(&cache)))
             || (state.audit.presented
+                && probe_view(index)
                 && frame.probe_job == Some(ProbeJob::Face((index - PROBE_START) as u8))
                 && probe.is_some_and(|p| {
                     p.probes[frame.probe_index].accepts(frame.probe_token)
@@ -784,6 +881,9 @@ fn finish_surface(
     effects: Res<super::source_effects::SourceEffects>,
     status: Res<RendererStateHandle>,
     props: Res<super::prop_draws::PropDraws>,
+    mirrors: Option<Res<MirrorCopy>>,
+    mirror_frame: Res<super::mirrors::MirrorFrame>,
+    gpu_images: Res<bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>>,
     mut context: RenderContext,
 ) {
     let (source, target, collector, lighting, shadow, targets, glass) = view.into_inner();
@@ -814,6 +914,22 @@ fn finish_surface(
             .raster_projection
             .to_cols_array(),
     };
+    if mirror_view(source.index) {
+        // The slot image is the source `rt`: R8G8B8A8_UNorm clamps the HDR color.
+        let (Some(mirrors), Some(image)) = (
+            mirrors,
+            mirror_frame
+                .images
+                .get(source.index - MIRROR_START)
+                .and_then(|handle| gpu_images.get(handle)),
+        ) else {
+            return;
+        };
+        mirrors
+            .copy
+            .encode(context.command_encoder(), &cache, &image.texture_view);
+        return;
+    }
     if source.index >= PROBE_START {
         let Some(probes) = probe.as_mut() else { return };
         let probe = &mut probes.probes[frame.probe_index];
@@ -1472,14 +1588,16 @@ fn render_capture_sky(
     if source.index < WORLD_VIEWS || status.failure().is_some() {
         return;
     }
+    // Sky bindings share the surface view index.
     if sky.encode(
-        source.index - PROBE_START + 1,
+        source.index,
         context.command_encoder(),
         &cache,
         targets.0.colors.attachment(),
         None,
         &targets.0.depth.attachment,
-    ) && let Some(probe) = probe.as_ref()
+    ) && probe_view(source.index)
+        && let Some(probe) = probe.as_ref()
     {
         probe.probes[frame.probe_index].sky_frames[source.index - PROBE_START]
             .store(frame.frame, Ordering::Release);

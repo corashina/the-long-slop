@@ -255,6 +255,10 @@ extern "C" {
     /// Pending "Sunglasses effects" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameSunglassesEffects)]
     pub fn game_sunglasses_effects() -> Option<bool>;
+    /// Fills the pending "Mirrors" setting: on (0 or 1) and the draw distance in meters.
+    /// False when nothing changed.
+    #[wasm_bindgen(js_namespace = window, js_name = gameMirrors)]
+    pub fn game_mirrors(setting: &mut [f32]) -> bool;
     /// Fills the appearance preview rect: x, y, width and height in canvas fractions.
     /// False while the appearance screen is closed.
     #[wasm_bindgen(js_namespace = window, js_name = gameAppearancePreview)]

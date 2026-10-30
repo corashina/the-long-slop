@@ -15,6 +15,7 @@ pub mod light_dither;
 pub mod lighting;
 pub mod materials;
 pub mod mechanisms;
+pub mod mirrors;
 pub mod outfit;
 pub mod outfit_preview;
 pub mod player_body;

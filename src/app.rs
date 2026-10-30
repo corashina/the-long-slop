@@ -104,6 +104,8 @@ struct CharacterShell<'a> {
 struct WorldShell<'a> {
     #[serde(borrow)]
     draw_distance: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    mirrors: &'a serde_json::value::RawValue,
     #[serde(borrow, skip_serializing)]
     startup: Vec<StartupShell<'a>>,
     /// Start car names in export order. The Game mode start car list shows them.
