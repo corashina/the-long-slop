@@ -50,3 +50,36 @@ pub fn tick(command: &[u8]) -> Result<Vec<u8>, JsValue> {
             .map_err(|e| JsValue::from_str(&e.0))
     })
 }
+
+fn with_session<T>(f: impl FnOnce(&mut Session) -> T) -> Result<T, JsValue> {
+    SESSION.with_borrow_mut(|session| {
+        session
+            .as_mut()
+            .map(f)
+            .ok_or_else(|| JsValue::from_str("The simulation is not started."))
+    })
+}
+
+/// Starts or ends a multiplayer session. `role`: 0 off, 1 host, 2 guest.
+#[wasm_bindgen]
+pub fn net_session(role: u8, slot: u8) -> Result<(), JsValue> {
+    with_session(|s| s.net_session(role, slot))
+}
+
+/// Length-prefixed peer packets for the next tick.
+#[wasm_bindgen]
+pub fn net_receive(packets: &[u8]) -> Result<(), JsValue> {
+    with_session(|s| s.net_receive(packets))
+}
+
+/// A peer left.
+#[wasm_bindgen]
+pub fn net_leave(slot: u8) -> Result<(), JsValue> {
+    with_session(|s| s.net_leave(slot))
+}
+
+/// Length-prefixed packets of the last tick for peers.
+#[wasm_bindgen]
+pub fn net_send() -> Result<Vec<u8>, JsValue> {
+    with_session(|s| s.net_send().to_vec())
+}

@@ -149,7 +149,7 @@ pub(crate) fn prepare_pass_order(
     let particle_draw = functions.id::<super::particles::DrawSourceParticle>();
     for (view, mut order, source) in &mut views {
         order.entries.clear();
-        if frame.skip_probe_preparation(source.index) {
+        if frame.skip_preparation(source.index) {
             continue;
         }
         // One named grab capture precedes the first distortion particle.

@@ -3,9 +3,9 @@ import {createSaveScreen} from './save-screen.js';
 import {createSettingsScreen} from './settings-screen.js';
 import {canLoadLast} from './save-session.js';
 export const ACTIONS={PAUSE:2,CONTINUE:4,RECOVER:16};
-const pendingText={save:'Saving...',load:'Loading...',loadLast:'Loading...',remove:'Deleting...',newGame:'Starting a new game...'};
-const resultText={save:'Save complete.',load:'Game loaded.',loadLast:'Game loaded.',remove:'Save deleted.',newGame:'New game ready.'};
-const SUBSCREENS=['settings','game-mode','saves','appearance'];
+const pendingText={join:'Loading the host world...',save:'Saving...',load:'Loading...',loadLast:'Loading...',remove:'Deleting...',newGame:'Starting a new game...'};
+const resultText={join:'Joined the game.',save:'Save complete.',load:'Game loaded.',loadLast:'Game loaded.',remove:'Save deleted.',newGame:'New game ready.'};
+const SUBSCREENS=['settings','game-mode','saves','appearance','multiplayer'];
 function operationError(error){
  const message=error?.message??String(error);
  if(message==='No saved game.')return 'No saved game is available.';
@@ -23,11 +23,12 @@ export class MenuState {
  gameMode(){if(this.pending||!['start-menu','pause-menu'].includes(this.state))return;this.origin=this.state;this.state='game-mode';}
  saves(){if(this.pending||!['start-menu','pause-menu'].includes(this.state))return;this.origin=this.state;this.state='saves';}
  appearance(){if(this.pending||!['start-menu','pause-menu'].includes(this.state))return;this.origin=this.state;this.state='appearance';}
+ multiplayer(){if(this.pending||!['start-menu','pause-menu'].includes(this.state))return;this.origin=this.state;this.state='multiplayer';}
  back(){if(SUBSCREENS.includes(this.state))this.state=this.origin;}
  recover(){if(this.state==='pause-menu'&&!this.pending&&!this.dead)this.actions=ACTIONS.RECOVER;}
  takeActions(){const a=this.actions;this.actions=0;return a;}
  async run(operation,saveSession,...args){
-  if(!this.readyFlag||this.pending||!['start-menu','pause-menu','saves'].includes(this.state)||(operation==='save'&&!this.started))return;
+  if(!this.readyFlag||this.pending||!['start-menu','pause-menu','saves','multiplayer'].includes(this.state)||(operation==='save'&&!this.started))return;
   const token=++this.generation;this.pending=true;this.operation=operation;this.error='';this.status=pendingText[operation];
   try {
    await saveSession[operation](...args);if(token!==this.generation)return;
@@ -45,13 +46,13 @@ export class MenuState {
  }
 }
 export async function captureWithAudio(model,action,request,audio){const success=await model.capture(action,request,()=>audio?.unlock());if(!success)audio?.pause();return success;}
-export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId,thumbnail=()=>null,sleeping=()=>false,seated=()=>false,slider,audio,drivingBindings,defaultAssists,onPause,onNewGame,appearance,figure,settings,resets}) {
- const model=new MenuState(),menu=document.querySelector('#menu'),settingsNode=document.querySelector('#settings-screen'),gameMode=document.querySelector('#game-mode-screen'),savesNode=document.querySelector('#save-screen'),appearanceNode=document.querySelector('#appearance-screen'),startLast=document.querySelector('#start-load-last');
+export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId,thumbnail=()=>null,sleeping=()=>false,seated=()=>false,guest=()=>false,slider,audio,drivingBindings,defaultAssists,onPause,onNewGame,appearance,figure,settings,resets}) {
+ const model=new MenuState(),menu=document.querySelector('#menu'),settingsNode=document.querySelector('#settings-screen'),gameMode=document.querySelector('#game-mode-screen'),savesNode=document.querySelector('#save-screen'),appearanceNode=document.querySelector('#appearance-screen'),multiplayerNode=document.querySelector('#multiplayer-screen'),startLast=document.querySelector('#start-load-last');
  const initial=document.querySelector('#start-actions'),paused=document.querySelector('#pause-actions'),error=document.querySelector('#capture-error'),status=document.querySelector('#status');
  const art=document.querySelector('#menu-art'),frame=document.querySelector('#menu-frame'),hud=document.querySelector('#hud');
- const initialNodes=[['#new-game','start'],['#start-load','start'],['#start-load-last','start-controls'],['#start-settings','start-controls'],['#start-game-mode','start-controls'],['#start-appearance','start-controls']];
- const pauseNodes=[['#resume','continue'],['#save','continue'],['#load','continue'],['#pause-new-game','restart'],['#recover','recover'],['#settings','controls'],['#pause-game-mode','controls'],['#appearance','controls']];
- const actionNodes=[...initialNodes,...pauseNodes],backNodes=['#back','#game-mode-back','#save-back','#appearance-back'],nodes=[...actionNodes,...backNodes.map(selector=>[selector,'back'])];
+ const initialNodes=[['#new-game','start'],['#start-load','start'],['#start-load-last','start-controls'],['#start-settings','start-controls'],['#start-game-mode','start-controls'],['#start-appearance','start-controls'],['#start-multiplayer','start-controls']];
+ const pauseNodes=[['#resume','continue'],['#save','continue'],['#load','continue'],['#pause-new-game','restart'],['#recover','recover'],['#settings','controls'],['#pause-game-mode','controls'],['#appearance','controls'],['#multiplayer','controls']];
+ const actionNodes=[...initialNodes,...pauseNodes],backNodes=['#back','#game-mode-back','#save-back','#appearance-back','#multiplayer-back'],nodes=[...actionNodes,...backNodes.map(selector=>[selector,'back'])];
  let lastState='',lastError='',lastStatus='',lastTravel=-1,pendingDriving=0,canLast=false,autoLoad=true;
  const screen=createSaveScreen({settings,paint:()=>paint(),run:(operation,name)=>operate(operation,...(operation==='save'?[name,thumbnail()]:operation==='loadLast'?[buildId]:[name]))});
  const clutch=document.querySelector('#automatic-clutch'),gears=document.querySelector('#automatic-gears');
@@ -81,10 +82,11 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId
    const mode=document.querySelector('#start-game-mode'),modeBox=layoutBox(ui.layouts['start-controls'],innerWidth,innerHeight),modeGap=Math.min(16,modeBox.height*.25),modeTop=start.y-modeBox.height-modeGap;Object.assign(mode.style,{left:((innerWidth-modeBox.width)/2)+'px',top:modeTop+'px'});
    Object.assign(startLast.style,{left:((innerWidth-modeBox.width)/2)+'px',top:(modeTop-modeBox.height-modeGap)+'px'});
    Object.assign(document.querySelector('#start-appearance').style,{left:((innerWidth-modeBox.width)/2)+'px',top:(modeTop-2*(modeBox.height+modeGap))+'px'});
+   Object.assign(document.querySelector('#start-multiplayer').style,{left:((innerWidth-modeBox.width)/2)+'px',top:(modeTop-3*(modeBox.height+modeGap))+'px'});
   }
  }
  function paint(){
-  const state=model.state;menu.hidden=state==='playing';settingsNode.hidden=state!=='settings';gameMode.hidden=state!=='game-mode';savesNode.hidden=state!=='saves';appearanceNode.hidden=state!=='appearance';initial.hidden=!['loading','start-menu','error'].includes(state);paused.hidden=state!=='pause-menu';
+  const state=model.state;menu.hidden=state==='playing';settingsNode.hidden=state!=='settings';gameMode.hidden=state!=='game-mode';savesNode.hidden=state!=='saves';appearanceNode.hidden=state!=='appearance';multiplayerNode.hidden=state!=='multiplayer';initial.hidden=!['loading','start-menu','error'].includes(state);paused.hidden=state!=='pause-menu';
   if(hud&&state!=='playing')hud.hidden=true;
   figure?.toggle(state==='start-menu');
   clutch.disabled=model.pending;gears.disabled=model.pending||!clutch.checked;
@@ -93,6 +95,8 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId
   for(const [selector] of actionNodes)document.querySelector(selector).disabled=!model.readyFlag||model.pending;
   document.querySelector('#recover').disabled ||= model.dead;
   document.querySelector('#resume').disabled ||= model.deathComplete;
+  // Source guests have no save: the host world is the one world.
+  for(const id of ['#save','#load','#pause-new-game'])document.querySelector(id).hidden=guest();
   startLast.hidden=!canLast;
   if(state==='saves')screen.paint(!model.readyFlag||model.pending);
   error.hidden=!model.error;if(lastError!==model.error){error.textContent=model.error;lastError=model.error;}
@@ -104,7 +108,7 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId
    if(state==='start-menu'||state==='pause-menu'){
     const pair=ui.pairUrls[Math.floor(Math.random()*ui.pairUrls.length)];art.style.backgroundImage='url("'+pair.background+'")';frame.style.backgroundImage='url("'+pair.frame+'")';
     queueMicrotask(()=>document.querySelector(state==='pause-menu'?'#resume':'#new-game').focus({preventScroll:true}));
-   } else if(SUBSCREENS.includes(state))queueMicrotask(()=>document.querySelector({settings:'#back','game-mode':'#game-mode-back',saves:'#save-back',appearance:'#appearance-back'}[state]).focus({preventScroll:true}));
+   } else if(SUBSCREENS.includes(state))queueMicrotask(()=>document.querySelector({settings:'#back','game-mode':'#game-mode-back',saves:'#save-back',appearance:'#appearance-back',multiplayer:'#multiplayer-back'}[state]).focus({preventScroll:true}));
    lastState=state;
   }
  }
@@ -126,14 +130,15 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId
  for(const id of ['#settings','#start-settings'])document.querySelector(id).addEventListener('click',()=>{model.settings();paint();});
  for(const id of ['#start-game-mode','#pause-game-mode'])document.querySelector(id).addEventListener('click',()=>{model.gameMode();paint();});
  for(const id of ['#appearance','#start-appearance'])document.querySelector(id).addEventListener('click',()=>{model.appearance();paint();});
+ for(const id of ['#multiplayer','#start-multiplayer'])document.querySelector(id).addEventListener('click',()=>{model.multiplayer();paint();});
  for(const id of backNodes)document.querySelector(id).addEventListener('click',()=>{model.back();paint();});
  document.querySelector('#recover').addEventListener('click',()=>{clearInput();model.recover();flush();paint();});
  const fullscreen=document.querySelector('#fullscreen');fullscreen.disabled=!document.fullscreenEnabled;
  fullscreen.addEventListener('click',async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.querySelector('main').requestFullscreen();}catch{model.error='Fullscreen is unavailable.';paint();}});
  document.addEventListener('fullscreenchange',()=>{fullscreen.textContent=document.fullscreenElement?'Exit fullscreen':'Fullscreen';resize();});
- window.addEventListener('keydown',event=>{if(event.code!=='Escape'||event.repeat)return;event.preventDefault();if(model.state==='saves'&&!model.pending){if(screen.state.escape()==='back')model.back();paint();}else if(['settings','game-mode','appearance'].includes(model.state)){model.back();paint();}else if(model.state==='playing'||model.pending)pause(true);else if(model.state==='pause-menu')capture();});
+ window.addEventListener('keydown',event=>{if(event.code!=='Escape'||event.repeat)return;event.preventDefault();if(model.state==='saves'&&!model.pending){if(screen.state.escape()==='back')model.back();paint();}else if(['settings','game-mode','appearance','multiplayer'].includes(model.state)){model.back();paint();}else if(model.state==='playing'||model.pending)pause(true);else if(model.state==='pause-menu')capture();});
  document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==canvas && model.state==='playing')pause();});
  window.addEventListener('blur',pause);document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});
  window.addEventListener('resize',resize);resize();paint();
- return {model,drivingState,takeDrivingAssists(){const request=pendingDriving;pendingDriving=0;return request;},survival(dead,due){if(dead===model.dead&&due===model.deathComplete)return;model.dead=dead;model.deathComplete=due;if(due){pause();model.status='You died. Select New game or Load.';queueMicrotask(()=>document.querySelector('#pause-new-game').focus({preventScroll:true}));}paint();},loading(){pendingDriving=0;audio?.pause();clearInput();model.loading();if(document.pointerLockElement===canvas)document.exitPointerLock();paint();},async ready(){model.ready();paint();await refresh();if(autoLoad){autoLoad=false;if(canLast&&settings.values.BAutoLoad)await operate('loadLast',buildId);}},sync(started,stopped,travelM){model.started=started;if(stopped && started && model.state==='playing'){onPause?.();model.pause();paint();}const km=Math.round(travelM/10)/100;if(lastTravel!==km){document.querySelector('#session-distance').textContent='Session distance: '+km.toFixed(2)+' km';lastTravel=km;}},fail(message){saveSession.cancel();clearInput();model.fail(message);if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();},dispose(){window.removeEventListener('resize',resize);}};
+ return {model,drivingState,paint,join:save=>operate('join',save),takeDrivingAssists(){const request=pendingDriving;pendingDriving=0;return request;},survival(dead,due){if(dead===model.dead&&due===model.deathComplete)return;model.dead=dead;model.deathComplete=due;if(due){pause();model.status='You died. Select New game or Load.';queueMicrotask(()=>document.querySelector('#pause-new-game').focus({preventScroll:true}));}paint();},loading(){pendingDriving=0;audio?.pause();clearInput();model.loading();if(document.pointerLockElement===canvas)document.exitPointerLock();paint();},async ready(){model.ready();paint();await refresh();if(autoLoad){autoLoad=false;if(canLast&&settings.values.BAutoLoad)await operate('loadLast',buildId);}},sync(started,stopped,travelM){model.started=started;if(stopped && started && model.state==='playing'){onPause?.();model.pause();paint();}const km=Math.round(travelM/10)/100;if(lastTravel!==km){document.querySelector('#session-distance').textContent='Session distance: '+km.toFixed(2)+' km';lastTravel=km;}},fail(message){saveSession.cancel();clearInput();model.fail(message);if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();},dispose(){window.removeEventListener('resize',resize);}};
 }
