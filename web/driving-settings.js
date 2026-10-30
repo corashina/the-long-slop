@@ -36,11 +36,14 @@ export function installDrivingSettings(storage,inputs,outputs,driving){
  let pending=true;
  // Call after each change to `settings`.
  const changed=()=>{pending=true;try{storage().setItem(KEY,JSON.stringify(settings));}catch{}};
- ranges.forEach((range,i)=>{
-  const input=inputs[i],show=()=>{outputs[i].textContent=settings.mouse[i].toFixed(2);};
+ const shows=ranges.map((range,i)=>{
+  const input=inputs[i],show=()=>{input.value=String(settings.mouse[i]);outputs[i].textContent=settings.mouse[i].toFixed(2);};
   Object.assign(input,{min:String(range.minimum),max:String(range.maximum),step:'any',value:String(settings.mouse[i])});show();
   input.addEventListener('input',()=>{settings.mouse[i]=Math.min(range.maximum,Math.max(range.minimum,Number(input.value)));show();changed();});
+  return show;
  });
+ // Source `tabControls` reset of `FMouseDriveSensX` and `FMouseDriveSensY`.
+ const resetMouse=()=>{settings.mouse=ranges.map(range=>range.default);shows.forEach(show=>show());changed();};
  // Rust takes the settings at start and after each change.
- return {settings,changed,take(){if(!pending)return undefined;pending=false;return JSON.stringify(settings);}};
+ return {settings,changed,resetMouse,take(){if(!pending)return undefined;pending=false;return JSON.stringify(settings);}};
 }

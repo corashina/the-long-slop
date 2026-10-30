@@ -47,7 +47,8 @@ pub struct MechanismState {
     frames: Vec<Frame>,
     nodes: HashMap<NodeId, usize>,
     bodies: HashMap<BodyId, usize>,
-    scroll_sensitivity: f32,
+    /// Source `FMouseSensZ`.
+    pub(super) scroll_sensitivity: f32,
     control_action: Option<ControlAction>,
     item_nodes: HashMap<ItemId, NodeId>,
     order: Vec<usize>,
@@ -292,7 +293,7 @@ impl MechanismState {
             frames,
             nodes,
             bodies,
-            scroll_sensitivity: reference.player.scroll_sensitivity,
+            scroll_sensitivity: reference.settings.sliders.scroll.value(),
             control_action: None,
             item_nodes: reference.items.iter().map(|i| (i.id, i.node)).collect(),
         };

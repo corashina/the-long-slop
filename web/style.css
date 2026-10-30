@@ -24,10 +24,22 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 #performance p {margin:8px 0 0;color:#bbb;font:11px/1.4 Arial,sans-serif;}
 .menu-actions {position:absolute;inset:0;}
 #session-distance {position:absolute;right:24px;bottom:16px;margin:0;font-size:clamp(16px,1.5vw,24px);text-shadow:2px 2px 2px #000;}
-#controls-screen,#game-mode-screen,#save-screen {position:absolute;inset:0;}
-#controls-title,#game-mode-title,#save-title {position:absolute;left:24px;top:20px;margin:0;font-size:clamp(24px,3.2vw,60px);font-weight:400;}
-#menu:has(#controls-screen:not([hidden]),#game-mode-screen:not([hidden])) h1,#menu:has(#controls-screen:not([hidden]),#game-mode-screen:not([hidden])) #status {visibility:hidden;}
-.control-columns {position:absolute;inset:0;}
+#settings-screen,#game-mode-screen,#save-screen {position:absolute;inset:0;}
+#settings-title,#game-mode-title,#save-title {position:absolute;left:24px;top:20px;margin:0;font-size:clamp(24px,3.2vw,60px);font-weight:400;}
+#menu:has(#settings-screen:not([hidden]),#game-mode-screen:not([hidden])) h1,#menu:has(#settings-screen:not([hidden]),#game-mode-screen:not([hidden])) #status {visibility:hidden;}
+#settings-tabs {position:absolute;left:24px;right:24px;top:clamp(64px,7vw,110px);display:flex;flex-wrap:wrap;gap:8px;}
+#settings-tabs button,#settings-reset,.setting-slider button {position:static;min-height:44px;padding:4px 16px;background:#b4804640;border:1px solid #b48046;font:18px Arial,sans-serif;}
+#settings-tabs button.selected {border:2px solid #fff;}
+.settings-body {position:absolute;left:24px;right:24px;top:calc(clamp(64px,7vw,110px) + 60px);bottom:80px;overflow:auto;font:18px Arial,sans-serif;text-shadow:2px 2px 2px #000;}
+.settings-list {display:flex;flex-direction:column;gap:4px;margin:0 0 24px;max-width:900px;}
+.settings-list label,.setting-row {display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;min-height:44px;}
+.setting-slider {display:flex;flex:1;flex-wrap:wrap;align-items:center;gap:8px 12px;}
+.setting-slider label {min-width:14em;}
+.setting-slider input[type=range] {flex:1;min-width:120px;accent-color:#b48046;}
+.setting-slider input[type=number] {width:6em;min-height:36px;background:#0008;border:1px solid #b48046;color:#fff;font:inherit;}
+.settings-list input[type=checkbox] {margin:0;width:20px;height:20px;accent-color:#b48046;}
+.setting-toggle:has(input:disabled) {opacity:.45;}
+.control-columns {display:grid;grid-template-columns:1fr 1fr;gap:32px;}
 .control-columns h3 {font-size:clamp(20px,2.5vw,50px);font-weight:400;margin:0 0 24px;text-shadow:2px 2px 2px #000;}
 .control-columns dl {margin:0;font-family:Arial,sans-serif;font-size:clamp(16px,1.65vw,36px);line-height:1.5;text-shadow:2px 2px 2px #000;}
 .control-columns dl div {display:grid;grid-template-columns:minmax(130px,1.2fr) 1fr;gap:16px;margin-bottom:8px;}
@@ -36,8 +48,8 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 .display-controls label {display:flex;align-items:center;gap:8px;}
 #draw-distance-value {min-width:5.5em;}
 #fullscreen,#scene-resolution,#shadow-quality,#grass-quality,#biome {min-height:44px;padding:8px 16px;background:#b4804640;border:1px solid #b48046;font:inherit;color:#fff;}
-#fullscreen {position:relative;}
-#controls-screen #back,#game-mode-back {position:static;left:auto!important;top:auto!important;width:150px!important;height:44px!important;font-size:18px!important;}
+#fullscreen {position:relative;align-self:flex-start;}
+#settings-screen #back,#game-mode-back {position:static;left:auto!important;top:auto!important;width:150px!important;height:44px!important;font-size:18px!important;}
 #menu:has(#save-screen:not([hidden])) h1 {visibility:hidden;}
 #appearance-screen {position:absolute;inset:0;z-index:2;}
 #menu:has(#appearance-screen:not([hidden])) :is(#menu-art,#menu-frame,h1,#status) {display:none;}
@@ -97,6 +109,7 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 #hud {position:absolute;inset:0;pointer-events:none;font-family:Arial,sans-serif;text-shadow:2px 2px 2px #000;}
 #crosshair {position:absolute;pointer-events:none;}
 #crosshair > * {position:absolute;left:0;top:0;transform:translate(-50%,-50%);}
+#crosshair .old-crosshair {mask-size:100% 100%;-webkit-mask-size:100% 100%;}
 #weapon-crosshair {position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);mask-size:contain;mask-repeat:no-repeat;mask-position:center;-webkit-mask-size:contain;-webkit-mask-repeat:no-repeat;-webkit-mask-position:center;pointer-events:none;}
 .action-row {position:absolute;margin:0;white-space:nowrap;text-shadow:2px 2px 2px #000;}
 #fluid-text {position:absolute;margin:0;white-space:pre;transform:translate(-50%,-50%);text-align:center;text-shadow:3px 3px 2px #000;}
@@ -109,7 +122,8 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
  #menu.narrow .menu-actions {inset:auto 16px 16px;display:grid;gap:12px;max-height:calc(100dvh - 210px);overflow:auto;}
  #menu.narrow .menu-actions button {position:relative;}
  #menu.narrow #session-distance {position:static;margin:8px 0;font-size:16px;}
- #controls-screen .control-columns {inset:90px 16px 144px;overflow:auto;display:grid;grid-template-columns:1fr;gap:32px;}
+ .control-columns {grid-template-columns:1fr;}
+ .settings-body {left:16px;right:16px;}
  .control-columns dl {font-size:16px;}
  #menu.narrow #status {top:70px;font-size:18px;}
  .save-body {inset:190px 16px 76px;grid-template-columns:1fr;}

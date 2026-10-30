@@ -245,6 +245,7 @@ impl SimDriver {
             .map_or(1, |audio| audio.session.wrapping_add(1));
         let settings = self.runtime.driving_input.settings;
         let options = self.runtime.options;
+        let player_settings = self.runtime.player_settings;
         // Assignment drops the old stream and terminates its road actor first.
         self.runtime = driver.runtime;
         // The renderer takes the candidate copy with the candidate scene.
@@ -256,6 +257,7 @@ impl SimDriver {
         self.runtime.driving_input.settings = settings;
         // A change during preparation reached only the old runtime.
         self.runtime.set_game_options(options);
+        self.runtime.set_player_settings(player_settings);
         self.runtime
             .stream
             .set_overlap(crate::world::WorldMetrics::default())

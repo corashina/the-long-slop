@@ -259,6 +259,7 @@ impl PlayerState {
     pub fn new(
         reference: &PlayerReference,
         pose_reference: &PlayerPoseReference,
+        settings: crate::reference::PlayerSettings,
         pose: VehiclePose,
         physics: &mut PhysicsWorld,
     ) -> Self {
@@ -311,7 +312,7 @@ impl PlayerState {
             interior_shape: Ball::new(reference.interior_sensor.radius),
             interior: sensor::SensorContact::default(),
             interior_body: None,
-            view_state: ViewState::new(reference, pose_reference),
+            view_state: ViewState::new(reference, pose_reference, settings),
             exit_capsule,
             body,
             collider,
@@ -816,7 +817,7 @@ impl PlayerState {
             .contacts(hits, self.reference.posture.sensor_hold_steps);
         let before = self.posture.value();
         let mut posture_input = input;
-        posture_input.wheel *= self.reference.scroll_sensitivity;
+        posture_input.wheel *= self.view_state.settings.player_scroll();
         // Source climbing sets BcanJump.
         let force = self.posture.step(
             posture_input,
@@ -998,6 +999,9 @@ impl PlayerState {
         physics.edit_body(self.body, |body| body.set_position(candidate, false));
         physics.refresh_queries();
         true
+    }
+    pub fn set_settings(&mut self, settings: crate::reference::PlayerSettings) {
+        self.view_state.settings = settings;
     }
     pub fn reference(&self) -> &PlayerReference {
         &self.reference
