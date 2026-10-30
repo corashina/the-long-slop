@@ -124,7 +124,9 @@ impl StructureRecipe {
         scale: [f32; 3],
         appearance: &[super::spawn_appearance::NodeAppearance],
     ) -> Result<Self, ReferenceError> {
-        let nonuniform = scale[0] != scale[1] || scale[1] != scale[2];
+        // Source scales carry float noise, such as [100, 99.99994, 99.99994].
+        let near = |a: f32, b: f32| (a - b).abs() <= 1e-5 * a.abs().max(b.abs());
+        let nonuniform = !near(scale[0], scale[1]) || !near(scale[1], scale[2]);
         let checked_nonuniform = fixed_decoration_source(&prototype.source)
             && prototype
                 .bodies

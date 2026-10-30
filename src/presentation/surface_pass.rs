@@ -13,6 +13,36 @@ use bevy::render::{
 use bevy::shader::{ShaderCacheError, ShaderDefVal};
 use bevy::{ecs as bevy_ecs, prelude::*};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// The last skipped surface draw: reason in the high bits, pipeline id in the low bits.
+static LAST_SKIP: AtomicU64 = AtomicU64::new(0);
+fn skip(reason: u64, pipeline: CachedRenderPipelineId) -> RenderCommandResult {
+    LAST_SKIP.store(reason << 32 | pipeline.id() as u64, Ordering::Relaxed);
+    RenderCommandResult::Skip
+}
+/// Why the last source surface draw was skipped, for the skipped-draw failure.
+pub fn last_skip(cache: &PipelineCache) -> String {
+    let value = LAST_SKIP.load(Ordering::Relaxed);
+    let reason = match value >> 32 {
+        0 => return "bind group or mesh not ready".into(),
+        1 => "no pass partner",
+        2 => "base pipeline",
+        3 => "additive pipeline",
+        _ => "additive partner",
+    };
+    let id = (value & 0xffff_ffff) as usize;
+    let state = cache
+        .pipelines()
+        .find(|p| p.id() == id)
+        .map_or("unknown".into(), |p| match &p.state {
+            CachedPipelineState::Queued => "queued".into(),
+            CachedPipelineState::Creating(_) => "creating".into(),
+            CachedPipelineState::Ok(_) => "ok".into(),
+            CachedPipelineState::Err(error) => format!("error {error}"),
+        });
+    format!("{reason} {id} {state}")
+}
 
 #[derive(Resource, Default)]
 pub struct SurfacePasses {
@@ -197,13 +227,15 @@ impl<P: CachedRenderPipelinePhaseItem> RenderCommand<P> for SourcePairReady {
         (passes, cache): SystemParamItem<'w, '_, Self::Param>,
         _: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some(add) = passes.partners.get(&item.cached_pipeline()) else {
-            return RenderCommandResult::Skip;
+        let base = item.cached_pipeline();
+        let Some(add) = passes.partners.get(&base) else {
+            return skip(1, base);
         };
-        if cache.get_render_pipeline(item.cached_pipeline()).is_none()
-            || add.is_some_and(|id| cache.get_render_pipeline(id).is_none())
-        {
-            return RenderCommandResult::Skip;
+        if cache.get_render_pipeline(base).is_none() {
+            return skip(2, base);
+        }
+        if let Some(id) = add.filter(|id| cache.get_render_pipeline(*id).is_none()) {
+            return skip(3, id);
         }
         RenderCommandResult::Success
     }
@@ -221,10 +253,10 @@ impl<P: CachedRenderPipelinePhaseItem> RenderCommand<P> for SetSourceAdditivePip
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(Some(id)) = passes.partners.get(&item.cached_pipeline()) else {
-            return RenderCommandResult::Skip;
+            return skip(4, item.cached_pipeline());
         };
         let Some(pipeline) = cache.into_inner().get_render_pipeline(*id) else {
-            return RenderCommandResult::Skip;
+            return skip(3, *id);
         };
         pass.set_render_pipeline(pipeline);
         RenderCommandResult::Success

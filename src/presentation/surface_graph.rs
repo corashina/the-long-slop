@@ -265,7 +265,8 @@ fn transparent(
     let [epoch, base_attempts, base_done, add_attempts, add_done] = lighting.draws();
     if base_attempts != base_done || add_attempts != add_done {
         status.fail(format!(
-            "Source surface draw skipped in view {entity:?}, epoch {epoch}: base {base_done}/{base_attempts}, additive {add_done}/{add_attempts}"
+            "Source surface draw skipped in view {entity:?}, epoch {epoch}: base {base_done}/{base_attempts}, additive {add_done}/{add_attempts}, last skip {}",
+            super::surface_pass::last_skip(&cache)
         ));
     }
     glass.completed(
