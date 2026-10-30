@@ -7,13 +7,15 @@ use super::{
     ao_upsample::AoUpsamplePass,
     bloom::BloomPass,
     copy::CopyPass,
+    dof::DofPass,
     exposure::ExposurePass,
     lut::{CURVE_BYTES, LUT_BYTES, LutPass},
     taa::TaaPass,
     uber::{MainInputs, UberPass},
 };
 use crate::reference::postprocessing::{
-    DeadGrading, DeadProfile, GlassesProfile, GradingSettings, PostprocessingRecord, Tonemapper,
+    DeadGrading, DeadProfile, GlassesProfile, GradingSettings, Lens, PostprocessingRecord,
+    Tonemapper,
 };
 use bevy::prelude::*;
 use bevy::render::{
@@ -24,6 +26,7 @@ use bevy::render::{
 #[derive(Clone)]
 pub struct PostShaders {
     pub copy: Handle<Shader>,
+    pub dof: Handle<Shader>,
     pub histogram: Handle<Shader>,
     pub exposure: Handle<Shader>,
     pub bloom: Handle<Shader>,
@@ -46,7 +49,7 @@ pub struct PostTextures<'a> {
     pub noise: [&'a TextureView; 64],
     pub dirt: &'a TextureView,
     pub dirt_extent: [u32; 2],
-    /// `BinocularVignette::mask`.
+    /// `BinocularProfile::mask`.
     pub vignette_mask: &'a TextureView,
 }
 #[derive(Clone, Copy)]
@@ -59,10 +62,15 @@ pub struct PostFrame {
     pub dead_weight: f32,
     /// `PPVSunGlasses` lens: index in `clothing.glasses_profiles`. None is no lens grading.
     pub glasses: Option<u32>,
-    /// The binocular volume applies its masked vignette.
+    /// The binocular volume applies its vignette, lens distortion, chromatic aberration and DoF.
     pub binoculars: bool,
     /// TAA jitter and history reset. None when antialiasing is off.
     pub motion: Option<(Vec2, bool)>,
+    /// DoF focus distance in meters. None is DoF off.
+    pub focus: Option<f32>,
+    /// Main view clip planes.
+    pub near: f32,
+    pub far: f32,
 }
 struct ColorTarget {
     _texture: Texture,
@@ -117,6 +125,9 @@ pub struct SourcePostChain {
     initial: ColorTarget,
     copy: CopyPass,
     taa: Option<TaaPass>,
+    dof: DofPass,
+    /// The `DOF` volume lens, then the `tavcso` lens.
+    lenses: [Lens; 2],
     uber: UberPass,
     main: MainChain,
     stop_nan: bool,
@@ -132,6 +143,7 @@ impl SourcePostChain {
         shaders: &PostShaders,
         textures: &PostTextures<'_>,
         source: &TextureView,
+        depth: &TextureView,
         extent: [u32; 2],
         samples: u32,
         record: &PostprocessingRecord,
@@ -150,15 +162,33 @@ impl SourcePostChain {
         let resize_count = previous.as_ref().map_or(0, |old| old.resize_count + 1);
         let completed = previous.as_ref().map_or(0, |old| old.completed);
         let initial = ColorTarget::new(device, extent);
-        let (mut copy, old_main, old_uber, old_taa) = match previous {
-            Some(old) => (old.copy, Some(old.main), Some(old.uber), old.taa),
+        let (mut copy, old_dof, old_main, old_uber, old_taa) = match previous {
+            Some(old) => (
+                old.copy,
+                Some(old.dof),
+                Some(old.main),
+                Some(old.uber),
+                old.taa,
+            ),
             None => (
                 CopyPass::new(device, cache, shaders.copy.clone(), source),
                 None,
                 None,
                 None,
+                None,
             ),
         };
+        let dof = DofPass::new(
+            device,
+            queue,
+            cache,
+            shaders.dof.clone(),
+            depth,
+            taa.as_ref()
+                .map(|inputs| (inputs.motion, inputs.settings.motion_blending)),
+            extent,
+            old_dof,
+        );
         copy.rebind(device, cache, source);
         let taa = taa
             .map(|inputs| {
@@ -312,7 +342,8 @@ impl SourcePostChain {
             + main.bloom.layout.logical_bytes()
             + LUT_BYTES
             + CURVE_BYTES
-            + taa.as_ref().map_or(0, |taa| taa.logical_bytes);
+            + taa.as_ref().map_or(0, |taa| taa.logical_bytes)
+            + dof.logical_bytes;
         Ok(Self {
             extent,
             logical_bytes,
@@ -321,6 +352,8 @@ impl SourcePostChain {
             initial,
             copy,
             taa,
+            dof,
+            lenses: [record.depth_of_field.lens, record.binoculars.depth_of_field],
             uber,
             main,
             stop_nan,
@@ -337,6 +370,7 @@ impl SourcePostChain {
     pub fn ready(&self, cache: &PipelineCache) -> bool {
         self.copy.ready(cache)
             && self.taa.as_ref().is_none_or(|taa| taa.ready(cache))
+            && self.dof.ready(cache)
             && self.uber.ready(cache)
             && self.main.histogram.ready(cache)
             && self.main.exposure.ready(cache)
@@ -347,6 +381,7 @@ impl SourcePostChain {
         self.copy
             .failure(cache)
             .or_else(|| self.taa.as_ref().and_then(|taa| taa.failure(cache)))
+            .or_else(|| self.dof.failure(cache))
             .or_else(|| self.uber.failure(cache))
             .or_else(|| self.main.histogram.failure(cache))
             .or_else(|| self.main.exposure.failure(cache))
@@ -361,6 +396,7 @@ impl SourcePostChain {
         if let Some(taa) = self.taa.as_mut() {
             taa.reset_history();
         }
+        self.dof.reset_history();
         self.main.lut_baked = false;
     }
     /// Noise index, exposure output/initialized.
@@ -374,6 +410,7 @@ impl SourcePostChain {
         if let Some(taa) = self.taa.as_mut() {
             taa.reset_history();
         }
+        self.dof.reset_history();
     }
     /// Image histories remain intact during floating-origin transport.
     pub fn rebase(&mut self, _delta: Vec3) {}
@@ -396,14 +433,41 @@ impl SourcePostChain {
         if !frame.delta_seconds.is_finite() || frame.delta_seconds < 0. {
             return Err("Invalid source effect frame".into());
         }
-        self.copy
-            .encode(encoder, cache, &self.initial.view, self.stop_nan);
+        // Post stack v2 order: TAA, then DoF. With DoF on, the step before it writes the DoF input.
+        let dof_input = frame.focus.map(|_| self.dof.raw());
         match (self.taa.as_mut(), frame.motion) {
             (Some(taa), Some((jitter, reset))) => {
-                taa.encode(encoder, device, queue, cache, jitter, reset)?
+                self.copy
+                    .encode(encoder, cache, &self.initial.view, self.stop_nan);
+                taa.encode(encoder, device, queue, cache, jitter, reset, dof_input)?
             }
-            (None, None) => {}
+            (None, None) => {
+                self.copy.encode(
+                    encoder,
+                    cache,
+                    dof_input.unwrap_or(&self.initial.view),
+                    self.stop_nan,
+                );
+            }
             _ => return Err("Source TAA state differs from the view".into()),
+        }
+        if let Some(focus) = frame.focus {
+            let scene = match self.taa.as_ref() {
+                Some(taa) => taa.output(),
+                None => &self.initial.view,
+            };
+            self.dof.encode(
+                encoder,
+                device,
+                queue,
+                cache,
+                self.lenses[usize::from(frame.binoculars)],
+                focus,
+                frame.near,
+                frame.far,
+                frame.motion,
+                scene,
+            )?;
         }
         self.main.histogram.encode(encoder, cache);
         self.main
@@ -454,7 +518,7 @@ impl SourcePostChain {
         if !self.main.lut_baked {
             self.main.lut.encode(encoder, cache);
         }
-        self.uber.set_vignette(frame.binoculars);
+        self.uber.set_binoculars(frame.binoculars);
         if !self.uber.encode(
             encoder,
             device,
@@ -477,6 +541,7 @@ impl SourcePostChain {
         if let Some(taa) = self.taa.as_mut() {
             taa.completed();
         }
+        self.dof.completed();
         self.main.lut_baked = true;
         self.uber.completed();
         self.completed = token;

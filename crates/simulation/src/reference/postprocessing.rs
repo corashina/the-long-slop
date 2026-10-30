@@ -117,17 +117,63 @@ pub struct PostprocessingRecord {
     pub grading: GradingSettings,
     pub blue_noise: Vec<super::SourceId>,
     pub heat_haze_weight: f32,
-    pub binoculars: BinocularVignette,
+    pub binoculars: BinocularProfile,
+    pub depth_of_field: FocusControl,
 }
-/// The masked vignette of the binocular volume profile `tavcso`.
+/// The binocular volume profile `tavcso`. It overrides the `DOF` volume.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct BinocularVignette {
+pub struct BinocularProfile {
     pub profile: super::SourceId,
+    /// Masked vignette color and opacity.
     pub color: [f32; 4],
     pub opacity: f32,
     /// `tavcsoscript.defVignette`. The shader reads its alpha.
     pub mask: super::SourceId,
+    /// Focus distance comes from `tavcsoscript.focusDistance`.
+    pub depth_of_field: Lens,
+    pub distortion: LensDistortion,
+    /// Fast mode with the internal red, green, blue spectrum.
+    pub chromatic_intensity: f32,
+}
+/// DepthOfField lens with the Small kernel.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Lens {
+    pub aperture: f32,
+    /// Millimeters.
+    pub focal_length: f32,
+}
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LensDistortion {
+    pub intensity: f32,
+    pub intensity_xy: [f32; 2],
+    pub center: [f32; 2],
+    pub scale: f32,
+}
+/// The `DOF` volume lens and `postprocesscontrol` focus ray.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FocusControl {
+    pub lens: Lens,
+    /// Profile focus before the first update.
+    pub focus_distance: f32,
+    pub layer_mask: u32,
+    /// `minFocusDistance`, `maxFocusDistance`.
+    pub focus: [f32; 2],
+    pub night_focus: f32,
+    pub focus_lerp: f32,
+    /// `minFocusDistanceRay`, `maxFocusDistanceRay`.
+    pub ray: [f32; 2],
+}
+impl Lens {
+    fn validate(&self) -> bool {
+        self.aperture.is_finite()
+            && self.aperture > 0.
+            && self.focal_length.is_finite()
+            && self.focal_length > 0.
+    }
 }
 /// `pplayermelle.TurnOn` temporal antialiasing settings.
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
@@ -281,6 +327,27 @@ impl PostprocessingRecord {
                 && (0. ..=1.).contains(&vignette.opacity)
                 && textures.contains(&vignette.mask),
             "postprocessing binocular vignette",
+        )?;
+        let d = vignette.distortion;
+        require(
+            vignette.depth_of_field.validate()
+                && finite(&[d.intensity, d.scale, vignette.chromatic_intensity])
+                && finite(&d.intensity_xy)
+                && finite(&d.center)
+                && d.scale > 0.
+                && vignette.chromatic_intensity >= 0.,
+            "postprocessing binocular lens",
+        )?;
+        let f = &self.depth_of_field;
+        require(
+            f.lens.validate()
+                && finite(&[f.focus_distance, f.night_focus, f.focus_lerp])
+                && finite(&f.focus)
+                && finite(&f.ray)
+                && f.focus_lerp >= 0.
+                && f.ray[0] < f.ray[1]
+                && f.layer_mask != 0,
+            "postprocessing focus control",
         )?;
         require(
             self.heat_haze_weight == 0.,

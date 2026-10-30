@@ -166,6 +166,10 @@ pub struct StateBlock {
     pub prepared_roads: u32,
     /// Lens of the worn glasses, as `GlassesState::encode`. Read it with `StateBlock::glasses`.
     pub glasses: u32,
+    /// Applied `DOF` volume focus distance in meters.
+    pub focus_distance: f32,
+    /// `tavcso` focus distance while `BINOCULARS` is set.
+    pub binocular_focus: f32,
     /// Player camera. The renderer adds the mouse of commands after `SimFrame::seq_consumed`.
     pub look: LookBlock,
     pub perf: PerfBlock,

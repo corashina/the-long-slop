@@ -35,6 +35,8 @@ struct EffectInput {
     glasses: Option<u32>,
     binoculars: bool,
     ambient_occlusion: bool,
+    /// DoF focus distance. None is DoF off.
+    focus: Option<f32>,
 }
 fn snapshot_input(
     frame: Res<SourceViewFrame>,
@@ -42,6 +44,7 @@ fn snapshot_input(
     sim: Res<super::sim_frame::SimFrameResource>,
     effects: Res<super::sunglasses::SunglassesEffects>,
     occlusion: Res<super::ambient_occlusion::AmbientOcclusion>,
+    depth_of_field: Res<super::depth_of_field::DepthOfField>,
     mut input: ResMut<EffectInput>,
 ) {
     if input.scene != frame.scene {
@@ -67,6 +70,12 @@ fn snapshot_input(
         .map(|g| g.profile);
     // The binocular `PP` volume holds the camera while the player uses binoculars.
     input.binoculars = sim.frame.state.flags & simulation::boundary::StateBlock::BINOCULARS != 0;
+    // The binocular volume overrides the `DOF` volume, `enabled` included.
+    input.focus = if input.binoculars {
+        Some(sim.frame.state.binocular_focus)
+    } else {
+        depth_of_field.0.then_some(sim.frame.state.focus_distance)
+    };
     input.frame = frame.frame;
 }
 
@@ -133,10 +142,15 @@ pub fn install(app: &mut App) {
     app.init_resource::<EffectInput>()
         .init_resource::<super::sunglasses::SunglassesEffects>()
         .init_resource::<super::ambient_occlusion::AmbientOcclusion>()
+        .init_resource::<super::depth_of_field::DepthOfField>()
         .add_plugins(ExtractResourcePlugin::<EffectInput>::default())
         .add_systems(
             Update,
-            (super::sunglasses::poll, super::ambient_occlusion::poll),
+            (
+                super::sunglasses::poll,
+                super::ambient_occlusion::poll,
+                super::depth_of_field::poll,
+            ),
         )
         .add_systems(
             PostUpdate,
@@ -170,6 +184,7 @@ fn shaders(assets: &LightingRenderAssets) -> PostShaders {
     let s = &assets.shaders;
     PostShaders {
         copy: s.copy.clone(),
+        dof: s.dof.clone(),
         histogram: s.histogram.clone(),
         exposure: s.exposure.clone(),
         bloom: s.bloom.clone(),
@@ -295,6 +310,7 @@ pub(crate) fn prepare(
             &shaders,
             &textures,
             colors.resolved.sampled.as_ref().unwrap(),
+            surfaces.targets.views[0].depth.sampled.as_ref().unwrap(),
             extent,
             colors.samples,
             record,
@@ -407,9 +423,12 @@ fn encode_post(
     if index != 0 || input.frame != frame.frame || status.failure().is_some() {
         return;
     }
-    if effects.audit.ao_frame != frame.frame || frame.views[index].is_none() {
+    if effects.audit.ao_frame != frame.frame {
         return;
     }
+    let Some(snapshot) = frame.views[index].as_ref() else {
+        return;
+    };
     let Some(targets) = effects.targets.as_mut() else {
         return;
     };
@@ -436,6 +455,9 @@ fn encode_post(
             motion: frame
                 .main_motion
                 .map(|motion| (motion.jitter, motion.reset)),
+            focus: input.focus,
+            near: snapshot.near,
+            far: snapshot.far,
         },
         targets.colors.attachment(),
         targets.colors.resolve_target(),

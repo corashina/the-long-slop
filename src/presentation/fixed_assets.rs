@@ -894,6 +894,7 @@ impl SourceFixedAssets {
                 float_store: shader("shaders/source_float_store.wgsl"),
                 glass: shader("shaders/source_glass.wgsl"),
                 copy: shader("shaders/source_copy.wgsl"),
+                dof: shader("shaders/source_dof.wgsl"),
                 histogram: shader("shaders/source_histogram.wgsl"),
                 exposure: shader("shaders/source_exposure.wgsl"),
                 probe: shader("shaders/source_probe.wgsl"),

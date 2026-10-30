@@ -183,6 +183,7 @@ pub struct LightingShaders {
     pub float_store: Handle<Shader>,
     pub glass: Handle<Shader>,
     pub copy: Handle<Shader>,
+    pub dof: Handle<Shader>,
     pub histogram: Handle<Shader>,
     pub exposure: Handle<Shader>,
     pub probe: Handle<Shader>,
@@ -202,7 +203,7 @@ pub struct LightingShaders {
     pub taa: Handle<Shader>,
 }
 impl LightingShaders {
-    pub(crate) fn handles(&self) -> [&Handle<Shader>; 23] {
+    pub(crate) fn handles(&self) -> [&Handle<Shader>; 24] {
         [
             &self.lighting,
             &self.cloud,
@@ -210,6 +211,7 @@ impl LightingShaders {
             &self.float_store,
             &self.glass,
             &self.copy,
+            &self.dof,
             &self.histogram,
             &self.exposure,
             &self.probe,

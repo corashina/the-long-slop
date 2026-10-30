@@ -40,6 +40,8 @@ fn frame_round_trips() {
                 profile: 3,
                 hide_flare: true,
             })),
+            focus_distance: 0.4,
+            binocular_focus: 0.,
             look: LookBlock {
                 yaw: 30.,
                 gain: 1.,

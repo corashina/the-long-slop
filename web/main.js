@@ -12,6 +12,8 @@ import {installAntialiasing} from './antialiasing.js';
 installAntialiasing(window,()=>localStorage,document.querySelector('#antialiasing'));
 import {installAmbientOcclusion} from './ambient-occlusion.js';
 installAmbientOcclusion(window,()=>localStorage,document.querySelector('#ambient-occlusion'));
+import {installDepthOfField} from './depth-of-field.js';
+installDepthOfField(window,()=>localStorage,document.querySelector('#depth-of-field'));
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
 import {manifestStamp,createSaveStorage,AUTOSAVE} from './save-storage.js';

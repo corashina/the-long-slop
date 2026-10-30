@@ -140,6 +140,8 @@ impl GarageRuntime {
             view_camera: PoseRow::default(),
             prepared_roads: metrics.prepared_roads as u32,
             glasses: crate::boundary::GlassesState::encode(area.wear.glasses),
+            focus_distance: self.focus.distance,
+            binocular_focus: 0.,
             // The driver sets the look and its own counters.
             look: crate::boundary::LookBlock::default(),
             perf: self.perf_block(),
@@ -157,6 +159,7 @@ impl GarageRuntime {
                 PoseRow::ACTIVE,
             );
             frame.state.fov_degrees = b.fov_degrees;
+            frame.state.binocular_focus = b.focus;
             frame.state.flags |= StateBlock::BINOCULARS;
         }
         frame.valves.clear();
