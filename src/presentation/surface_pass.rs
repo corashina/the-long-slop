@@ -90,7 +90,9 @@ impl SurfacePasses {
         cache: &PipelineCache,
         owners: &super::pipeline_ownership::PipelineOwners,
     ) -> bool {
+        // A base that the inspection has not seen has no partner yet.
         !self.partners.is_empty()
+            && self.inspected >= cache.pipelines().count()
             && self
                 .partners
                 .iter()

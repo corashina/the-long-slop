@@ -420,6 +420,7 @@ fn state(runtime: &GarageRuntime, reference: &ReferenceManifest, radius: f32) ->
     json!({
         "player": origin.absolute(player),
         "supported": runtime.world_supported(),
+        "pending": runtime.stream.pending_parts(),
         "player_gap": gap(runtime.area.player.focus_position(&runtime.physics)),
         "seated": runtime.area.player.seated(),
         "cycle": runtime.lighting.cycle.capture_save().cycle_seconds,

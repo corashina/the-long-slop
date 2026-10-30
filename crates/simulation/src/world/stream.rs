@@ -1357,17 +1357,24 @@ impl WorldStream {
         self.dependency_metadata = metadata;
         Ok(())
     }
+    /// The pending work parts, for the sandbox: replay, contents, props, ready structures,
+    /// prepared surface, terrain, road and renderer.
+    pub fn pending_parts(&self) -> [usize; 8] {
+        [
+            self.replay_roots
+                .len()
+                .max(usize::from(self.contents.has_replay())),
+            self.contents.pending_requests(),
+            self.props.pending_requests(),
+            self.ready_structures.len(),
+            usize::from(self.ready.is_some()),
+            usize::from(self.terrain_execution.has_pending()),
+            usize::from(self.road_work.is_some()),
+            self.presentation.pending,
+        ]
+    }
     fn pending_work(&self) -> usize {
-        self.replay_roots
-            .len()
-            .max(usize::from(self.contents.has_replay()))
-            + self.contents.pending_requests()
-            + self.props.pending_requests()
-            + self.ready_structures.len()
-            + usize::from(self.ready.is_some())
-            + usize::from(self.terrain_execution.has_pending())
-            + usize::from(self.road_work.is_some())
-            + self.presentation.pending
+        self.pending_parts().iter().sum()
     }
     pub(crate) fn can_request_independent(&self, claims: usize) -> bool {
         let fits = self
