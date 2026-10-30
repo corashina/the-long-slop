@@ -11,9 +11,8 @@ use super::{
     surface_views::{SourceSurfaceView, WORLD_VIEWS},
     view_frame::SourceViewFrame,
 };
-use crate::reference::{
-    shadow_cadence::{CascadeEpoch, CascadeHistory, CascadeInputs, cascades_to_render},
-    shadows::ShadowFit,
+use crate::reference::shadow_cadence::{
+    CascadeEpoch, CascadeHistory, CascadeInputs, CascadePlan, plan_cascades as plan_tiles,
 };
 use bevy::render::{
     Render, RenderApp, RenderSystems,
@@ -30,22 +29,22 @@ use std::sync::Arc;
 pub struct ShadowCadence {
     targets: Arc<SourceViewTargets>,
     history: CascadeHistory,
-    pub render: [bool; 4],
+    pub plan: CascadePlan,
     pub frame: u32,
     /// Changes when a tile gets a different fit.
     pub revision: u64,
 }
 impl ShadowCadence {
-    fn plan(
+    fn update(
         &mut self,
         frame: u32,
-        world_view: bool,
-        fit: Option<&ShadowFit>,
+        scene: &ShadowScene,
+        index: usize,
         epoch: CascadeEpoch,
         encoded: u32,
     ) {
-        self.render = [true; 4];
-        let Some(fit) = fit else {
+        self.plan = CascadePlan::ALL;
+        let Some(fit) = &scene.fits[index] else {
             // The next fit renders all cascades.
             if self.history.epoch.is_some() {
                 self.history = CascadeHistory::default();
@@ -57,12 +56,14 @@ impl ShadowCadence {
         let current = CascadeInputs {
             epoch,
             cascades: fit.cascades,
+            sun: scene.sun.to_array().map(f32::to_bits),
+            contents: scene.contents[index],
             forced: encoded != self.frame,
         };
-        if world_view {
-            self.render = cascades_to_render(frame, &self.history, &current);
+        if index < WORLD_VIEWS {
+            self.plan = plan_tiles(frame, &self.history, &current);
         }
-        self.revision += u64::from(self.history.commit(self.render, &current));
+        self.revision += u64::from(self.history.commit(&self.plan, &current));
         self.frame = frame;
     }
 }
@@ -106,22 +107,20 @@ pub(crate) fn plan_cascades(
         if frame.views[view.index].is_none() {
             continue;
         }
-        let fit = scene.fits[view.index].as_ref();
         let encoded = state.map_or(0, ShadowDrawState::encoded_frame);
-        let world_view = view.index < WORLD_VIEWS;
         if let Some(mut cadence) = cadence.filter(|c| Arc::ptr_eq(&c.targets, &targets.0)) {
-            cadence.plan(frame.frame, world_view, fit, epoch, encoded);
+            cadence.update(frame.frame, &scene, view.index, epoch, encoded);
             continue;
         }
         // A new atlas has no history, so all cascades render.
         let mut cadence = ShadowCadence {
             targets: targets.0.clone(),
             history: CascadeHistory::default(),
-            render: [true; 4],
+            plan: CascadePlan::ALL,
             frame: 0,
             revision: 0,
         };
-        cadence.plan(frame.frame, world_view, fit, epoch, encoded);
+        cadence.update(frame.frame, &scene, view.index, epoch, encoded);
         commands.entity(entity).insert(cadence);
     }
 }
@@ -249,7 +248,7 @@ pub(crate) fn render_atlas(
         ..default()
     });
     for cascade in 0..4 {
-        if !cadence.render[cascade] {
+        if !cadence.plan.draw[cascade] {
             continue;
         }
         state.select(cascade);
@@ -276,7 +275,7 @@ pub(crate) fn render_atlas(
     let instances = state.instance_counts();
     // Skipped cascades draw no instances.
     let required: [u32; 4] = std::array::from_fn(|cascade| {
-        queues.instances[source.index][cascade] * u32::from(cadence.render[cascade])
+        queues.instances[source.index][cascade] * u32::from(cadence.plan.draw[cascade])
     });
     if attempted != issued || instances[0] != required || instances[1] != required {
         status.fail(format!(

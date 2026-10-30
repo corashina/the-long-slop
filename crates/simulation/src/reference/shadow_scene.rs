@@ -76,17 +76,21 @@ impl<K: Copy + Eq + Hash> CasterIndex<K> {
         data.casters.clear();
         data.changed = true;
     }
-    pub fn update(&mut self, data: &mut CasterData<K>, entity: K, caster: CasterInput) {
+    /// Returns the row of the caster.
+    pub fn update(&mut self, data: &mut CasterData<K>, entity: K, caster: CasterInput) -> usize {
         if let Some(&row) = self.0.get(&entity) {
             if !data.casters[row].unchanged(&caster) {
                 data.casters[row] = caster;
                 data.changed = true;
             }
+            row
         } else {
-            self.0.insert(entity, data.entities.len());
+            let row = data.entities.len();
+            self.0.insert(entity, row);
             data.entities.push(entity);
             data.casters.push(caster);
             data.changed = true;
+            row
         }
     }
 }
