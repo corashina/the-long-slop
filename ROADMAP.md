@@ -108,6 +108,7 @@ Prepare once:
 13. Metal detector: turn it on and off with use. Check the beep pitch and volume and the needle near metal, buried metal, and behind a wall. Save and load with it on.
 14. Tumbleweeds: check they spawn near the player, roll in gusts, stop near walls, and save with the world.
 15. Drop an item, drive about 10 km out and back, save and reload. The item stays where it was dropped.
+16. Load the game at 500 m and at the largest draw distance, then drive for 5 minutes. The game does not stop with "Source renderer allocation exceeds its resource budget".
 
 ### More cars
 

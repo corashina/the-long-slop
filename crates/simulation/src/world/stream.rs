@@ -204,6 +204,8 @@ struct PreparedSurface {
     road_claim: Option<(RoadJobId, u64)>,
     pending_bytes: usize,
     renderer_ready: bool,
+    /// The renderer may see the surface. Its render staging and memory are charged.
+    offered: bool,
     renderer_reserved: bool,
     request: WorldRequest,
     published: PublishedSurface,
@@ -1283,7 +1285,7 @@ impl WorldStream {
             + self.road_work.as_ref().map_or(0, |w| w.pending_bytes)
             + self.ready.as_ref().map_or(0, |w| {
                 w.pending_bytes
-                    + if w.renderer_reserved {
+                    + if w.offered {
                         surface_render_cpu(&w.published.surface)
                     } else {
                         0
@@ -1776,9 +1778,14 @@ impl WorldStream {
         {
             self.discard_unreserved_surface();
         }
-        if self.ready.is_some() {
-            return;
+        if self.ready.is_none() {
+            self.prepare_surface(should_yield);
         }
+        if let Err(error) = self.offer_surface() {
+            self.failure = Some(error.0);
+        }
+    }
+    fn prepare_surface(&mut self, should_yield: impl FnMut() -> bool) {
         if self
             .wanted_tiles
             .iter()
@@ -2995,6 +3002,7 @@ impl WorldStream {
                 road_claim: Some((work.identity, work.source_revision)),
                 pending_bytes: work.surface_bytes,
                 renderer_ready: false,
+                offered: false,
                 renderer_reserved: false,
                 request: self.request,
                 published: PublishedSurface {
@@ -3195,6 +3203,7 @@ impl WorldStream {
                     road_claim: None,
                     pending_bytes: metadata.pending_bytes,
                     renderer_ready: false,
+                    offered: false,
                     renderer_reserved: false,
                     request: metadata.request,
                     published: PublishedSurface {
@@ -3370,7 +3379,9 @@ impl WorldStream {
         self.ready
             .as_ref()
             .filter(|work| {
-                same_request(work.request, self.request) && self.road_publication_valid(work)
+                work.offered
+                    && same_request(work.request, self.request)
+                    && self.road_publication_valid(work)
             })
             .map(|work| (work.request, &work.published))
     }
@@ -3431,23 +3442,46 @@ impl WorldStream {
                 "Source renderer already owns its claim".into(),
             ));
         }
-        let metrics = self.metrics();
-        if surface_render_cpu(&work.published.surface) > self.available_staging_bytes()
-            || metrics
-                .active_cpu_bytes
-                .saturating_add(surface_render_cpu(&work.published.surface))
-                > self.limits.active_cpu
-            || metrics
-                .active_gpu_bytes
-                .saturating_add(surface_render_bytes(&work.published.surface))
-                > self.limits.active_gpu
-        {
+        if !work.offered && !self.offer_surface()? {
             return Err(ReferenceError(
-                "Source renderer allocation exceeds its resource budget".into(),
+                "Source renderer staging exceeds its resource budget".into(),
             ));
         }
         self.ready.as_mut().unwrap().renderer_reserved = true;
         Ok(())
+    }
+    /// Charges the render staging and memory of the prepared surface before the renderer sees
+    /// it. The renderer reserves from an older frame, so the stream must not grant this room to
+    /// other work meanwhile. False while staging waits for renderer credit.
+    fn offer_surface(&mut self) -> Result<bool, ReferenceError> {
+        let Some(work) = self.ready.as_ref() else {
+            return Ok(false);
+        };
+        if work.offered {
+            return Ok(true);
+        }
+        let cpu = surface_render_cpu(&work.published.surface);
+        let gpu = surface_render_bytes(&work.published.surface);
+        let metrics = self.metrics();
+        let staging = STAGING - self.dependency_staging_reserve;
+        if work.pending_bytes.saturating_add(cpu) > staging
+            || metrics.active_cpu_bytes.saturating_add(cpu) > self.limits.active_cpu
+            || metrics.active_gpu_bytes.saturating_add(gpu) > self.limits.active_gpu
+        {
+            return Err(ReferenceError(format!(
+                "Source renderer allocation exceeds its resource budget: staging {} of {staging} bytes, CPU {} of {} bytes, GPU {} of {} bytes",
+                work.pending_bytes.saturating_add(cpu),
+                metrics.active_cpu_bytes.saturating_add(cpu),
+                self.limits.active_cpu,
+                metrics.active_gpu_bytes.saturating_add(gpu),
+                self.limits.active_gpu,
+            )));
+        }
+        if !self.wait_for_room(cpu <= self.available_staging_bytes(), Reclaim::STAGING) {
+            return Ok(false);
+        }
+        self.ready.as_mut().unwrap().offered = true;
+        Ok(true)
     }
     /// The renderer dropped the prepared surface after its work drained.
     /// Work that the stream dropped before the reservation arrived is already rewound.
@@ -5288,7 +5322,7 @@ impl WorldStream {
                     .prototype
                     .as_ref()
                     .map_or(0, |id| id.file.capacity());
-            if work.renderer_reserved {
+            if work.offered {
                 metrics.active_cpu_bytes += surface_render_cpu(&work.published.surface);
                 metrics.active_gpu_bytes += surface_render_bytes(&work.published.surface);
             }
