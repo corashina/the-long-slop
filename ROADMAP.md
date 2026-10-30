@@ -29,7 +29,18 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binocular lens distortion and chromatic aberration, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. |
 
-Not planned: multiplayer, VR, stereo 3D, mod events, Steam features.
+### Multiplayer
+
+Match the source Steam multiplayer (`sns`, `snl`, `snTempPlayerSync`). WebRTC peer to peer through PeerJS. The host browser runs the world. Guests talk only to the host. The host forwards.
+
+| ID | Task | Size | Remaining work |
+| --- | --- | --- | --- |
+| M01 | Join and see each other | L | Room code, join with the host save, remote player figures with IK and outfit, collision, chat, ping. |
+| M02 | Shared cars | L | Driver input sync (`carfloats`, gears, ignition, lamps, handbrake), passengers. |
+| M03 | Shared items and world | XL | `claim`, item poses and velocity, inventory, tanks and caps, parts, usables, attachables, food, weapons. |
+| M04 | Everything else | XL | Creatures, time and sleep, weather, radio channels, sounds, voice chat. |
+
+Not planned: VR, stereo 3D, mod events, Steam features.
 
 ## Test pass
 
@@ -258,3 +269,19 @@ Prepare once:
 2. Eat each food. Crumbs, meat, turd and chocolate bits fall from the food. Smoke a cigarette: ash falls now and then.
 3. Stay up at night for a few nights. The horror sound plays for 5 to 15 s on the first night, then every 1 to 5 nights. It stops at day.
 4. New game between 15 October and 15 November: the start pumpkin glows and flickers at night. Hold it and wear it: the light follows.
+
+### Multiplayer
+
+Use two browser tabs on one PC first, then two PCs.
+
+1. Host from the pause menu: a 6-letter room code shows. Join from the start menu with the code and a name.
+2. The guest loads the host world and spawns next to the host.
+3. Each player sees the other walk, run, duck, prone, look up and down, and carry items. Names show above the heads.
+4. Sit in the Lada as driver and passenger: the figure sits in the seat.
+5. Walk into the other player: you bump. Right after join, figures do not collide for 3 s.
+6. Outfit: change the appearance on one peer. The other peer sees the change.
+7. Chat with T. Messages show on all peers. Ping shows for each player.
+8. Wrong code, wrong password and a full room each show their message. A different build shows "Different game version."
+9. A guest closes the tab: its figure goes away within 5 s. The host closes the tab: guests see "Host left." and go to the main menu.
+10. The guest cannot save. Autosave does not run on the guest.
+11. F3 with 1 and with 7 remote players. Report the frame time cost per figure.
