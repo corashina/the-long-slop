@@ -61,8 +61,6 @@ export function createSaveSession({storage,runtime,drawDistance,reload,onStatus=
   load,
   // Multiplayer host: the world for a joining guest, as JSON. Nothing is stored.
   async share(){const {save}=await runtime.capture(true);return JSON.stringify(save);},
-  // Multiplayer guest: loads the host world.
-  join(save){return run('join',operation=>prepare(operation,()=>runtime.prepare(save,operation.controller.signal,drawDistance())));},
   remove(name){return run('remove',async()=>{await storage.remove(name);});},
   async loadLast(buildId){
    const name=lastSave(await storage.list(),buildId);

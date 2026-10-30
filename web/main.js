@@ -6,13 +6,14 @@ installShadowQuality(window,()=>localStorage,document.querySelector('#shadow-qua
 import {installGrassQuality} from './grass-quality.js';
 installGrassQuality(window,()=>localStorage,document.querySelector('#grass-quality'));
 import {gameFields,installGameMode,installGameOptions,installSeed,installStartCar} from './game-mode.js';
-// New game and Load reload the page, as the source loads the game scene again. The simulation
-// then starts in the menu game mode or from the save, so one world exists at a time.
-const NEW_GAME_KEY='tls-new-game',LOAD_KEY='tls-load';
+// New game, Load and Join reload the page, as the source loads the game scene again. The simulation
+// then starts in the menu game mode, from the save or from the host world, so one world exists at a time.
+const NEW_GAME_KEY='tls-new-game',LOAD_KEY='tls-load',JOIN_KEY='tls-join';
 const takeSession=key=>{try{const v=sessionStorage.getItem(key);sessionStorage.removeItem(key);return v;}catch{return null;}};
 const reloadWith=(key,value)=>{try{sessionStorage.setItem(key,value);}catch{}location.reload();return new Promise(()=>{});};
 const newGameSeed=(()=>{const v=Number(takeSession(NEW_GAME_KEY)??NaN);return Number.isInteger(v)?v:undefined;})();
 const loadName=takeSession(LOAD_KEY);
+const joinRoom=(()=>{try{return JSON.parse(takeSession(JOIN_KEY)??'null');}catch{return null;}})();
 const seed=installSeed(window,document.querySelector('#seed'),Math.random,newGameSeed);
 import {installSunglassesEffects} from './sunglasses.js';
 import {installScreenEffects} from './screen-effects.js';
@@ -255,13 +256,16 @@ async function load(){
  // The simulation parses its own manifest copy while this thread loads the interface.
  worldDrawDistance=slider.value();
  const garageMode=[worldDrawDistance,window.gameBiome(),window.gameStartCar(),window.gameSeed()];
- // The save of a Load reload, or of Load last at start.
- let startSave=new Uint8Array(),startError='';
- try{
+ // The world of a Join reload, of a Load reload, or of Load last at start. `save` is its JSON.
+ let joined;
+ const storedSave=async()=>{
   const name=loadName??(newGameSeed===undefined&&settings.values.BAutoLoad?lastSave(await saveStorage.list(),manifest.build_id):null);
-  if(name!==null){const record=await saveStorage.read(name);if(record===null)throw new Error('No saved game.');startSave=new TextEncoder().encode(JSON.stringify(await verifyRecord(record)));}
- }catch(error){startError=error?.message??String(error);}
- const simulationStarted=simulation.start(bytes.slice(),manifestHash,...garageMode,gameOptions.bits(),startSave);
+  if(name===null)return null;
+  const record=await saveStorage.read(name);if(record===null)throw new Error('No saved game.');
+  return {save:new TextEncoder().encode(JSON.stringify(await verifyRecord(record))),operation:'load'};
+ };
+ const startWorld=joinRoom?new Promise(resolve=>{joined=resolve;}):storedSave().catch(error=>({error:error?.message??String(error),operation:'load'}));
+ const simulationStarted=startWorld.then(async world=>({world,...await simulation.start(bytes.slice(),manifestHash,...garageMode,gameOptions.bits(),world?.save??new Uint8Array())}));
  // False: the garage is the new game world.
  const reloadNewGame=started=>{
   const mode=[slider.value(),window.gameBiome(),window.gameStartCar(),window.gameSeed()];
@@ -295,14 +299,16 @@ async function load(){
  const resets={graphics:[()=>choose(sunglasses,'checked',true,'change'),()=>choose(select('#heat-haze'),'checked',true,'change'),()=>choose(select('#old-heat-haze'),'checked',false,'change'),()=>choose(select('#lut'),'value','default','change'),()=>choose(select('#grayscale'),'checked',false,'change'),()=>choose(sceneResolution,'value','100','change'),()=>choose(select('#shadow-quality'),'value','0','change'),
   ()=>choose(select('#grass-quality'),'value','0','change'),()=>choose(select('#motion-blur'),'checked',true,'change'),()=>choose(select('#depth-of-field'),'checked',false,'change'),()=>choose(select('#lamp-shadows'),'checked',true,'change'),()=>choose(select('#antialiasing'),'checked',true,'change'),()=>choose(select('#ambient-occlusion'),'checked',true,'change'),()=>choose(select('#reflections'),'checked',true,'change'),()=>mirrors.reset(),()=>slider.reset()],controls:[()=>drivingSettings.resetMouse()]};
  menu=createMenu({canvas,appearance,figure,settings,resets,defaultAssists:manifest.driving.default_assists,ui:manifest.ui,bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,guest:()=>multiplayer?.role===ROLE.GUEST,slider,audio,onNewGame:()=>seed.reroll(),reloadNewGame,autoNewGame:newGameSeed!==undefined,onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
- multiplayer=createMultiplayer({document,target:window,Peer:window.peerjs.Peer,buildId:manifest.build_id,exportHash:manifestHash,simulation,saveSession,menu,outfit,storage:()=>localStorage});
+ multiplayer=createMultiplayer({document,target:window,Peer:window.peerjs.Peer,buildId:manifest.build_id,exportHash:manifestHash,simulation,saveSession,menu,outfit,storage:()=>localStorage,
+  room:joinRoom,joined:(save,error)=>joined({save,error,operation:'join'}),reloadJoin:room=>reloadWith(JOIN_KEY,JSON.stringify(room))});
  {const changed=outfit.changed;outfit.changed=()=>{changed();multiplayer.look(outfit.outfit);};}
  feedback=createFeedback(manifest.ui,manifest,settings,actions);
  startup.end('interface');
  if(failed)return;status.textContent='Loading the garage...';loading.stage(status.textContent);
  startup.begin('generation');startup.begin('decodeUpload');startup.begin('pipeline');
- const {startup:startupBytes,loadError}=await simulationStarted;
- if(startSave.length||startError)menu.started(startError||loadError);
+ const {world,startup:startupBytes,loadError}=await simulationStarted;
+ if(world)menu.started(world.error||loadError,world.operation);
+ if(world?.operation==='join'&&(world.error||loadError))multiplayer.leave();
  if(failed)return;run(bytes,startupBytes);
  cpuProfile.end('startup');
 }
