@@ -480,6 +480,7 @@ fn withdraw_terrain(run: &mut GarageRuntime, key: SurfaceKey) {
         road_claim: None,
         pending_bytes: 0,
         renderer_ready: false,
+        offered: true,
         renderer_reserved: false,
         request: run.stream.request,
         published: surface,
