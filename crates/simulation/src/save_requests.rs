@@ -166,6 +166,10 @@ impl SimDriver {
                 if !autosave && self.runtime.started && !self.runtime.paused {
                     return Err(invalid("Pause the game first"));
                 }
+                // Source guests have no save: the host world is the one world.
+                if request.kind == "Capture" && self.net.role() == crate::net::NetRole::Guest {
+                    return Err(invalid("Guests cannot save"));
+                }
                 if request.kind == "Capture" {
                     if !autosave {
                         self.clear_input();

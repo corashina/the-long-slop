@@ -25,7 +25,7 @@ struct SkyBinding {
 pub struct SkyPass {
     pipelines: [CachedRenderPipelineId; 2],
     vertices: Buffer,
-    bindings: [SkyBinding; 7],
+    bindings: [SkyBinding; super::surface_views::VIEW_COUNT],
 }
 impl SkyPass {
     pub fn new(
@@ -172,7 +172,7 @@ impl SkyPass {
             .iter()
             .all(|id| cache.get_render_pipeline(*id).is_some())
     }
-    /// View zero is the sky camera; views one through six are capture faces.
+    /// View zero is the sky camera. Other indices are the surface views of the same index.
     /// The caller supplies its established source-to-target clip conversion.
     pub fn write_view(
         &mut self,

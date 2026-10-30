@@ -269,6 +269,12 @@ extern "C" {
     /// Pending `Outfit` JSON, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameOutfit)]
     pub fn game_outfit() -> Option<String>;
+    /// Pending peer outfits JSON `[[slot, outfit], ...]`, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameRemoteLooks)]
+    pub fn game_remote_looks() -> Option<String>;
+    /// Name label of a remote figure in canvas pixels. Negative: hidden.
+    #[wasm_bindgen(js_namespace = window, js_name = gameRemoteLabel)]
+    pub fn game_remote_label(slot: u32, x: f32, y: f32);
     /// "Antialiasing" setting at page load.
     #[wasm_bindgen(js_namespace = window, js_name = gameAntialiasing)]
     pub fn game_antialiasing() -> bool;
@@ -287,10 +293,21 @@ extern "C" {
     /// Pending "Lamp shadows" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameLampShadows)]
     pub fn game_lamp_shadows() -> Option<bool>;
+    /// Pending "Reflections" setting, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameReflections)]
+    pub fn game_reflections() -> Option<bool>;
+    /// Fills the pending "Mirrors" setting: on (0 or 1) and the draw distance in meters.
+    /// False when nothing changed.
+    #[wasm_bindgen(js_namespace = window, js_name = gameMirrors)]
+    pub fn game_mirrors(setting: &mut [f32]) -> bool;
     /// Fills the appearance preview rect: x, y, width and height in canvas fractions.
     /// False while the appearance screen is closed.
     #[wasm_bindgen(js_namespace = window, js_name = gameAppearancePreview)]
     pub fn game_appearance_preview(rect: &mut [f32]) -> bool;
+    /// Fills the start menu mouse: x and y in canvas fractions, held buttons and buttons pressed since the last call.
+    /// Bit 1 is the left button, bit 2 the right. False while the start menu is closed.
+    #[wasm_bindgen(js_namespace = window, js_name = gameMenuFigure)]
+    pub fn game_menu_figure(input: &mut [f32]) -> bool;
     /// Fills 4 pads × 8 axes and 4 pads × 32 button bits (`GamepadFrame`).
     #[wasm_bindgen(js_namespace = window, js_name = gameGamepad)]
     pub fn game_gamepad(axes: &mut [f32], buttons: &mut [u32]);

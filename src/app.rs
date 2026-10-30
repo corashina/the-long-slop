@@ -108,6 +108,8 @@ struct CharacterShell<'a> {
 struct WorldShell<'a> {
     #[serde(borrow)]
     draw_distance: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    mirrors: &'a serde_json::value::RawValue,
     #[serde(borrow, skip_serializing)]
     startup: Vec<StartupShell<'a>>,
     /// Start car names in export order. The Game mode start car list shows them.
@@ -244,8 +246,10 @@ pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
             presentation::decals::SourceDecalPlugin,
             presentation::world::prototypes::SourcePrototypePlugin,
             presentation::world::pipelines::WorldPipelinePlugin,
-            presentation::outfit_preview::OutfitPreviewPlugin,
+            presentation::figure_stage::FigureStagePlugin,
         ))
+        .init_resource::<presentation::outfit_preview::OutfitPreview>()
+        .init_resource::<presentation::menu_figure::MenuFigure>()
         .init_resource::<presentation::save::CandidateImportedPoses>()
         .init_resource::<presentation::world::SourceWorldVisuals>()
         .init_resource::<presentation::world::instances::SourceInstances>()
@@ -286,9 +290,12 @@ pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
                     presentation::cigarettes::sync,
                     presentation::light_dither::sync,
                     presentation::outfit::poll,
+                    presentation::remote_players::poll,
                     presentation::player_body::sync,
+                    presentation::remote_players::sync,
                     presentation::ragdoll::sync,
                     presentation::outfit_preview::sync,
+                    presentation::menu_figure::sync,
                     presentation::sky_traffic::sync,
                     presentation::creatures::sync,
                 )
@@ -333,6 +340,8 @@ fn setup(
     commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
     commands.insert_resource(presentation::spawned::SpawnedVisuals::default());
     commands.insert_resource(presentation::player_body::PlayerBody::default());
+    commands.insert_resource(presentation::remote_players::RemoteLooks::default());
+    commands.insert_resource(presentation::remote_players::RemoteFigures::default());
     commands.insert_resource(presentation::ragdoll::RagdollBody::default());
     commands.insert_resource(presentation::outfit::Outfit::defaults(
         &reference.0.clothing.characters,

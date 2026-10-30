@@ -49,8 +49,6 @@ pub(crate) struct SimFrameResource {
     pub changed_conditions: Vec<ConditionId>,
     /// Home cable aims waiting for the reference visuals.
     pub home_cable: Option<Vec<RopeAim>>,
-    /// The world car the player last sat in, else the start car: id and prototype.
-    pub followed_car: Option<(GeneratedId, u32)>,
     /// Feedback waiting for the HUD.
     pub feedback: Option<Box<Feedback>>,
     structure_slots: HashMap<GeneratedId, u32>,
@@ -106,7 +104,6 @@ impl SimFrameResource {
                 }
                 Change::PlayerRig(joints) => self.rig.clone_from(joints),
                 Change::HomeCable(aims) => self.home_cable = Some(aims.clone()),
-                Change::FollowedCar(car) => self.followed_car.clone_from(car),
                 Change::Feedback(feedback) => self.feedback = Some(feedback.clone()),
                 Change::StructureAdd { slot, id } => {
                     let slot = *slot as usize;

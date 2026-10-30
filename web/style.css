@@ -24,9 +24,9 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 #performance p {margin:8px 0 0;color:#bbb;font:11px/1.4 Arial,sans-serif;}
 .menu-actions {position:absolute;inset:0;}
 #session-distance {position:absolute;right:24px;bottom:16px;margin:0;font-size:clamp(16px,1.5vw,24px);text-shadow:2px 2px 2px #000;}
-#settings-screen,#game-mode-screen,#save-screen {position:absolute;inset:0;}
-#settings-title,#game-mode-title,#save-title {position:absolute;left:24px;top:20px;margin:0;font-size:clamp(24px,3.2vw,60px);font-weight:400;}
-#menu:has(#settings-screen:not([hidden]),#game-mode-screen:not([hidden])) h1,#menu:has(#settings-screen:not([hidden]),#game-mode-screen:not([hidden])) #status {visibility:hidden;}
+#settings-screen,#game-mode-screen,#save-screen,#multiplayer-screen {position:absolute;inset:0;}
+#settings-title,#game-mode-title,#save-title,#multiplayer-title {position:absolute;left:24px;top:20px;margin:0;font-size:clamp(24px,3.2vw,60px);font-weight:400;}
+#menu:has(#settings-screen:not([hidden]),#game-mode-screen:not([hidden]),#multiplayer-screen:not([hidden])) h1,#menu:has(#settings-screen:not([hidden]),#game-mode-screen:not([hidden]),#multiplayer-screen:not([hidden])) #status {visibility:hidden;}
 #settings-tabs {position:absolute;left:24px;right:24px;top:clamp(64px,7vw,110px);display:flex;flex-wrap:wrap;gap:8px;}
 #settings-tabs button,#settings-reset,.setting-slider button {position:static;min-height:44px;padding:4px 16px;background:#b4804640;border:1px solid #b48046;font:18px Arial,sans-serif;}
 #settings-tabs button.selected {border:2px solid #fff;}
@@ -116,6 +116,18 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 .action-row {position:absolute;margin:0;white-space:nowrap;text-shadow:2px 2px 2px #000;}
 #fluid-text {position:absolute;margin:0;white-space:pre;transform:translate(-50%,-50%);text-align:center;text-shadow:3px 3px 2px #000;}
 #carry-help {position:absolute;margin:0;white-space:pre;text-align:right;text-shadow:2px 2px 2px #000;}
+/* Multiplayer screen, chat and name labels. */
+.multiplayer-panel {position:absolute;left:24px;top:clamp(70px,9vw,120px);width:min(480px,calc(100% - 48px));display:flex;flex-direction:column;gap:12px;padding:16px 20px;background:#000c;font:18px Arial,sans-serif;color:#fff;}
+.multiplayer-panel label {display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.multiplayer-panel fieldset {display:flex;flex-direction:column;gap:10px;border:1px solid #b48046;}
+.multiplayer-panel input {min-height:36px;padding:4px 10px;background:#b4804640;border:1px solid #b48046;font:inherit;color:#fff;}
+.multiplayer-panel button {min-height:44px;padding:8px 16px;background:#b4804640;border:1px solid #b48046;font:inherit;color:#fff;}
+.multiplayer-panel ul {margin:0;padding-left:20px;}
+#net-chat {position:absolute;left:16px;bottom:96px;width:min(480px,calc(100% - 32px));font:16px Arial,sans-serif;color:#fff;text-shadow:2px 2px 2px #000;pointer-events:none;}
+#net-chat ul {margin:0;padding:0;list-style:none;}
+#net-chat input {width:100%;box-sizing:border-box;min-height:32px;background:#000a;border:1px solid #b48046;font:inherit;color:#fff;pointer-events:auto;}
+#net-labels {position:absolute;inset:0;overflow:hidden;pointer-events:none;}
+#net-labels span {position:absolute;left:0;top:0;font:16px Arial,sans-serif;color:#fff;text-shadow:2px 2px 2px #000;white-space:nowrap;}
 #autosave-notice {position:absolute;right:16px;top:16px;margin:0;color:#fff;font-family:Arial,sans-serif;text-shadow:2px 2px 2px #000;pointer-events:none;}
 #action-notice {position:absolute;left:0;bottom:20px;margin:0;color:#fff;text-shadow:2px 2px 2px #000;}
 @media(max-width:799px) {

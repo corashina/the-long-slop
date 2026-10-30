@@ -27,13 +27,22 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | --- | --- | --- | --- |
 | X03 | Creatures | XL | Ground UFO, EMP and green-eyed evil rabbits, human monster (attacks hurt the player), breakablescript `DamageFrom` for AI. Rabbits do not yet sense the player hum. |
 | X04d | Languages and help text | M | 10 language files, language dropdown, word table for all menu and HUD text. Help text follows the assists. |
-| X04e | Menu figure IK | S | Start-menu figure turns its head, body and hands towards the mouse, as `menuIkScript`. |
-| X06a | Live mirrors | L | Car mirror cameras render to textures. Only the 5 nearest run. FOV and far plane follow distance. Mirrors toggle and Mirror draw distance slider. |
-| X06c | Live reflection probes | M | Only 1 probe is live. Make every building and car probe live, with the 5 s disable distance check and the Reflections toggle. |
+| X06c | Building reflection probes | S | Car probes are live. Check the original building prefabs for realtime `ReflectionProbe`s. Export any as prototype probes. The live probe slots then take them. |
 | X06f | Depth of field and binocular lens | M | Main DoF with focus ray, night clamp and Dof toggle. Binocular DoF, lens distortion and chromatic aberration. |
 | X06g | Heat haze and LUT options | M | Heat haze pass weighted by temperature, old particle heat haze, LUT option (Default, C64, Sepia), grayscale. |
 
-Not planned: multiplayer, VR, stereo 3D, mod events, Steam features.
+### Multiplayer
+
+Match the source Steam multiplayer (`sns`, `snl`, `snTempPlayerSync`). WebRTC peer to peer through PeerJS. The host browser runs the world. Guests talk only to the host. The host forwards.
+
+| ID | Task | Size | Remaining work |
+| --- | --- | --- | --- |
+| M01 | Join and see each other | S | Remote player collision: export the `mpplayerscript` capsule (`minBodyRadius`, `maxBodyRadius`, head and prone head nodes), add a kinematic capsule per figure, 3 s spawn delay and 1 s after standing up. |
+| M02 | Shared cars | L | Driver input sync (`carfloats`, gears, ignition, lamps, handbrake), passengers. Seated figures follow the seat of the car by save id (source `UpdPos` sitting). |
+| M03 | Shared items and world | XL | `claim`, item poses and velocity, inventory, tanks and caps, parts, usables, attachables, food, weapons. |
+| M04 | Everything else | XL | Creatures, time and sleep, weather, radio channels, sounds, voice chat. |
+
+Not planned: VR, stereo 3D, mod events, Steam features.
 
 ## Test pass
 
@@ -210,6 +219,15 @@ Prepare once:
 20. HUD hints show the bound keys: rebind Use to G, then aim at a door. Hide HUD follows its binding.
 21. Seated with the clutch held, the inventory keys select nothing while Inventory Slot 1 and Shift To 1 share a key name. Rebind one: they select again.
 
+### Start menu figure
+
+1. The start menu shows the figure in the menu camera view, under the menu art. It wears the Appearance outfit. Change the outfit: the figure follows.
+2. Move the mouse: the head turns toward it. Hands and feet stay at their rest goals.
+3. Click and hold the left button on the figure, then move: the head and right hand follow the mouse. The right button kicks with the left leg. Both buttons slide the body. Release: the figure returns to rest.
+4. The right button opens no context menu on the start menu.
+5. The figure is gone in the pause menu, Appearance and in game. F3 on the start menu: frame time near the previous run.
+6. Compare with the original menu: pose, place, head turn speed. Note the port choices: no idle clip, no menu scenery, gray background.
+
 ### Player body and outfit
 
 1. Look down standing, crouching, walking forward and back. Carry a light and a heavy (>10 kg) item. Sit in the Lada (driver and passenger), on the WC and on the sled. Check legs, arms and hands on the wheel.
@@ -308,3 +326,29 @@ Prepare once:
 9. Stand near 5 or more shadowed lamps: only the 4 nearest cast shadows. No shadow pops when two lamps swap order.
 10. Turn "Lamp shadows" off and on. Reload: the setting stays. Check the F3 cost with it on and off.
 11. Check the page log for "layout requires ... textures": the lamp atlas adds one texture to each surface pipeline.
+12. Park three cars near the garage. Each car body reflects its own surroundings, and the reflections update as the cars and the sun move.
+13. Walk more than 50 m from a car: within 5 s its reflection probe turns off. Walk back: it turns on again within 5 s.
+14. Turn Reflections off: car reflections go away at once. Turn it on: they return. Reload the page: the setting stays.
+15. Check F3 near four cars with Reflections on and off. Live probes render one 64 px cube face each frame.
+16. Re-export first: the export now has the live mirror records.
+17. Sit in the Lada with Mirrors on. The side and front mirrors show the world behind the car, not flipped.
+18. Turn Mirrors off, or walk more than 4 m from the car. The mirrors show the glass material.
+19. Move the Mirror draw distance slider. Far objects appear and disappear in the mirrors. Reload: the setting stays.
+20. Stand among several cars. Check F3 with 5 live mirrors against the frame rate rule.
+
+### Multiplayer
+
+Re-export first: the export now holds `playeranimationscript.sendInterval`. Use two browser tabs on one PC first, then two PCs.
+
+1. Host from the pause menu: a 6-letter room code shows. Join from the start menu with the code and a name.
+2. The guest loads the host world and stands where the host stood. A host in a car seat puts the guest in the same seat until M02.
+3. Each player sees the other walk, run, duck, prone, look up and down, and carry items. Names show above the heads.
+4. Sit in the Lada as driver and passenger: the figure sits in the seat.
+5. Outfit: change the appearance on one peer. The other peer sees the change.
+6. Press Enter to chat. Messages show on all peers for 10 s. The multiplayer screen shows each player and its ping.
+7. Wrong code, wrong password and a full room each show their message. A different build shows "Different game version."
+8. A guest closes the tab: its figure goes away within 5 s. The host closes the tab: guests see "Host left." and keep playing alone.
+9. The guest cannot save: Save, Load and New game hide in the pause menu. Autosave does not run on the guest.
+10. Name labels stand above the heads. Check the label height (port choice 2.1 m).
+11. Each figure keeps its own outfit colors. The local body colors do not change.
+12. F3 with 1 and with 7 remote players. Report the frame time cost per figure.

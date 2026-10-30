@@ -20,16 +20,7 @@ use std::collections::{HashMap, HashSet};
 #[derive(Resource, Default)]
 pub struct PlayerBody {
     scene: Option<Entity>,
-    /// Source Player Transform. It follows the player pose.
-    player: Option<Entity>,
-    /// Source `CharacterRoot`. It follows `BodyState::root_local`.
-    character_root: Option<Entity>,
-    /// Skin joints of both characters.
-    joints: HashMap<NodeId, Entity>,
-    /// Skin joint entities of each character in `BodyState` joint order.
-    posed: [Vec<Entity>; 2],
-    /// Renderer primitives and their character.
-    primitives: Vec<(Entity, usize)>,
+    bound: BoundBody,
     shown: bool,
     /// The outfit is applied. It applies again after each change.
     dressed: bool,
@@ -37,13 +28,38 @@ pub struct PlayerBody {
 impl PlayerBody {
     /// Entity of the source Player Transform, once the body is bound.
     pub fn player(&self) -> Option<Entity> {
-        self.player
+        self.bound.player
     }
     /// Entity of a skin joint, once the body is bound.
     pub fn joint(&self, node: NodeId) -> Option<Entity> {
-        self.joints.get(&node).copied()
+        self.bound.joints.get(&node).copied()
     }
 }
+
+/// The bound nodes of one player asset instance: the local body or a remote figure.
+#[derive(Default)]
+pub(super) struct BoundBody {
+    /// Source Player Transform. It follows the player pose.
+    pub player: Option<Entity>,
+    /// Source `CharacterRoot`. It follows `BodyState::root_local`.
+    pub character_root: Option<Entity>,
+    /// Skin joints of both characters.
+    pub joints: HashMap<NodeId, Entity>,
+    /// Skin joint entities of each character in `BodyState` joint order.
+    pub posed: [Vec<Entity>; 2],
+    /// Renderer primitives and their character.
+    pub primitives: Vec<(Entity, usize)>,
+}
+
+pub(super) type NodeQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static mut Transform,
+        &'static mut Visibility,
+        Has<MeshMaterial3d<SourceMaterial>>,
+    ),
+>;
 
 #[derive(serde::Deserialize)]
 pub(super) struct Identity {
@@ -75,6 +91,7 @@ pub(super) fn character_renderer(
 
 /// Outfit slot of a renderer primitive: the segment that owns the material slot `submesh` of `node`.
 pub(super) fn outfit_slot(
+    figure: u8,
     manifest: &ReferenceManifest,
     characters: &[CharacterReference],
     invisible: &SourceId,
@@ -104,6 +121,7 @@ pub(super) fn outfit_slot(
             .ok_or_else(|| format!("outfit material {}:{}", source.file, source.path_id))
     };
     Ok(Some(OutfitSlot {
+        figure,
         character: character as u8,
         segment: index as u8,
         material: material(&segment.default_material)?,
@@ -198,21 +216,22 @@ pub(super) fn materials_bound(
         .all(|(p, _)| sourced(*p) && !matches!(outfit.get(*p), Ok(None)))
 }
 
-/// Bind the player nodes. Remove the primitives of all renderers except those of the characters.
-fn bind(
-    event: On<WorldInstanceReady>,
-    mut commands: Commands,
-    reference: Res<RuntimeReference>,
-    frame: Res<SimFrameResource>,
-    mut body: ResMut<PlayerBody>,
-    children: Query<&Children>,
-    extras: Query<&GltfExtras>,
-    primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
-) {
-    let manifest = &reference.0;
+/// Bind the player nodes of the instance under `root`. Remove the primitives of all renderers except those of the characters.
+/// `rig` is the `BodyState` joint order. `figure` is the `OutfitSlot::figure` of the instance.
+pub(super) fn bind_instance(
+    figure: u8,
+    root: Entity,
+    commands: &mut Commands,
+    manifest: &ReferenceManifest,
+    rig: &[NodeId],
+    children: &Query<&Children>,
+    extras: &Query<&GltfExtras>,
+    primitives: &Query<(Entity, &ChildOf), With<Mesh3d>>,
+) -> Option<BoundBody> {
     let clothing = &manifest.clothing;
     let characters = &clothing.characters;
-    for entity in children.iter_descendants(event.entity) {
+    let mut body = BoundBody::default();
+    for entity in children.iter_descendants(root) {
         let Ok(extra) = extras.get(entity) else {
             continue;
         };
@@ -242,7 +261,7 @@ fn bind(
         }
         let drawn = character_renderer(characters, node.id);
         let mut removed = false;
-        for (primitive, parent) in &primitives {
+        for (primitive, parent) in primitives {
             if parent.parent() != entity {
                 continue;
             }
@@ -259,6 +278,7 @@ fn bind(
                 .map_err(|e| e.to_string())
                 .and_then(|e| {
                     outfit_slot(
+                        figure,
                         manifest,
                         characters,
                         &clothing.invisible_material,
@@ -279,7 +299,7 @@ fn bind(
         if removed {
             continue;
         }
-        if let Err(error) = bind_node(&mut commands, node, entity, extra, &primitives) {
+        if let Err(error) = bind_node(commands, node, entity, extra, primitives) {
             error!("Player body: {error}");
         }
     }
@@ -291,19 +311,99 @@ fn bind(
     let complete = body.player.is_some() && joints && !body.primitives.is_empty();
     let Some(root) = body.character_root.filter(|_| complete) else {
         error!("Player body glTF lacks its root, CharacterRoot, skin joints, or renderers");
-        return;
+        return None;
     };
-    let Some(female) = character_nodes(manifest, characters, frame.rig()) else {
+    let Some(female) = character_nodes(manifest, characters, rig) else {
         error!("Player body: character 1 lacks a joint name of character 0");
-        return;
+        return None;
     };
     // BodyState poses every joint relative to CharacterRoot, so each joint is its direct child.
-    let male: Vec<Entity> = frame.rig().iter().map(|node| body.joints[node]).collect();
+    let male: Vec<Entity> = rig.iter().map(|node| body.joints[node]).collect();
     let female: Vec<Entity> = female.iter().map(|node| body.joints[node]).collect();
     for joint in male.iter().chain(&female) {
         commands.entity(*joint).insert(ChildOf(root));
     }
     body.posed = [male, female];
+    Some(body)
+}
+
+/// Bind the local player body.
+fn bind(
+    event: On<WorldInstanceReady>,
+    mut commands: Commands,
+    reference: Res<RuntimeReference>,
+    frame: Res<SimFrameResource>,
+    mut body: ResMut<PlayerBody>,
+    children: Query<&Children>,
+    extras: Query<&GltfExtras>,
+    primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
+) {
+    if let Some(bound) = bind_instance(
+        0,
+        event.entity,
+        &mut commands,
+        &reference.0,
+        frame.rig(),
+        &children,
+        &extras,
+        &primitives,
+    ) {
+        body.bound = bound;
+    }
+}
+
+/// Spawns the player asset scene, hidden until it binds.
+pub(super) fn spawn_instance(
+    commands: &mut Commands,
+    manifest: &ReferenceManifest,
+    visuals: &ReferenceVisuals,
+    gltfs: &Assets<bevy::gltf::Gltf>,
+) -> Option<Entity> {
+    let asset = manifest.clothing.characters[0].asset;
+    let gltf = visuals
+        .gltfs
+        .iter()
+        .find(|(id, _)| *id == asset)
+        .and_then(|(_, handle)| gltfs.get(handle))?;
+    Some(
+        commands
+            .spawn((
+                WorldAssetRoot(gltf.scenes[0].clone()),
+                Transform::default(),
+                Visibility::Hidden,
+            ))
+            .id(),
+    )
+}
+
+/// Moves the Player Transform, `CharacterRoot` and the joints of the chosen character.
+pub(super) fn pose_instance(
+    body: &BoundBody,
+    nodes: &mut NodeQuery,
+    player: crate::vehicle::VehiclePose,
+    root: crate::vehicle::VehiclePose,
+    joint_scale: f32,
+    joints: &[simulation::boundary::PoseRow],
+    character: usize,
+) {
+    if let Some(entity) = body.player
+        && let Ok((mut transform, _, _)) = nodes.get_mut(entity)
+    {
+        let scale = transform.scale;
+        transform.set_if_neq(super::transform(player).with_scale(scale));
+    }
+    if let Some(entity) = body.character_root
+        && let Ok((mut transform, _, _)) = nodes.get_mut(entity)
+    {
+        let scale = transform.scale;
+        transform.set_if_neq(super::transform(root).with_scale(scale));
+    }
+    let scale = Vec3::splat(joint_scale);
+    for (joint, row) in body.posed[character].iter().zip(joints) {
+        if let Ok((mut transform, _, _)) = nodes.get_mut(*joint) {
+            transform.set_if_neq(super::transform(row.pose()).with_scale(scale));
+        }
+    }
 }
 
 pub(crate) fn sync(
@@ -318,43 +418,25 @@ pub(crate) fn sync(
     slots: OutfitQuery,
     bound: BoundQuery,
     mut body: ResMut<PlayerBody>,
-    mut nodes: Query<(
-        &mut Transform,
-        &mut Visibility,
-        Has<MeshMaterial3d<SourceMaterial>>,
-    )>,
+    mut nodes: NodeQuery,
 ) {
     if !visuals.bound {
         return;
     }
     let Some(scene) = body.scene else {
-        let asset = reference.0.clothing.characters[0].asset;
-        let Some(gltf) = visuals
-            .gltfs
-            .iter()
-            .find(|(id, _)| *id == asset)
-            .and_then(|(_, handle)| gltfs.get(handle))
-        else {
-            return;
-        };
-        let scene = commands
-            .spawn((
-                WorldAssetRoot(gltf.scenes[0].clone()),
-                Transform::default(),
-                Visibility::Hidden,
-            ))
-            .observe(bind)
-            .id();
-        body.scene = Some(scene);
+        if let Some(scene) = spawn_instance(&mut commands, &reference.0, &visuals, &gltfs) {
+            commands.entity(scene).observe(bind);
+            body.scene = Some(scene);
+        }
         return;
     };
-    let Some(player) = body.player else {
+    if body.bound.player.is_none() {
         return;
-    };
+    }
     // Show the body after its source materials replace the glTF materials.
     if !body.shown {
         if !materials_bound(
-            &body.primitives,
+            &body.bound.primitives,
             |p| nodes.get(p).is_ok_and(|(_, _, source)| source),
             &bound,
         ) {
@@ -366,7 +448,7 @@ pub(crate) fn sync(
         dress(
             &mut commands,
             &outfit,
-            &body.primitives,
+            &body.bound.primitives,
             outfit.model == MODEL_SHADOW,
             &slots,
             &materials,
@@ -383,22 +465,14 @@ pub(crate) fn sync(
             },
         );
     }
-    if let Ok((mut transform, _, _)) = nodes.get_mut(player) {
-        let scale = transform.scale;
-        let pose = drive.rendered_body_pose(frame.frame.state.body_pose.pose());
-        transform.set_if_neq(super::transform(pose).with_scale(scale));
-    }
     let state = &frame.frame.state;
-    if let Some(root) = body.character_root
-        && let Ok((mut transform, _, _)) = nodes.get_mut(root)
-    {
-        let scale = transform.scale;
-        transform.set_if_neq(super::transform(state.body_root.pose()).with_scale(scale));
-    }
-    let scale = Vec3::splat(state.joint_scale);
-    for (joint, row) in body.posed[outfit.character].iter().zip(&frame.frame.joints) {
-        if let Ok((mut transform, _, _)) = nodes.get_mut(*joint) {
-            transform.set_if_neq(super::transform(row.pose()).with_scale(scale));
-        }
-    }
+    pose_instance(
+        &body.bound,
+        &mut nodes,
+        drive.rendered_body_pose(state.body_pose.pose()),
+        state.body_root.pose(),
+        state.joint_scale,
+        &frame.frame.joints,
+        outfit.character,
+    );
 }

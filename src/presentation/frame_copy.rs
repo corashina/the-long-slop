@@ -1,4 +1,4 @@
-//! Persistent fullscreen copy for the final display.
+//! Persistent fullscreen copies: the final display and the mirror images.
 use bevy::prelude::*;
 use bevy::render::{
     render_resource::{binding_types::*, *},
@@ -18,6 +18,7 @@ impl FrameCopy {
         shader: Handle<Shader>,
         source: &TextureView,
         format: TextureFormat,
+        entry: &'static str,
     ) -> Self {
         let layout = BindGroupLayoutDescriptor::new(
             "source_frame_copy",
@@ -39,7 +40,7 @@ impl FrameCopy {
             },
             fragment: Some(FragmentState {
                 shader,
-                entry_point: Some("display_copy".into()),
+                entry_point: Some(entry.into()),
                 targets: vec![Some(ColorTargetState {
                     format,
                     blend: None,

@@ -1,14 +1,16 @@
 use super::lighting_scene::PROBE_COUNT;
 use simulation::boundary::StateBlock;
 // One main-world view snapshot for raster, culling, and shadow fitting.
-use super::surface_views::{PROBE_START, VIEW_COUNT, WORLD_VIEWS};
+use super::surface_views::{
+    MIRROR_EXTENT, MIRROR_START, PROBE_START, VIEW_COUNT, WORLD_VIEWS, mirror_view, probe_view,
+};
 use super::{
     lighting_assets::LightingAssets, lighting_scene::SourceSceneLighting,
     readiness::RendererStateHandle, surface_views::SourceSurfaceView,
 };
 use crate::reference::{
     reflections::{
-        ProbeJob, ProbeSchedule, capture_view_from_world, pending_probe_index, prepare_probe_face,
+        ProbeJob, ProbeSchedule, capture_view_from_world, next_probe_index, prepare_probe_face,
     },
     shadow_planes::{CullPlanes, implicit_cull_planes},
 };
@@ -79,6 +81,18 @@ impl SourceViewClock {
     pub fn main_token(&self) -> u32 {
         self.main_token
     }
+    /// The slot of the active capture. Its probe must not change.
+    pub(crate) fn probe_index(&self) -> usize {
+        self.probe_index
+    }
+    pub(crate) fn probe_published(&self, index: usize) -> bool {
+        self.probe[index].published()
+    }
+    /// A new probe in a slot starts unpublished. Only idle slots may reset.
+    pub(crate) fn reset_probe(&mut self, index: usize) {
+        debug_assert_ne!(index, self.probe_index);
+        self.probe[index] = ProbeSchedule::default();
+    }
     fn probe_job(&self, enabled: [bool; PROBE_COUNT]) -> Option<ProbeJob> {
         self.probe[self.probe_index].pending_job(enabled[self.probe_index])
     }
@@ -121,8 +135,17 @@ impl SourceViewClock {
                 .checked_add(1)
                 .ok_or("Source probe job token exhausted")?;
         }
-        // Each probe captures once per scene. A published probe keeps its cubemap.
-        let next = pending_probe_index(self.probe_index, &self.probe, probe_enabled);
+        // Enabled probes capture in turn. A published probe keeps its cubemap.
+        let current = self.probe_index;
+        let next = if published
+            || self.probe[current]
+                .pending_job(probe_enabled[current])
+                .is_none()
+        {
+            next_probe_index(current, probe_enabled)
+        } else {
+            current
+        };
         if next != self.probe_index {
             self.probe_index = next;
             if !published {
@@ -187,7 +210,8 @@ impl SourceViewFrame {
             source
         })
     }
-    pub fn skip_probe_preparation(&self, index: usize) -> bool {
+    /// A probe face or mirror view without a snapshot prepares and draws nothing this frame.
+    pub fn skip_preparation(&self, index: usize) -> bool {
         index >= PROBE_START && self.views[index].is_none()
     }
     pub(crate) fn render_identity(&self) -> Option<crate::render_readiness::RenderIdentity> {
@@ -276,7 +300,7 @@ fn sync_probe_cameras(
     }
     let active = clock.probe_cameras_active(activation.enabled);
     for (view, mut camera) in &mut views {
-        if (PROBE_START..VIEW_COUNT).contains(&view.index) && camera.is_active != active {
+        if probe_view(view.index) && camera.is_active != active {
             camera.is_active = active;
         }
     }
@@ -298,6 +322,7 @@ pub(crate) fn snapshot(
     settings: (
         Res<crate::render_scale::SceneScaleSetting>,
         Res<super::shadow_quality::ShadowQuality>,
+        Res<super::mirrors::MirrorFrame>,
     ),
     views: Query<(&SourceSurfaceView, &Camera, &GlobalTransform)>,
     sky_view: Query<(&Camera, &GlobalTransform), With<super::frame_graph::SourceSkyCamera>>,
@@ -310,7 +335,7 @@ pub(crate) fn snapshot(
 ) {
     frame.session = sim.frame.state.session;
     frame.selection_revision = sim.frame.state.selection_revision;
-    let (scale, shadow_quality) = settings;
+    let (scale, shadow_quality, mirrors) = settings;
     frame.scale = scale.0;
     frame.shadow_quality = *shadow_quality;
     frame.scene = epoch.0;
@@ -352,7 +377,8 @@ pub(crate) fn snapshot(
             return;
         }
         identities[view.index] = true;
-        if view.index >= PROBE_START && !probes_active {
+        // Mirror views take their pose and extent from the mirror frame.
+        if mirror_view(view.index) || (probe_view(view.index) && !probes_active) {
             continue;
         }
         if !camera.is_active {
@@ -412,6 +438,18 @@ pub(crate) fn snapshot(
     let job = probe_job;
     let fov_degrees = sim.frame.state.fov_degrees;
     let mut snapshots: [Option<ViewSnapshot>; VIEW_COUNT] = std::array::from_fn(|index| {
+        if mirror_view(index) {
+            let view = mirrors.views[index - MIRROR_START]?;
+            return Some(camera_snapshot(
+                UVec2::splat(MIRROR_EXTENT),
+                view.world_from_view.inverse(),
+                view.near,
+                view.far,
+                view.fov_degrees,
+                view.mask,
+                assets.record.shadows.distance,
+            ));
+        }
         if index >= PROBE_START && !prepare_probe_face(job, index - PROBE_START, warmup) {
             return None;
         }
@@ -427,7 +465,7 @@ pub(crate) fn snapshot(
                 assets.record.shadows.distance,
             )
         } else {
-            let p = &assets.record.probes[clock.probe_index];
+            let p = &assets.record.probes[0];
             (p.near, p.far, 90., p.mask, p.shadow_distance)
         };
         let view = if index < WORLD_VIEWS {
@@ -544,7 +582,8 @@ pub fn apply_render_snapshot(
             view.world_from_view = GlobalTransform::from(snapshot.view_from_world.inverse());
             view.clip_from_view = snapshot.raster_projection;
             view.clip_from_world = Some(snapshot.raster_projection * snapshot.view_from_world);
-            view.invert_culling = state.index < WORLD_VIEWS;
+            // World and mirror poses are converted transforms. Probe faces are source matrices.
+            view.invert_culling = !probe_view(state.index);
             view.viewport = UVec4::new(0, 0, snapshot.extent.x, snapshot.extent.y);
             state.clip_from_world = snapshot.raster_projection * snapshot.view_from_world;
             state.near = snapshot.near;
@@ -561,11 +600,13 @@ pub fn install(app: &mut App) {
         .init_resource::<SourceViewClock>()
         .init_resource::<SourceSceneEpoch>()
         .init_resource::<super::lighting_scene::ProbeActivation>()
+        .init_resource::<super::reflections::Reflections>()
         .init_resource::<SourceViewFrame>()
         .init_resource::<super::temporal::TemporalView>()
         .add_plugins(bevy::render::extract_resource::ExtractResourcePlugin::<
             SourceViewFrame,
         >::default())
+        .add_systems(Update, super::reflections::poll)
         .add_systems(
             PostUpdate,
             sync_probe_cameras
@@ -725,8 +766,9 @@ pub(crate) fn append_probe_required_views(
     light_mask: u32,
 ) -> Result<(), crate::reference::ReferenceError> {
     const _: () = assert!(crate::world::REQUIRED_VIEW_CAPACITY == WORLD_VIEWS + PROBE_COUNT * 6);
+    // Every car probe shares the capture settings of the one probe record.
+    let probe = &records[0];
     views.append_probe_faces(enabled, |index, face| {
-        let probe = &records[index];
         let snapshot = camera_snapshot(
             UVec2::splat(probe.resolution),
             Mat4::from_cols_array_2d(&capture_view_from_world(face, positions[index].to_array())),

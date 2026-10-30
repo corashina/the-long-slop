@@ -4,7 +4,7 @@ use super::{
     lighting_scene::{PROBE_COUNT, SourceSceneLighting},
     materials::MaterialLoading,
     readiness::RendererStateHandle,
-    render_targets::{HDR_FORMAT, ProbeTargets, SurfaceTargets},
+    render_targets::{HDR_FORMAT, ProbeTargets, PublishedProbes, SurfaceTargets},
     source_lighting::SourceViewLighting,
     stained_glass::{GlassViewUniform, SourceGlassView},
     surface_graph::SurfaceViewTargets,
@@ -22,15 +22,27 @@ use bevy::{ecs as bevy_ecs, prelude::*};
 
 pub const WORLD_VIEWS: usize = 1;
 pub const PROBE_START: usize = WORLD_VIEWS;
-pub const VIEW_COUNT: usize = PROBE_START + 6;
+pub const MIRROR_START: usize = PROBE_START + 6;
+/// `MirrorsUpdate` renders the 5 nearest mirrors.
+pub const MIRROR_COUNT: usize = 5;
+pub const VIEW_COUNT: usize = MIRROR_START + MIRROR_COUNT;
+/// Side of the square `defMirrorTexture`.
+pub const MIRROR_EXTENT: u32 = 256;
+
+pub fn probe_view(index: usize) -> bool {
+    (PROBE_START..MIRROR_START).contains(&index)
+}
+pub fn mirror_view(index: usize) -> bool {
+    (MIRROR_START..VIEW_COUNT).contains(&index)
+}
 
 /// Source `playermodeloutfitscript.SetDistance`: `player_model` `_Dist` is 0.35 while the player camera draws.
-/// Other views, such as the probe faces, draw it with 0.
+/// Other views, such as the probe faces and mirrors, draw it with 0.
 pub fn player_dist(index: usize) -> f32 {
     if index < WORLD_VIEWS { 0.35 } else { 0. }
 }
 
-/// The world view precedes six probe faces.
+/// The world view precedes six probe faces and the mirrors.
 /// Shadow values come from each view's source fit and sun shadow preparation.
 #[derive(Component, Clone, Copy)]
 pub struct SourceSurfaceView {
@@ -58,6 +70,7 @@ impl ExtractComponent for SourceSurfaceView {
 pub struct SurfaceResources {
     pub targets: SurfaceTargets,
     pub probes: [ProbeTargets; PROBE_COUNT],
+    published: PublishedProbes,
     probe_sampler: Sampler,
     shadow_compare: Sampler,
 }
@@ -70,9 +83,11 @@ impl SurfaceResources {
         samples: u32,
         atlas: u32,
     ) -> Result<Self, String> {
+        let published = PublishedProbes::new(device, queue);
         Ok(Self {
             targets: SurfaceTargets::new(device, width, height, samples, atlas)?,
-            probes: std::array::from_fn(|_| ProbeTargets::new(device, queue)),
+            probes: std::array::from_fn(|slot| ProbeTargets::new(device, &published, slot)),
+            published,
             probe_sampler: device.create_sampler(&SamplerDescriptor {
                 label: Some("source_probe_sampler"),
                 mag_filter: FilterMode::Linear,
@@ -150,16 +165,20 @@ pub(crate) fn prepare_views(
         extents[source.index] = Some(view.viewport.zw());
     }
     let Some(main) = extents[0] else { return };
-    if extents[PROBE_START..]
+    if extents[PROBE_START..MIRROR_START]
         .iter()
         .flatten()
         .any(|size| *size != UVec2::splat(64))
+        || extents[MIRROR_START..]
+            .iter()
+            .flatten()
+            .any(|size| *size != UVec2::splat(MIRROR_EXTENT))
     {
         status.fail("Source surface view extents disagree".into());
         return;
     }
     if (PROBE_START..VIEW_COUNT)
-        .any(|index| !frame.skip_probe_preparation(index) && extents[index].is_none())
+        .any(|index| !frame.skip_preparation(index) && extents[index].is_none())
     {
         return;
     }
@@ -213,7 +232,7 @@ pub(crate) fn prepare_views(
         return;
     };
     for (entity, source, _, _, bound, binding, glass, sun_shadow) in &mut views {
-        if frame.skip_probe_preparation(source.index) {
+        if frame.skip_preparation(source.index) {
             continue;
         }
         let target = &resources.targets.views[source.index];
@@ -257,13 +276,11 @@ pub(crate) fn prepare_views(
             binding.write(uniform, &device, &queue);
             continue;
         }
-        let cubes = std::array::from_fn(|index| {
-            if source.index < PROBE_START {
-                &resources.probes[index].published_view
-            } else {
-                &resources.probes[index].capture_sample_view
-            }
-        });
+        let cubes = if !probe_view(source.index) {
+            &resources.published.view
+        } else {
+            &resources.published.capture_view
+        };
         // Only MSAA views keep the resolved camera depth free of the transparent attachment.
         let camera_depth = target
             .multisample_depth
