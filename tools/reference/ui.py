@@ -109,7 +109,7 @@ def export_ui(source, output, library):
         layout(label_of(go),role,True)
     layout(source.get('level1',67604),'back',True)
     fields={'use':'TextE','pickup':'TextPickup','mount':'TextMount','fill':'LMB',
-            'carry':'TextMoveRotateHelp','fluid':'TTankCap','reticle':'GCDef','foot':'TextCF1','driving':'TextCC1'}
+            'carry':'TextMoveRotateHelp','help':'ThelpText','fluid':'TTankCap','reticle':'GCDef','foot':'TextCF1','driving':'TextCC1'}
     for role,field in fields.items():layout(source.resolve(menu,md[field]),role)
     icons={}
     # mainscript.CrossHairStuff sets these sprites on the GCE, GCAdjust, GCMMB, GCF and GCLMB images.
@@ -165,12 +165,5 @@ def export_ui(source, output, library):
         sprite(source.get(*identity), 'inventory-item')
     for identity in sorted(source.crosshair_icons):
         sprite(source.get(*identity), 'crosshair')
-    from .hose import hose_prompts
-    from .caps import word
-    from .computer import computer_prompts
-    # fpscontroller ammo texts: R (canReload, ls.w.reload) and E (ls.w.unload).
-    ammo_prompts={'reload':word(source,'reload'),'unload':word(source,'unload')}
-    # fpscontroller binoculars: LMB use, MMB focus while used.
-    binocular_prompts={'use':word(source,'use'),'focus':word(source,'focus')}
-    return {'crosshair_colors':crosshair_colors,'hose_prompts':hose_prompts(source),'ammo_prompts':ammo_prompts,'binocular_prompts':binocular_prompts,'computer_prompts':computer_prompts(source),'need_sliders':need_sliders,'sprites':sprites,'pairs':pairs,'icons':icons,'layouts':layouts,
+    return {'crosshair_colors':crosshair_colors,'need_sliders':need_sliders,'sprites':sprites,'pairs':pairs,'icons':icons,'layouts':layouts,
             'overlay_color':[180/255,128/255,70/255,64/255],'frame_color':[180/255,128/255,70/255,1.]}

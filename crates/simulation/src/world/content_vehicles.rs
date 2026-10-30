@@ -253,6 +253,9 @@ pub(super) fn bind(
         }
         powertrain.register_gauge(part);
     }
+    if let Some(owner) = content.item {
+        bind_help_texts(owner, instance, prototype, interaction);
+    }
     let key = ObjectKey::Generated(content.content.placement.id.clone());
     if let (Some(owner), Some(blood)) = (
         content.item,
@@ -281,6 +284,37 @@ pub(super) fn bind(
         }
     }
     Ok(())
+}
+
+/// The help box colliders of one copy: the colliders at and below each `helptextscript` node.
+fn bind_help_texts(
+    owner: ItemId,
+    instance: &StructureInstance,
+    prototype: &WorldPrototypeReference,
+    interaction: &mut InteractionState,
+) {
+    for help in &prototype.help_texts {
+        let bits = crate::interaction::help_texts::bits(help);
+        for (source, handle) in &instance.colliders {
+            let below = prototype
+                .colliders
+                .iter()
+                .find(|c| &c.source == source)
+                .is_some_and(|c| {
+                    let mut node = Some(c.node);
+                    while let Some(n) = node {
+                        if n == help.node {
+                            return true;
+                        }
+                        node = prototype.nodes[n as usize].parent;
+                    }
+                    false
+                });
+            if below {
+                interaction.help_texts.add(*handle, owner, bits);
+            }
+        }
+    }
 }
 
 /// The car blood trigger of one car copy. Colliders at and below the trigger node wash it.
@@ -604,6 +638,7 @@ pub(super) fn retire(
         retire_parts(item, items, powertrain, changes);
     }
     if let Some(owner) = content.item {
+        interaction.help_texts.remove_owner(owner);
         interaction
             .cleaning
             .remove_generated_wash(WashOwner::Car(owner));

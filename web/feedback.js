@@ -1,23 +1,27 @@
 import {applyLayout} from './ui-layout.js';
 import {boundNames} from './bindings.js';
+import {HELP,helpText} from './help-text.js';
 export function formatGear(gear){return gear<0?'R':gear===0?'N':String(gear);}
 /** Item prompt bits (Rust `ItemPrompt`). */
 export const PROMPT={ATTACH:1,COIL:2,DRAIN:4,RELOAD:8,UNLOAD:16,LOOK:32,FOCUS:64};
 /** Computer prompt bits (Rust `ComputerPrompt`). TYPING routes the keyboard to the computer. */
 export const COMPUTER={TURN_ON:1,TURN_OFF:2,USE:4,CONNECT:8,DISCONNECT:16,TYPING:32};
 export const ACTION={USE:1,DOOR:2,PICKUP:4,DROP:8,MOUNT:16,DISMOUNT:32,FILL:64,TUNE:128,ENTER:256,EXIT:512,SWITCH:1024,PUSH:2048,GRIP:4096,THROW:8192,ROTATE:32768,RELEASE_GRIP:65536,PRIMARY_SWITCH:131072,SCROLL:262144,CONSUME:524288,DRINK:1048576,HELD_SWITCH:2097152,WASH:4194304,SCRUB:8388608,EQUIP:16777216,RECENTER:33554432,RELEASE_EQUIPMENT:67108864,RELEASE_EQUIPMENT_SEATED:134217728,TAKE_ONE:268435456,SMOKE:536870912,PUT_ON:1073741824,CRANK:2147483648};
-const FLUIDS=['Gas','Oil','Alcohol','Water','Blood','Diesel'];
-export function formatRadio(r){if(r.context===11&&Number.isFinite(r.radioVolume))return 'Volume: '+Math.round(r.radioVolume*10).toString().padStart(2,'0');if(r.context===12&&Number.isFinite(r.radioFrequency))return (r.radioAm?'AM '+r.radioFrequency.toFixed(0).padStart(3,'0'):'FM '+r.radioFrequency.toFixed(1).padStart(4,'0'));return '';}
+// Source `mainscript.fluids[type].lname` words.
+const FLUIDS=['gas','oil','alcohol','water','blood','diesel'];
+// `word` returns a source `ls.w` word by name.
+export function formatRadio(r,word){if(r.context===11&&Number.isFinite(r.radioVolume))return word('volume')+': '+Math.round(r.radioVolume*10).toString().padStart(2,'0');if(r.context===12&&Number.isFinite(r.radioFrequency))return (r.radioAm?word('am')+' '+r.radioFrequency.toFixed(0).padStart(3,'0'):word('fm')+' '+r.radioFrequency.toFixed(1).padStart(4,'0'));return '';}
 function volume(value){return (Math.round(value*10)/10).toFixed(1).replace(/\.0$/,'');}
-export function formatTank(r) {
+// Source `GetCapString`. `index` returns the word of an `ls.w` index.
+export function formatTank(r,word,index) {
  if(r.noText)return '';
  if(r.context===14)return Math.round(r.amount).toString();
- const prefix=r.hasName?r.fluidName+':\n':'';
- if(r.amount<=Math.fround(.05))return prefix+'empty';
+ const prefix=r.hasName?index(r.fluidWord)+':\n':'';
+ if(r.amount<=Math.fround(.05))return prefix+word('empty');
  const amount=volume(r.amount),capacity=volume(r.capacity);
- let result=prefix+(amount===capacity?amount+' L (full)':amount+' / '+capacity+' L');
+ let result=prefix+(amount===capacity?amount+' '+word('liter')+' '+word('full'):amount+' / '+capacity+' '+word('liter'));
  // Source GetCapString follows the tank's fluid list order: type + 1 per 4 bits, 0 ends.
- for(let order=r.fluidOrder??0;order;order>>>=4){const i=(order&15)-1,percent=Math.fround(Math.fround(r.quantities[i]/r.amount)*100);if(percent>=1)result+='\n'+Math.round(percent)+'% '+FLUIDS[i];}
+ for(let order=r.fluidOrder??0;order;order>>>=4){const i=(order&15)-1,percent=Math.fround(Math.fround(r.quantities[i]/r.amount)*100);if(percent>=1)result+='\n'+Math.round(percent)+word('percent')+' '+word(FLUIDS[i]);}
  return result;
 }
 /** Rust `Crosshair` layer bits. E, adjust and F hold a sprite choice. */
@@ -38,20 +42,23 @@ export function pickupWeightAlphas(weight){
  return [inverse(0.9,0.5,weight),inverse(0.5,0,weight)];
 }
 export class FeedbackState {
- constructor(){this.visible=false;this.enabled=true;this.active=false;this.fluidText='';this.fluidName=undefined;this.capacity=undefined;this.amountKey=undefined;this.percentKeys=[-1,-1,-1,-1,-1,-1];this.hasName=undefined;this.noText=undefined;this.empty=undefined;this.lmbUse=false;this.actions=-1;this.context=-1;this.carrying=false;this.notice='';this.throwCharge=0;this.throwActive=false;this.prompts=0;this.computer=0;this.crosshair=0;this.weight=1;}
+ constructor(word=name=>name,index=String){this.word=word;this.index=index;this.record=null;this.help=0;this.visible=false;this.enabled=true;this.active=false;this.fluidText='';this.fluidWord=undefined;this.capacity=undefined;this.amountKey=undefined;this.percentKeys=[-1,-1,-1,-1,-1,-1];this.hasName=undefined;this.noText=undefined;this.empty=undefined;this.lmbUse=false;this.actions=-1;this.context=-1;this.carrying=false;this.notice='';this.throwCharge=0;this.throwActive=false;this.prompts=0;this.computer=0;this.crosshair=0;this.weight=1;}
+ // Formats the fluid text again with the current words.
+ relabel(){this.amountKey=undefined;if(this.record)this.update(this.record);}
  setVisible(active){this.active=active;this.visible=active&&this.enabled;}
  toggle(){this.enabled=!this.enabled;this.visible=this.active&&this.enabled;}
  update(r){
+  this.record=r;
   const amountKey=Math.round(r.amount*(r.context===14?1:10)),empty=r.amount<=Math.fround(.05);
-  let changed=r.context!==this.context||amountKey!==this.amountKey||r.capacity!==this.capacity||r.fluidName!==this.fluidName||r.hasName!==this.hasName||r.noText!==this.noText||empty!==this.empty||r.fluidOrder!==this.fluidOrder;
+  let changed=r.context!==this.context||amountKey!==this.amountKey||r.capacity!==this.capacity||r.fluidWord!==this.fluidWord||r.hasName!==this.hasName||r.noText!==this.noText||empty!==this.empty||r.fluidOrder!==this.fluidOrder;
   for(let i=0;i<6;i++){const percent=r.amount>0?Math.fround(Math.fround(r.quantities[i]/r.amount)*100):0;const key=percent>=1?Math.round(percent):-1;if(this.percentKeys[i]!==key){changed=true;this.percentKeys[i]=key;}}
   const radioChanged=r.radioAm!==this.radioAm||r.radioFrequency!==this.radioFrequency||r.radioVolume!==this.radioVolume;
-  if(changed||radioChanged){this.fluidText=r.context===11||r.context===12?formatRadio(r):formatTank(r);this.amountKey=amountKey;this.empty=empty;this.capacity=r.capacity;this.fluidName=r.fluidName;this.hasName=r.hasName;this.noText=r.noText;this.fluidOrder=r.fluidOrder;}
+  if(changed||radioChanged){this.fluidText=r.context===11||r.context===12?formatRadio(r,this.word):formatTank(r,this.word,this.index);this.amountKey=amountKey;this.empty=empty;this.capacity=r.capacity;this.fluidWord=r.fluidWord;this.hasName=r.hasName;this.noText=r.noText;this.fluidOrder=r.fluidOrder;}
   this.radioAm=r.radioAm;this.radioFrequency=r.radioFrequency;this.radioVolume=r.radioVolume;
   const detailChanged=r.throwCharge!==this.throwCharge||r.throwActive!==this.throwActive;
   this.throwCharge=r.throwCharge;this.throwActive=r.throwActive;
-  const actionsChanged=r.actions!==this.actions||r.context!==this.context||r.carrying!==this.carrying||r.notice!==this.notice||r.lmbUse!==this.lmbUse||r.prompts!==this.prompts||r.computer!==this.computer||r.crosshair!==this.crosshair||r.weight!==this.weight;
-  this.lmbUse=r.lmbUse;this.prompts=r.prompts;this.computer=r.computer;this.crosshair=r.crosshair;this.weight=r.weight;this.actions=r.actions;this.context=r.context;this.carrying=r.carrying;this.notice=r.notice;
+  const actionsChanged=r.actions!==this.actions||r.context!==this.context||r.carrying!==this.carrying||r.notice!==this.notice||r.lmbUse!==this.lmbUse||r.prompts!==this.prompts||r.computer!==this.computer||r.crosshair!==this.crosshair||r.weight!==this.weight||r.help!==this.help;
+  this.lmbUse=r.lmbUse;this.prompts=r.prompts;this.computer=r.computer;this.crosshair=r.crosshair;this.weight=r.weight;this.help=r.help;this.actions=r.actions;this.context=r.context;this.carrying=r.carrying;this.notice=r.notice;
   return changed||radioChanged||actionsChanged||detailChanged;
  }
 }
@@ -64,53 +71,53 @@ export function oldCrosshairColor(bits,colors){
 }
 const css=([r,g,b,a])=>`rgba(${r*255},${g*255},${b*255},${a})`;
 // `settings` is the settings store: `BHelp`, `BCrosshair`, `BOldCrosshair` and `FCrosshairScale`.
-// `actions` is the action index by source name (`actionIndex`).
-export function createFeedback(ui,manifest,settings,actions) {
- const state=new FeedbackState(),root=document.querySelector('#hud'),icon=document.querySelector('#crosshair'),fluid=document.querySelector('#fluid-text'),carry=document.querySelector('#carry-help'),notice=document.querySelector('#action-notice'),charge=document.querySelector('#throw-charge'),level=document.querySelector('#throw-level');
+// `actions` is the action index by source name (`actionIndex`). `language` is the word table (`createLanguage`).
+export function createFeedback(ui,manifest,settings,actions,language) {
+ const state=new FeedbackState(language.word,language.index),root=document.querySelector('#hud'),icon=document.querySelector('#crosshair'),fluid=document.querySelector('#fluid-text'),carry=document.querySelector('#carry-help'),helpNode=document.querySelector('#help-text'),notice=document.querySelector('#action-notice'),charge=document.querySelector('#throw-charge'),level=document.querySelector('#throw-level');
  const gear=document.querySelector('#driving-gear');let lastGear,wasSeated;
  const rows=[
-  [ACTION.USE,'use','{use}: Open/Close'],
-  [ACTION.DOOR,'door','{lmb}+[Mouse]: Open/Close'],
-  [ACTION.PICKUP,'pickup','{pickup}: Pick Up'],
+  [ACTION.USE,'use','{use}: <openclose>'],
+  [ACTION.DOOR,'door','{lmb}+[<mouse>]: <openclose>'],
+  [ACTION.PICKUP,'pickup','{pickup}: <pickup>'],
   [ACTION.DROP,'drop','{pickup}: Drop'],
-  [ACTION.MOUNT,'mount','{mountdismount}: Mount'],
-  [ACTION.DISMOUNT,'dismount','{mountdismount}: Dismount'],
-  [ACTION.FILL,'fill','{lmb}: Fill'],
-  [ACTION.CONSUME,'eat','{lmb}: Eat'],
-  [ACTION.SMOKE,'smoke','{lmb}: Smoke'],
-  [ACTION.TAKE_ONE,'takeOne','{use}: Take one'],
-  [ACTION.PUT_ON,'putOn','Tap {equiprecenter}: put on'],
-  [ACTION.DRINK,'drink','Hold {lmb}: Drink'],
-  [ACTION.TUNE,'tune','{use}+[Mouse] / {scrollup}: Open/Close'],
-  [ACTION.ENTER,'enter','Release {use}: Sit'],
-  [ACTION.EXIT,'exit','{use}: Get out/stand'],
-  [ACTION.SWITCH,'switch','{use}: Switch'],
-  [ACTION.PRIMARY_SWITCH,'primary','{use} / {lmb}: Switch'],
-  [ACTION.PUSH,'push','{push}: Push'],
+  [ACTION.MOUNT,'mount','{mountdismount}: <mount>'],
+  [ACTION.DISMOUNT,'dismount','{mountdismount}: <dismount>'],
+  [ACTION.FILL,'fill','{lmb}: <fill>'],
+  [ACTION.CONSUME,'eat','{lmb}: <eat>'],
+  [ACTION.SMOKE,'smoke','{lmb}: <eatsmoke>'],
+  [ACTION.TAKE_ONE,'takeOne','{use}: <takeone>'],
+  [ACTION.PUT_ON,'putOn','Tap {equiprecenter}: <puton>'],
+  [ACTION.DRINK,'drink','Hold {lmb}: <drink>'],
+  [ACTION.TUNE,'tune','{use}+[<mouse>] / {scrollup}: <openclose>'],
+  [ACTION.ENTER,'enter','Release {use}: <sit>'],
+  [ACTION.EXIT,'exit','{use}: <getoutstand>'],
+  [ACTION.SWITCH,'switch','{use}: <turnSwitch>'],
+  [ACTION.PRIMARY_SWITCH,'primary','{use} / {lmb}: <turnSwitch>'],
+  [ACTION.PUSH,'push','{push}: <push>'],
   [ACTION.GRIP,'grip','{push}: Grip'],
-  [ACTION.RELEASE_GRIP,'release','{forward}{left}{back}{right}: Push / {push}: Release'],
+  [ACTION.RELEASE_GRIP,'release','{forward}{left}{back}{right}: <push> / {push}: Release'],
   [ACTION.THROW,'throw','{pickup}: Drop / hold to throw'],
-  [ACTION.SCROLL,'scroll','{scrollup}: Open/Close'],
+  [ACTION.SCROLL,'scroll','{scrollup}: <openclose>'],
   [ACTION.HELD_SWITCH,'heldSwitch','{lmb}: Switch flashlight'],
-  [ACTION.WASH,'wash','{lmb}: Wash'],
-  [ACTION.SCRUB,'scrub','{lmb}: Scrub'],
-  [ACTION.EQUIP,'equip','Tap {equiprecenter}: equip'],
+  [ACTION.WASH,'wash','{lmb}: <wash>'],
+  [ACTION.SCRUB,'scrub','{lmb}: <scrub>'],
+  [ACTION.EQUIP,'equip','Tap {equiprecenter}: <equip>'],
   [ACTION.RECENTER,'recenter','Hold {equiprecenter}: recenter'],
   [ACTION.RELEASE_EQUIPMENT,'releaseEquipment','{equiprecenter} or {mmb}: release'],
   [ACTION.RELEASE_EQUIPMENT_SEATED,'releaseEquipmentSeated','{mmb}: release'],
-  [ACTION.CRANK,'crank','{use}+[Mouse]: Crank'],
-  [0,'hoseAttach','{mountdismount}: '+ui.hose_prompts.attach,PROMPT.ATTACH],
-  [0,'coilUp','{reload}: '+ui.hose_prompts.coilup,PROMPT.COIL],
-  [0,'drain','{lmb}: '+ui.hose_prompts.drain,PROMPT.DRAIN],
-  [0,'reload','{reload}: '+ui.ammo_prompts.reload,PROMPT.RELOAD],
-  [0,'unload','{use}: '+ui.ammo_prompts.unload,PROMPT.UNLOAD],
-  [0,'binocularsUse','{lmb}: '+ui.binocular_prompts.use,PROMPT.LOOK],
-  [0,'binocularsFocus','{mmb}: '+ui.binocular_prompts.focus,PROMPT.FOCUS],
-  [0,'computerTurnOn','{reload}: '+ui.computer_prompts.turnon,0,COMPUTER.TURN_ON],
-  [0,'computerTurnOff','{reload}: '+ui.computer_prompts.turnoff,0,COMPUTER.TURN_OFF],
-  [0,'computerUse','{lmb}: '+ui.computer_prompts.use,0,COMPUTER.USE],
-  [0,'computerConnect','{use}: '+ui.computer_prompts.connect,0,COMPUTER.CONNECT],
-  [0,'computerDisconnect','{use}: '+ui.computer_prompts.disconnect,0,COMPUTER.DISCONNECT]
+  [ACTION.CRANK,'crank','{use}+[<mouse>]: <crank>'],
+  [0,'hoseAttach','{mountdismount}: <stickin>',PROMPT.ATTACH],
+  [0,'coilUp','{reload}: <coilup>',PROMPT.COIL],
+  [0,'drain','{lmb}: <drain>',PROMPT.DRAIN],
+  [0,'reload','{reload}: <reload>',PROMPT.RELOAD],
+  [0,'unload','{use}: <unload>',PROMPT.UNLOAD],
+  [0,'binocularsUse','{lmb}: <use>',PROMPT.LOOK],
+  [0,'binocularsFocus','{mmb}: <focus>',PROMPT.FOCUS],
+  [0,'computerTurnOn','{reload}: <turnon>',0,COMPUTER.TURN_ON],
+  [0,'computerTurnOff','{reload}: <turnoff>',0,COMPUTER.TURN_OFF],
+  [0,'computerUse','{lmb}: <use>',0,COMPUTER.USE],
+  [0,'computerConnect','{use}: <connect>',0,COMPUTER.CONNECT],
+  [0,'computerDisconnect','{use}: <disconnect>',0,COMPUTER.DISCONNECT]
  ].map(([bit,role,template,prompt=0,computer=0])=>{const n=document.createElement('p');n.className='action-row';n.hidden=true;root.append(n);return {bit,prompt,computer,role,template,n,family:0,top:0,line:0,offset:-1};});
  const named=Object.fromEntries(rows.map(r=>[r.role,r.n]));
  // fpscontroller GCWeapon: the gun crosshair sprite tinted by its color. It is one crosshair layer.
@@ -123,19 +130,23 @@ export function createFeedback(ui,manifest,settings,actions) {
  // Source GC and GC2: one sprite, tinted by the target and by the carried weight.
  const old=['old-crosshair','old-crosshair-carry'].map(role=>{const n=document.createElement('div');n.className='old-crosshair';n.hidden=true;const url=ui.urls[ui.layouts[role].sprite];n.style.maskImage=n.style.webkitMaskImage=`url("${url}")`;icon.append(n);return n;});
  function showWeapon(){weapon.hidden=!(weaponIcon&&state.crosshair&CROSSHAIR.WEAPON);}
- let lastLayers=-1,lastOld=-1,lastWeight=-1,lastFluid='',lastNotice='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='',lastPrimary='',lastCrank='';
- // Hint templates: `{action}` is the bound key name of a source action in brackets. They fill once per binding change.
- const templates={translationHelp:'{rmb}+[Mouse]: Move\n{scrollup}: Distance\n{looklean}+{scrollup}: Posture',
-  rotationHelp:'{rmb}+[Mouse]: Move\n{mmb}+[Mouse]: Rotate\n{rmb}+{mmb}+[Mouse]: Roll\n{scrollup}: Distance\n{looklean}+{scrollup}: Posture',
-  doorMove:'{lmb}+[Mouse]: Move',doorOpen:'{lmb}+[Mouse]: Open/Close',useLmbSwitch:'{use} / {lmb}: Switch',useSwitch:'{use}: Switch',useOpen:'{use}: Open/Close',
-  tuneLmb:'{use} / {lmb}+[Mouse]: Tune',tune:'{use}+[Mouse]: Tune',tuneOpen:'{use}+[Mouse] / {scrollup}: Open/Close',scrollTune:'{scrollup}: Tune',scrollOpen:'{scrollup}: Open/Close',
-  crankLmb:'{use} / {lmb}+[Mouse]: Crank',crank:'{use}+[Mouse]: Crank'};
+ let lastLayers=-1,lastOld=-1,lastWeight=-1,lastFluid='',lastNotice='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='',lastPrimary='',lastCrank='',lastHelp='';
+ // Bound key names by action, and the driving assist bits (1 auto clutch, 2 auto shift).
+ let names={},assists=0;
+ // Hint templates: `{action}` is the bound key name of a source action in brackets, `<word>` an `ls.w` word.
+ // They fill once per binding or language change.
+ const templates={translationHelp:'{rmb}+[<mouse>]: <move>\n{scrollup}: Distance\n{looklean}+{scrollup}: Posture',
+  rotationHelp:'{rmb}+[<mouse>]: <move>\n{mmb}+[<mouse>]: <rotate>\n{rmb}+{mmb}+[<mouse>]: Roll\n{scrollup}: Distance\n{looklean}+{scrollup}: Posture',
+  doorMove:'{lmb}+[<mouse>]: <move>',doorOpen:'{lmb}+[<mouse>]: <openclose>',useLmbSwitch:'{use} / {lmb}: <turnSwitch>',useSwitch:'{use}: <turnSwitch>',useOpen:'{use}: <openclose>',
+  tuneLmb:'{use} / {lmb}+[<mouse>]: <tune>',tune:'{use}+[<mouse>]: <tune>',tuneOpen:'{use}+[<mouse>] / {scrollup}: <openclose>',scrollTune:'{scrollup}: <tune>',scrollOpen:'{scrollup}: <openclose>',
+  crankLmb:'{use} / {lmb}+[<mouse>]: <crank>',crank:'{use}+[<mouse>]: <crank>'};
  const texts={};
  function fillTexts(){
-  const names=boundNames(settings.values.inputs,actions),fill=t=>t.replace(/\{(\w+)\}/g,(_,a)=>'['+names[a]+']');
+  names=boundNames(settings.values.inputs,actions);
+  const fill=t=>t.replace(/<(\w+)>/g,(_,w)=>language.word(w)).replace(/\{(\w+)\}/g,(_,a)=>'['+names[a]+']');
   for(const row of rows)row.n.textContent=fill(row.template);
   for(const [name,t] of Object.entries(templates))texts[name]=fill(t);
-  lastCarry=lastDoor=lastUse=lastTune=lastScroll=lastPrimary=lastCrank='';
+  lastCarry=lastDoor=lastUse=lastTune=lastScroll=lastPrimary=lastCrank=lastHelp='';
  }
  const counts=new Uint8Array(4);
  const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',eat:'use',smoke:'use',takeOne:'use',putOn:'pickup',drink:'use',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',scroll:'use',heldSwitch:'use',wash:'use',scrub:'use',equip:'pickup',recenter:'pickup',releaseEquipment:'pickup',releaseEquipmentSeated:'pickup',crank:'use',hoseAttach:'mount',coilUp:'use',drain:'use',reload:'use',unload:'use',binocularsUse:'use',binocularsFocus:'use',computerTurnOn:'use',computerTurnOff:'use',computerUse:'use',computerConnect:'use',computerDisconnect:'use'};
@@ -152,6 +163,7 @@ export function createFeedback(ui,manifest,settings,actions) {
   for(const child of pickupChildren){child.style.width=layers[2].style.width;child.style.height=layers[2].style.height;}
   old.forEach((n,i)=>{const [,,width,height]=ui.layouts[i?'old-crosshair-carry':'old-crosshair'].rect;n.style.width=width*scale+'px';n.style.height=height*scale+'px';});
   const fluidBox=applyLayout(fluid,ui.layouts.fluid);fluid.style.top=(fluidBox.y+fluidBox.height/2)+'px';fluid.style.height='auto';fluid.style.width='max-content';fluid.style.left='50%';
+  const helpBox=applyLayout(helpNode,ui.layouts.help);helpNode.style.height='auto';helpNode.style.top=helpBox.y+'px';
   const carryBox=applyLayout(carry,ui.layouts.carry);carry.style.left='auto';carry.style.right='8px';carry.style.width='max-content';carry.style.height='auto';carry.style.top='auto';carry.style.bottom=(innerHeight-carryBox.y-carryBox.height)+'px';
   notice.style.fontSize=ui.layouts.use.font_size*scale+'px';
   charge.style.fontSize=ui.layouts.use.font_size*scale+'px';charge.style.left='50%';charge.style.top=(innerHeight/2+120*scale)+'px';
@@ -179,6 +191,10 @@ export function createFeedback(ui,manifest,settings,actions) {
   if(strength!==lastCharge){level.value=strength;lastCharge=strength;}
   carry.hidden=!help||!state.carrying;const carryText=state.actions&ACTION.ROTATE?texts.rotationHelp:texts.translationHelp;
   if(carryText!==lastCarry){carry.textContent=carryText;lastCarry=carryText;}
+  // Source GhelpText: `BHelp` or `showifmenudisabledtoo`, and a help box under the use ray.
+  const shown=Boolean(state.help)&&(help||Boolean(state.help&HELP.ALWAYS));helpNode.hidden=!shown;
+  const helpLines=shown?helpText(state.help,assists,language.word,names,v.inputs[actions.lookright][0]==='Mouse X'):'';
+  if(helpLines!==lastHelp){helpNode.textContent=helpLines;lastHelp=helpLines;}
   // Source `BCrosshair` hides every crosshair. `BOldCrosshair` swaps the layers for GC and GC2. TCrossHair scales both.
   icon.hidden=!v.BCrosshair;icon.style.scale=String(v.FCrosshairScale);
   for(const layer of layers)layer.style.visibility=v.BOldCrosshair?'hidden':'';
@@ -211,6 +227,7 @@ export function createFeedback(ui,manifest,settings,actions) {
  const key=event=>{if(settings.values.inputs[actions.hidehud].includes(event.code)&&!event.repeat&&state.active){event.preventDefault();state.toggle();paint();}};
  let inputs=settings.values.inputs;fillTexts();
  settings.listen(v=>{if(v.inputs!==inputs){inputs=v.inputs;fillTexts();}paint();});
+ language.listen(()=>{fillTexts();state.relabel();paint();});
  window.addEventListener('keydown',key);window.addEventListener('resize',resize);resize();paint();
- return {state,inventory:updateInventory,weapon:setWeapon,drivingState(value,seated){if(value!==lastGear){gear.textContent='Gear: '+formatGear(value);lastGear=value;}if(seated!==wasSeated){gear.hidden=!seated;wasSeated=seated;}},update(record){if(state.update(record))paint();},setVisible(value){const before=state.visible;state.setVisible(value);if(before!==state.visible)paint();},dispose(){window.removeEventListener('keydown',key);window.removeEventListener('resize',resize);}};
+ return {state,inventory:updateInventory,weapon:setWeapon,drivingState(value,seated,assistBits){if(value!==lastGear){gear.textContent='Gear: '+formatGear(value);lastGear=value;}if(seated!==wasSeated){gear.hidden=!seated;wasSeated=seated;}if(assistBits!==assists){assists=assistBits;paint();}},update(record){if(state.update(record))paint();},setVisible(value){const before=state.visible;state.setVisible(value);if(before!==state.visible)paint();},dispose(){window.removeEventListener('keydown',key);window.removeEventListener('resize',resize);}};
 }

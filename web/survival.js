@@ -1,9 +1,16 @@
 import {applyLayout,rgba} from './ui-layout.js';
-// `settings` is the settings store: `BAlwaysShow*` and `BHelp`.
-export function createSurvival(ui,cooldownSeconds,settings) {
+import {actionName} from './bindings.js';
+// Source `ls.w` words of the sleep labels.
+const SLEEP_WORDS={'can-sleep':'fallingasleep','cannot-sleep':'cantsleepyet'};
+// `settings` is the settings store: `BAlwaysShow*`, `BHelp` and `inputs`. `language` is the word table (`createLanguage`).
+// `actions` is the action index by source name (`actionIndex`).
+export function createSurvival(ui,cooldownSeconds,settings,language,actions) {
  const root=document.querySelector('#survival'),death=document.querySelector('#death-shade'),bars=[];
  const sleepRoot=document.createElement('div');sleepRoot.id='sleep-feedback';sleepRoot.hidden=true;root.parentNode.append(sleepRoot);
- const hint=document.createElement('div');hint.id='sleep-hint';hint.className='sleep-label';hint.textContent=ui.layouts['sleep-hint'].text;hint.hidden=true;root.parentNode.append(hint);
+ const hint=document.createElement('div');hint.id='sleep-hint';hint.className='sleep-label';hint.hidden=true;root.parentNode.append(hint);
+ // Source TextV: the bound sleep key and the word.
+ const hintText=()=>{hint.textContent=' ['+actionName(settings.values.inputs[actions.sleep])+']: '+language.word('sleep');};
+ hintText();settings.listen(hintText);language.listen(hintText);
  const sleepNodes={};let sleepVisible=false,hintVisible=false,visible=false;
  // The HUD updates each frame. Write to the DOM only on change, so the browser does not recompute styles.
  const written=new Map();
@@ -11,7 +18,7 @@ export function createSurvival(ui,cooldownSeconds,settings) {
  function show(node,value){if(node.hidden===value)node.hidden=!value;}
  function clip(direction,amount){const rest=100-Math.max(0,Math.min(1,amount))*100;return direction===0?'inset(0 '+rest+'% 0 0)':direction===1?'inset(0 0 0 '+rest+'%)':direction===2?'inset('+rest+'% 0 0 0)':'inset(0 0 '+rest+'% 0)';}
  for(const role of ['can-sleep','cannot-sleep','need-sleep-background','need-sleep-fill']){
-  const node=document.createElement('div');node.className=role.endsWith('sleep')?'sleep-label':'need-part';node.textContent=ui.layouts[role].text;sleepRoot.append(node);sleepNodes[role]=node;
+  const node=document.createElement('div');node.className=role.endsWith('sleep')?'sleep-label':'need-part';if(SLEEP_WORDS[role])language.text(node,SLEEP_WORDS[role]);else node.textContent=ui.layouts[role].text;sleepRoot.append(node);sleepNodes[role]=node;
  }
  const sourceFill=ui.layouts['need-sleep-fill'],fillAncestry=sourceFill.ancestry.slice();
  fillAncestry[fillAncestry.length-1]={...fillAncestry.at(-1),anchor_min:[0,0],anchor_max:[1,1]};

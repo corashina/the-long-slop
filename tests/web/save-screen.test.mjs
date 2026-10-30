@@ -46,12 +46,12 @@ test('save_is_refused_in_menu_after_death_on_autosave_sleeping_seated_or_empty_n
 });
 
 test('cant_save_text_follows_the_source',()=>{
- assert.equal(screen(0,{sleeping:true}).cantSaveText(),"Can't save\nwhile sleeping");
- assert.equal(screen(0,{seated:true}).cantSaveText(),"Can't save\nwhile sitting");
- assert.equal(screen(0).cantSaveText(),'');
+ assert.deepEqual(screen(0,{sleeping:true}).cantSaveText(),['cantSave','whileSleeping']);
+ assert.deepEqual(screen(0,{seated:true}).cantSaveText(),['cantSave','whileSitting']);
+ assert.deepEqual(screen(0).cantSaveText(),[]);
  const s=screen(0,{sleeping:true,seated:true}),texts=[];
- for(const r of [0.99,0.99,0.99,0,0,0.5])texts.push(s.cantSaveText(()=>r));
- assert.equal(texts[0],"Don't sit\nand sleep");
- assert.equal(texts[1],'Keep trying');
+ for(const r of [0.99,0.99,0.99,0,0,0.5])texts.push(s.cantSaveText(()=>r).join(' '));
+ assert.equal(texts[0],'dontsit andsleep');
+ assert.equal(texts[1],'keeptrying');
  for(let i=1;i<texts.length;i++)assert.notEqual(texts[i],texts[i-1]);
 });

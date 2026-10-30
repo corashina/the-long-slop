@@ -3,7 +3,8 @@ use super::*;
 #[serde(deny_unknown_fields)]
 pub struct FluidPresentation {
     pub has_name: bool,
-    pub name: String,
+    /// Source `nameText`: the `ls.w` index of the name. Valid when `has_name` is set.
+    pub word: u32,
     pub no_text: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -61,10 +62,6 @@ pub struct UiElement {
 #[serde(deny_unknown_fields)]
 pub struct UiReference {
     pub crosshair_colors: CrosshairColors,
-    pub hose_prompts: HosePrompts,
-    pub computer_prompts: ComputerPrompts,
-    pub ammo_prompts: AmmoPrompts,
-    pub binocular_prompts: BinocularPrompts,
     pub need_sliders: HashMap<String, NeedSlider>,
     pub sprites: Vec<UiSprite>,
     pub pairs: Vec<MenuPair>,
@@ -83,37 +80,6 @@ pub struct CrosshairColors {
     pub f: [f32; 4],
     pub mmb: [f32; 4],
 }
-/// Source `ls.w` default English hose prompts.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct HosePrompts {
-    pub attach: String,
-    pub drain: String,
-    pub coilup: String,
-}
-/// Source `ls.w` default English computer prompts.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ComputerPrompts {
-    pub turnon: String,
-    pub turnoff: String,
-    pub r#use: String,
-    pub connect: String,
-    pub disconnect: String,
-}
-/// Source `ls.w` default English ammo prompts: R reloads the held item, E unloads into the aimed one.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AmmoPrompts {
-    pub reload: String,
-    pub unload: String,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct BinocularPrompts {
-    pub r#use: String,
-    pub focus: String,
-}
 impl UiReference {
     /// The `sprites` index of a source sprite.
     pub fn sprite(&self, source: &SourceId) -> Option<u32> {
@@ -126,26 +92,6 @@ impl UiReference {
         require(
             !self.sprites.is_empty() && !self.pairs.is_empty(),
             "UI assets",
-        )?;
-        let h = &self.hose_prompts;
-        require(
-            !h.attach.is_empty() && !h.drain.is_empty() && !h.coilup.is_empty(),
-            "hose prompts",
-        )?;
-        let c = &self.computer_prompts;
-        require(
-            [&c.turnon, &c.turnoff, &c.r#use, &c.connect, &c.disconnect]
-                .iter()
-                .all(|t| !t.is_empty()),
-            "computer prompts",
-        )?;
-        require(
-            !self.ammo_prompts.reload.is_empty() && !self.ammo_prompts.unload.is_empty(),
-            "ammo prompts",
-        )?;
-        require(
-            !self.binocular_prompts.r#use.is_empty() && !self.binocular_prompts.focus.is_empty(),
-            "binocular prompts",
         )?;
         for role in ["food", "water", "hp", "bladder", "bowel", "sleep"] {
             let slider = self
@@ -222,6 +168,7 @@ impl UiReference {
             "mount",
             "fill",
             "carry",
+            "help",
             "fluid",
             "reticle",
             "foot",

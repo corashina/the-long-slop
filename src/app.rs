@@ -78,6 +78,8 @@ struct ManifestShell<'a> {
     #[serde(borrow)]
     settings: &'a serde_json::value::RawValue,
     #[serde(borrow)]
+    language: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
     ui: &'a serde_json::value::RawValue,
     #[serde(borrow)]
     sleep: &'a serde_json::value::RawValue,
@@ -1072,7 +1074,7 @@ fn update_hud(mut drive: ResMut<Drive>, mut sim: ResMut<SimFrameResource>) {
         f.capacity,
         f.has_name,
         f.no_text,
-        &f.fluid_name,
+        f.fluid_word,
         &f.held_name,
         f.throw_charge,
         f.throw_active,
@@ -1095,6 +1097,7 @@ fn update_hud(mut drive: ResMut<Drive>, mut sim: ResMut<SimFrameResource>) {
         f.computer.into(),
         f.crosshair,
         f.weight,
+        f.help.into(),
     );
 }
 

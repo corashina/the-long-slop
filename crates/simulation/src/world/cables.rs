@@ -661,6 +661,7 @@ mod tests {
             trailer: None,
             followers: None,
             hitches: Vec::new(),
+            help_texts: Vec::new(),
             pushes: Vec::new(),
         };
         let pole = RoadPole {

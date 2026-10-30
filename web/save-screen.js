@@ -1,7 +1,8 @@
 import {trimName,defaultName,AUTOSAVE} from './save-storage.js';
 import {bindToggle} from './settings-screen.js';
 export const PER_PAGE=6,STEP=2;
-const CANT_BOTH=["Can't save\nwhile sitting\nor sleeping","Can't save\nwhile sleeping\nor sitting here","Don't sleep\nand sit","Don't sit\nand sleep","Keep trying"];
+// Source `ls.w` lines of the cant-save texts.
+const CANT_BOTH=[['cantSave','whileSitting','OrSleeping'],['cantSave','whileSleeping','OrSittingHere'],['dontsleep','andsit'],['dontsit','andsleep'],['keeptrying']];
 export class SaveScreenState {
  // text starts at 4, so the first pick of both texts is from 0-3, as in the source.
  constructor(){this.saves=[];this.autosave=null;this.last=null;this.canLast=false;this.top=0;this.selected=null;this.confirm=null;this.name='';this.inMenu=true;this.dead=false;this.sleeping=false;this.seated=false;this.text=4;}
@@ -31,14 +32,14 @@ export class SaveScreenState {
  answer(yes){const kind=this.confirm;this.confirm=null;return yes?kind:null;}
  cantSaveText(random=Math.random){
   if(this.sleeping&&this.seated){let i=Math.floor(random()*4);if(i>=this.text)i++;this.text=i;return CANT_BOTH[i];}
-  if(this.sleeping)return "Can't save\nwhile sleeping";
-  return this.seated?"Can't save\nwhile sitting":'';
+  if(this.sleeping)return ['cantSave','whileSleeping'];
+  return this.seated?['cantSave','whileSitting']:[];
  }
 }
-const driven=km=>String(Math.round(km)).padStart(4,'0')+' km';
-const details=entry=>[entry.date,'Seed '+entry.seed,driven(entry.drivenKm),entry.version].join(' · ');
-// `settings` is the settings store. The autosave toggles are its source `tabMisc` toggles.
-export function createSaveScreen({settings,run,paint}){
+// `settings` is the settings store. The autosave toggles are its source `tabMisc` toggles. `word` returns a source `ls.w` word.
+export function createSaveScreen({settings,word,run,paint}){
+ const driven=km=>String(Math.round(km)).padStart(4,'0')+' '+word('mkm');
+ const details=entry=>[entry.date,word('mseed')+' '+entry.seed,driven(entry.drivenKm),entry.version].join(' · ');
  const state=new SaveScreenState(),q=selector=>document.querySelector(selector),urls=new Map(),kinds=['save','load','delete','last'];
  const tile=selector=>({button:q(selector),img:q(selector+' img'),label:q(selector+' strong'),details:q(selector+' small'),url:null});
  const tiles=Array.from({length:PER_PAGE},(_,i)=>tile('#save-tile-'+i)),auto=tile('#save-autosave');
@@ -74,7 +75,7 @@ export function createSaveScreen({settings,run,paint}){
   state,
   open(flags){
    Object.assign(state,flags,{top:0,selected:null,confirm:null,name:defaultName(new Date())});name.value=state.name;
-   text=state.inMenu||state.dead?'':state.cantSaveText();
+   text=state.inMenu||state.dead?'':state.cantSaveText().map(word).join('\n');
   },
   update(list,canLast){
    for(const url of urls.values())URL.revokeObjectURL(url);urls.clear();
@@ -84,7 +85,7 @@ export function createSaveScreen({settings,run,paint}){
   paint(pending){
    tiles.forEach((t,i)=>show(t,state.saves[state.top+i],state.selected===state.top+i));
    show(auto,state.autosave,state.selected==='autosave');
-   const {page,pages,count}=state.page();pageText.textContent='Page: '+page+'/'+pages;countText.textContent='Count: '+count;
+   const {page,pages,count}=state.page();pageText.textContent=word('mpage')+': '+page+'/'+pages;countText.textContent=word('mcount')+': '+count;
    const entry=state.entry();info.hidden=!entry;
    if(entry)[entry.name,entry.date,String(entry.seed),driven(entry.drivenKm),entry.version].forEach((value,i)=>{fields[i].textContent=value;});
    nameRow.hidden=!state.saveShown();name.disabled=pending;

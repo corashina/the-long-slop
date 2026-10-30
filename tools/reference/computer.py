@@ -1,6 +1,5 @@
 """Checked computer (computerscript) and TV (displayscript) inputs."""
 import math
-from .caps import word
 from .source import key, source_id
 from .survival import managed_evidence
 
@@ -23,11 +22,6 @@ EVIDENCE=[
     'ScreenText.text += screenText[j + i * xSize];']
 # Printable ASCII cells of the glyph atlas.
 FIRST_GLYPH,GLYPH_COUNT=32,95
-
-
-def computer_prompts(source) -> dict:
-    """fpscontroller texts: R turns a computer on or off, LMB uses it, E connects or disconnects a held one."""
-    return {name: word(source, name) for name in ('turnon', 'turnoff', 'use', 'connect', 'disconnect')}
 
 
 def owner(source, manifest, spec):

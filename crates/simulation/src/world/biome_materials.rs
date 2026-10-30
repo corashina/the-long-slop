@@ -108,6 +108,7 @@ mod tests {
             trailer: None,
             followers: None,
             hitches: Vec::new(),
+            help_texts: Vec::new(),
             pushes: Vec::new(),
         };
         let marked: Vec<_> = (0..4).map(|n| under_mark(&prototype, n)).collect();
