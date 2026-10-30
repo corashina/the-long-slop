@@ -129,6 +129,7 @@ window.gameMeasurements=json=>{
  for(const resolve of measurementWaiters.splice(0))resolve(snapshot);
 };
 const sandbox=readSandbox(location.search);installSandbox(window,sandbox!==null);
+if(sandbox)window.gameSeed=()=>sandbox.seed;
 let input,survival,dead=false,sleeping=false,audio,menu,multiplayer,feedback,failed=false,worldAdmitted=false,actions=0,frame,renderFailure;
 const inventory={selected:0,slots:[0,0,0,0],progress:0};
 window.gameInventory=(selected,a,b,c,d,progress)=>{
