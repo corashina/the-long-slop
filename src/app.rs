@@ -3,6 +3,7 @@ mod performance;
 pub(crate) mod save;
 mod sim_link;
 use crate::browser::*;
+use crate::interaction::labels::vehicle_name;
 use crate::presentation::{
     self,
     camera::DriveCamera,
@@ -105,9 +106,9 @@ struct WorldShell<'a> {
     draw_distance: &'a serde_json::value::RawValue,
     #[serde(borrow, skip_serializing)]
     startup: Vec<StartupShell<'a>>,
-    /// Start car fields in export order. The Game mode start car list shows them.
+    /// Start car names in export order. The Game mode start car list shows them.
     #[serde(skip_deserializing)]
-    start_cars: Vec<&'a str>,
+    start_cars: Vec<String>,
 }
 #[derive(serde::Deserialize)]
 struct StartupShell<'a> {
@@ -119,13 +120,16 @@ struct StartupShell<'a> {
 pub fn manifest_shell(reference_json: &[u8]) -> Result<String, JsValue> {
     let mut shell: ManifestShell =
         serde_json::from_slice(reference_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    shell.world.start_cars = shell
-        .world
-        .startup
-        .iter()
-        .filter(|s| s.start_car)
-        .map(|s| s.group)
-        .collect();
+    // Car09 has two start fields. The second one with a name shows "(2)".
+    for startup in shell.world.startup.iter().filter(|s| s.start_car) {
+        let name = vehicle_name(startup.group).unwrap_or(startup.group);
+        let name = if shell.world.start_cars.iter().any(|n| n == name) {
+            format!("{name} (2)")
+        } else {
+            name.to_owned()
+        };
+        shell.world.start_cars.push(name);
+    }
     serde_json::to_string(&shell).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 

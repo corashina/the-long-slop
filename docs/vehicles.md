@@ -18,6 +18,11 @@ The world loader spawns cars from car prototypes. The export allows the Lada, th
 | Bike01 (bare and full) | Catalog category `bike01` items with `carscript` | World spawn pools | Motorcycle, kick start |
 | Bike03 (bare and full) | Catalog category `bike03` items with `carscript` | World spawn pools | Moped, pedals and engine |
 
+## Car names
+
+The game uses its own vehicle names, not source labels. `interaction::labels::vehicle_name` holds the table.
+The hover text and the Game mode start car list show them. Saves and sandbox commands keep the source names.
+
 - Each `vehicle` record has the source `carscript.carType`.
 - `CAR_ITEMS` also spawn from the pools `kaszni` (bare body) and `carfull` (full car). Car06P and Car09T are V03.
 

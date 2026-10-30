@@ -145,6 +145,7 @@ Prepare once:
 29. Car07 shifts by itself in manual mode. Its dashboard clock shows game time, and its knob sets the time.
 30. Drive past groups of roadside cars for 2 km. F3 bodies and generated objects fall back after you pass. Your start car and last car keep their area.
 31. Tow a small trailer and drive Bus02 with its trailer: wheel meshes turn and steer. Bus02 leaf springs, axles and tipper rams follow the wheels.
+32. Look at the Lada, a roadside car, a bus and each bike. The hover text shows the game name, such as "Volna Kombi", not "Car02kFull". The Game mode start car list shows the same names.
 
 ### Car camera and crash damage
 
