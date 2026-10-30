@@ -1,7 +1,6 @@
-//! Source motion vectors for TAA: camera motion from resolved depth, then rigid renderers that moved.
+//! Source motion vectors for TAA and motion blur: camera motion from resolved depth, then rigid renderers that moved.
 //! Every source renderer uses `m_MotionVectors` 1 (per object). Skinned meshes keep camera motion.
 use super::{
-    antialiasing::Antialiasing,
     lighting_assets::LightingRenderAssets,
     lighting_scene::SourceWorldOrigin,
     readiness::RendererStateHandle,
@@ -58,9 +57,9 @@ pub struct MotionRows {
 }
 
 /// An unchanged transform keeps its model. Its previous model is therefore the stored one.
+/// A reset refreshes every model: transforms can change while motion is off.
 fn collect(
     mut commands: Commands,
-    antialiasing: Res<Antialiasing>,
     frame: Res<SourceViewFrame>,
     origin: Res<SourceWorldOrigin>,
     mut last_origin: Local<Option<[f64; 3]>>,
@@ -73,35 +72,43 @@ fn collect(
             Without<SkinnedMesh>,
         ),
     >,
-    mut moved: Query<
-        (Entity, &GlobalTransform, &ViewVisibility, &mut MotionModel),
-        Changed<GlobalTransform>,
-    >,
+    mut models: ParamSet<(
+        Query<
+            (Entity, &GlobalTransform, &ViewVisibility, &mut MotionModel),
+            Changed<GlobalTransform>,
+        >,
+        Query<(&GlobalTransform, &mut MotionModel)>,
+    )>,
     mut rows: ResMut<MotionRows>,
 ) {
     rows.rows.clear();
     rows.frame = 0;
-    if !antialiasing.0 {
+    let Some(motion) = frame.main_motion else {
         return;
-    }
+    };
     for (entity, transform) in &added {
         commands
             .entity(entity)
             .insert(MotionModel(transform.to_matrix()));
     }
-    let Some(motion) = frame.main_motion else {
+    if motion.reset {
+        *last_origin = Some(origin.0);
+        for (transform, mut model) in &mut models.p1() {
+            model.0 = transform.to_matrix();
+        }
+        rows.frame = frame.frame;
         return;
-    };
+    }
     // Runtime poses subtract the origin. Move stored models into the current origin.
     let delta = last_origin.replace(origin.0).map_or(Vec3::ZERO, |old| {
         Vec3::from_array(std::array::from_fn(|i| (origin.0[i] - old[i]) as f32))
     });
     let rebase = Mat4::from_translation(-delta);
-    for (entity, transform, visibility, mut model) in &mut moved {
+    for (entity, transform, visibility, mut model) in &mut models.p0() {
         let current = transform.to_matrix();
         let previous = rebase * model.0;
         model.0 = current;
-        if motion.reset || !visibility.get() || current.abs_diff_eq(previous, 1e-4) {
+        if !visibility.get() || current.abs_diff_eq(previous, 1e-4) {
             continue;
         }
         rows.rows.push(MotionRow {
@@ -245,7 +252,6 @@ fn layouts() -> [BindGroupLayoutDescriptor; 3] {
 }
 
 fn prepare(
-    antialiasing: Res<Antialiasing>,
     mut motion: ResMut<SourceMotion>,
     mut specialized: ResMut<SpecializedMeshPipelines<ObjectPipeline>>,
     surfaces: Option<Res<SurfaceResources>>,
@@ -263,7 +269,7 @@ fn prepare(
     cache: Res<PipelineCache>,
     status: Res<RendererStateHandle>,
 ) {
-    if !antialiasing.0 || status.failure().is_some() {
+    if frame.main_motion.is_none() || status.failure().is_some() {
         return;
     }
     let (Some(surfaces), Some(assets)) = (surfaces, assets) else {

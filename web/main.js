@@ -10,6 +10,8 @@ const seed=installSeed(window,document.querySelector('#seed'));
 const gameOptions=installGameOptions(window,{peaceful:document.querySelector('#peaceful'),survival:document.querySelector('#survival-mode'),homesick:document.querySelector('#homesick')},options=>survival?.setSurvival(options.survival));
 import {installSunglassesEffects} from './sunglasses.js';
 installSunglassesEffects(window,()=>localStorage,document.querySelector('#sunglasses-effects'));
+import {installMotionBlur} from './motion-blur.js';
+installMotionBlur(window,()=>localStorage,document.querySelector('#motion-blur'));
 import {installAntialiasing} from './antialiasing.js';
 installAntialiasing(window,()=>localStorage,document.querySelector('#antialiasing'));
 import {installAmbientOcclusion} from './ambient-occlusion.js';

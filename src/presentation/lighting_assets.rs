@@ -200,9 +200,10 @@ pub struct LightingShaders {
     pub props_cull: Handle<Shader>,
     pub motion: Handle<Shader>,
     pub taa: Handle<Shader>,
+    pub motion_blur: Handle<Shader>,
 }
 impl LightingShaders {
-    pub(crate) fn handles(&self) -> [&Handle<Shader>; 23] {
+    pub(crate) fn handles(&self) -> [&Handle<Shader>; 24] {
         [
             &self.lighting,
             &self.cloud,
@@ -227,6 +228,7 @@ impl LightingShaders {
             &self.props_cull,
             &self.motion,
             &self.taa,
+            &self.motion_blur,
         ]
     }
 }

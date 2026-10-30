@@ -173,7 +173,7 @@ pub struct SourceViewFrame {
     pub probe_token: u32,
     pub probe_job: Option<ProbeJob>,
     pub views: [Option<ViewSnapshot>; VIEW_COUNT],
-    /// Main-view TAA state. None when antialiasing is off.
+    /// Main-view motion state. None when antialiasing and motion blur are off.
     pub main_motion: Option<super::temporal::MainMotion>,
 }
 impl SourceViewFrame {
@@ -301,8 +301,9 @@ pub(crate) fn snapshot(
     ),
     views: Query<(&SourceSurfaceView, &Camera, &GlobalTransform)>,
     sky_view: Query<(&Camera, &GlobalTransform), With<super::frame_graph::SourceSkyCamera>>,
-    (antialiasing, mut temporal, origin): (
+    (antialiasing, blur, mut temporal, origin): (
         Res<super::antialiasing::Antialiasing>,
+        Res<super::motion_blur::MotionBlur>,
         ResMut<super::temporal::TemporalView>,
         Res<super::lighting_scene::SourceWorldOrigin>,
     ),
@@ -443,15 +444,19 @@ pub(crate) fn snapshot(
         }
         Some(snapshot)
     });
-    let main_motion = antialiasing.0.then(|| {
+    let main_motion = (antialiasing.0 || blur.0).then(|| {
         temporal.advance(
             snapshots[0].as_mut().unwrap(),
-            &assets.record.postprocessing.taa,
+            antialiasing.0.then_some(&assets.record.postprocessing.taa),
             origin.0,
             sim.frame.state.motion_revision,
             epoch.0,
         )
     });
+    if main_motion.is_none() {
+        // A later start has no valid history.
+        temporal.clear();
+    }
     let jitter = main_motion.map_or(Mat4::IDENTITY, |motion| {
         super::temporal::jitter_clip(motion.jitter)
     });
