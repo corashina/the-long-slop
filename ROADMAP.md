@@ -42,7 +42,7 @@ Not planned: VR, stereo 3D, mod events, Steam features.
 
 ## Test pass
 
-Run these checks on Tomasz's PC in one run. Nothing below has passed yet.
+Run these checks on Tomasz's PC in one run. Passed checks are removed.
 Check F3 in each scenario below. Compare with the frame rate rule.
 
 Known failures on master c0da737f (2026-10-30 browser retest), fix before the next run:
@@ -176,12 +176,10 @@ Prepare once:
 
 ### Saves
 
-1. Save under two names. Each tile shows a game thumbnail, date, seed, km and version.
-2. Overwrite, Load and Delete ask Yes/No in game. Load last loads the newest save.
-3. Load, Load last and New game after death do not fail with "Asset CPU budget exceeded". Reload the page, then Load last from the start menu: the game starts, no "Source building metadata exceeds prototype CPU budget".
-4. Play 2 minutes on foot. The autosave tile appears. Check the F3 cost of the autosave frame.
-5. Turn on "Load last save at start" and reload the page. The last save loads.
-6. Sleep, wake, save and load: the sleep hint stays off until the cooldown ends.
+1. Load, Load last and New game after death do not fail with "Asset CPU budget exceeded". Reload the page, then Load last from the start menu: the game starts, no "Source building metadata exceeds prototype CPU budget".
+2. Play 2 minutes on foot. The autosave tile appears. Check the F3 cost of the autosave frame.
+3. Turn on "Load last save at start" and reload the page. The last save loads.
+4. Sleep, wake, save and load: the sleep hint stays off until the cooldown ends.
 
 ### Game options
 
@@ -269,9 +267,8 @@ Prepare once:
 1. Park a bus on a slope, release the handbrake and stand inside while it rolls. The player rides inside.
 2. Stand on a trailer bed or the Lada roof while it moves fast: you slide off. While it moves slowly: you ride.
 3. Jump inside a moving bus: you land in the same place.
-4. Run, jump, release W: you keep flying forward. Standing jump: straight up. Keys in the air turn you slowly.
-5. Jump at a wall: one extra push. Jump at a ledge: a second push. Hold jump below the ledge: you grip and stop falling, then jump up.
-6. Save mid-air and load: the jump continues.
+4. Jump at a wall: one extra push. Jump at a ledge: a second push. Hold jump below the ledge: you grip and stop falling, then jump up.
+5. Save mid-air and load: the jump continues.
 
 ### Weapons and damage
 
