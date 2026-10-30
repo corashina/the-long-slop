@@ -320,6 +320,8 @@ impl PersistentWorld {
                         root: None,
                         handle: None,
                         state: None,
+                        extent: 0.,
+                        fixed: false,
                     });
                     changed = true;
                 }
@@ -718,6 +720,7 @@ mod world_sync_tests {
             item_bodies: ItemBodyIndex::default(),
             pending_items: Vec::new(),
             frozen: HashSet::new(),
+            spawned: HashSet::new(),
             important: Vec::new(),
             configured: true,
         };
