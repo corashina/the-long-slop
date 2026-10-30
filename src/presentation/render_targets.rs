@@ -11,7 +11,7 @@ pub const DEPTH_FORMAT: TextureFormat = TextureFormat::Depth24PlusStencil8;
 pub const SHADOW_FORMAT: TextureFormat = TextureFormat::Depth16Unorm;
 pub const EXPOSURE_FORMAT: TextureFormat = TextureFormat::R32Float;
 pub const HISTOGRAM_FORMAT: TextureFormat = TextureFormat::Rgba32Uint;
-/// The source uses 8 samples. Four samples is an approved image-quality change.
+/// World view samples with antialiasing on. The source uses 8. WebGPU allows only 1 or 4.
 pub const MSAA_SAMPLES: u32 = 4;
 
 pub struct Target {
@@ -210,15 +210,16 @@ pub struct SurfaceTargets {
     pub logical_bytes: u64,
 }
 impl SurfaceTargets {
-    pub fn new(device: &RenderDevice, width: u32, height: u32, atlas: u32) -> Result<Self, String> {
+    pub fn new(
+        device: &RenderDevice,
+        width: u32,
+        height: u32,
+        samples: u32,
+        atlas: u32,
+    ) -> Result<Self, String> {
         use std::sync::Arc;
         let capture_atlas = crate::reference::shadows::source_atlas_size(64, 64).unwrap();
-        let world = Arc::new(SourceColorTargets::new(
-            device,
-            width,
-            height,
-            MSAA_SAMPLES,
-        )?);
+        let world = Arc::new(SourceColorTargets::new(device, width, height, samples)?);
         let capture = Arc::new(SourceColorTargets::new(device, 64, 64, 1)?);
         let mut views = Vec::with_capacity(VIEW_COUNT);
         for index in 0..VIEW_COUNT {
@@ -249,14 +250,10 @@ impl SurfaceTargets {
         device: &RenderDevice,
         width: u32,
         height: u32,
+        samples: u32,
         atlas: u32,
     ) -> Result<(), String> {
-        let world = std::sync::Arc::new(SourceColorTargets::new(
-            device,
-            width,
-            height,
-            MSAA_SAMPLES,
-        )?);
+        let world = std::sync::Arc::new(SourceColorTargets::new(device, width, height, samples)?);
         for index in 0..WORLD_VIEWS {
             self.views[index] =
                 std::sync::Arc::new(SourceViewTargets::new(device, world.clone(), atlas)?);

@@ -1,5 +1,5 @@
 //! Source cloud geometry and transparent draws. No full-screen cloud approximation.
-use super::render_targets::{DEPTH_FORMAT, HDR_FORMAT, MSAA_SAMPLES};
+use super::render_targets::{DEPTH_FORMAT, HDR_FORMAT};
 use crate::reference::lighting_scene::LightingRecord;
 use bevy::asset::AssetId;
 use bevy::ecs as bevy_ecs;
@@ -43,6 +43,7 @@ impl CloudPass {
         mesh_id: AssetId<Mesh>,
         mesh: &RenderMesh,
         textures: [[&GpuImage; 4]; 2],
+        samples: u32,
     ) -> Result<Self, String> {
         // The source Ball has no normals. Bevy's glTF loader expands its indices
         // in order before generating unused flat normals. Position and UV are unchanged.
@@ -115,7 +116,7 @@ impl CloudPass {
                 bias: default(),
             }),
             multisample: MultisampleState {
-                count: MSAA_SAMPLES,
+                count: samples,
                 ..default()
             },
             ..default()
@@ -259,6 +260,7 @@ pub(crate) fn prepare_clouds(
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
     status: Res<super::readiness::RendererStateHandle>,
+    antialiasing: Res<super::antialiasing::Antialiasing>,
 ) {
     if let Some(pass) = existing {
         use bevy::shader::ShaderCacheError;
@@ -305,6 +307,7 @@ pub(crate) fn prepare_clouds(
         assets.cloud_mesh.id(),
         mesh,
         textures.map(|row| row.map(|texture| texture.expect("validated cloud slots"))),
+        antialiasing.samples(),
     );
     match result {
         Ok(pass) => {

@@ -21,6 +21,7 @@ impl AoCompositePass {
         shader: Handle<Shader>,
         depth: &TextureView,
         visibility: &TextureView,
+        samples: u32,
         previous: Option<&Self>,
     ) -> Self {
         let layout = BindGroupLayoutDescriptor::new(
@@ -86,7 +87,7 @@ impl AoCompositePass {
                         ..default()
                     }),
                     multisample: MultisampleState {
-                        count: crate::presentation::render_targets::MSAA_SAMPLES,
+                        count: samples,
                         ..default()
                     },
                     ..default()
@@ -120,7 +121,7 @@ impl AoCompositePass {
         queue: &RenderQueue,
         cache: &PipelineCache,
         color: &TextureView,
-        resolve: &TextureView,
+        resolve: Option<&TextureView>,
         near: f32,
         far: f32,
         density: f32,
@@ -142,7 +143,7 @@ impl AoCompositePass {
         let colors = [Some(RenderPassColorAttachment {
             view: color,
             depth_slice: None,
-            resolve_target: Some(resolve),
+            resolve_target: resolve.map(|view| &**view),
             ops: Operations {
                 load: LoadOp::Load,
                 store: StoreOp::Store,
