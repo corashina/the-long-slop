@@ -171,6 +171,7 @@ impl Plugin for SourceFramePlugin {
         super::shadow_atlas::install(app);
         super::shadow_collector::install(app);
         super::source_effects::install(app);
+        super::gpu_timing::install(app);
         let render = app.sub_app_mut(RenderApp);
         render
             .insert_resource(progress)
@@ -1048,6 +1049,7 @@ pub fn source_render_audit() -> String {
         "state": status, "graph": GraphDiagnostic { loading: &state.proof, audit: &state.audit },
         "graph_control_bytes": super::readiness::control_bytes(),
         "gpu_validated_generation": audit.gate.validated_generation(),
+        "gpu_ms": super::gpu_timing::stage_ms(),
     }))
     .expect("source diagnostic values serialize")
 }
