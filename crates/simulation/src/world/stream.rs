@@ -791,6 +791,10 @@ impl WorldStream {
         self.request.player
     }
 
+    /// Spawn context of later source spawns. Spawned content keeps its own context.
+    pub fn set_peaceful_enemies(&mut self, value: i32) {
+        self.contents.state.context.peaceful_enemies = value;
+    }
     pub fn mode(&self) -> super::GameMode {
         self.mode
     }
