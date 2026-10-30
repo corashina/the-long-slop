@@ -121,6 +121,7 @@ impl SourcePostChain {
         textures: &PostTextures<'_>,
         source: &TextureView,
         extent: [u32; 2],
+        samples: u32,
         record: &PostprocessingRecord,
         dead: &DeadProfile,
         glasses: &[GlassesProfile],
@@ -267,6 +268,7 @@ impl SourcePostChain {
             &initial.view,
             textures.noise,
             extent,
+            samples,
             record,
             inputs,
             old_uber,
@@ -342,7 +344,7 @@ impl SourcePostChain {
         cache: &PipelineCache,
         frame: PostFrame,
         output: &TextureView,
-        resolve: &TextureView,
+        resolve: Option<&TextureView>,
     ) -> Result<bool, String> {
         if frame.token == 0 || frame.token <= self.completed {
             return Ok(false);
@@ -451,6 +453,7 @@ impl SourceAoChain {
         shaders: &PostShaders,
         camera_depth: &TextureView,
         extent: [u32; 2],
+        samples: u32,
         record: &PostprocessingRecord,
         previous: Option<Self>,
     ) -> Result<Self, String> {
@@ -492,6 +495,7 @@ impl SourceAoChain {
             shaders.ao_composite.clone(),
             &depth.copy.view,
             &upsample.output[3].view,
+            samples,
             previous.as_ref().map(|old| &old.composite),
         );
         let logical_bytes = depth.logical_bytes + render.logical_bytes + upsample.logical_bytes;
@@ -526,7 +530,7 @@ impl SourceAoChain {
         queue: &RenderQueue,
         cache: &PipelineCache,
         color: &TextureView,
-        resolve: &TextureView,
+        resolve: Option<&TextureView>,
         near: f32,
         far: f32,
         projection_00: f32,

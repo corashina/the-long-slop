@@ -170,6 +170,7 @@ impl Plugin for SourceFramePlugin {
         super::caster_material::install(app);
         super::shadow_atlas::install(app);
         super::shadow_collector::install(app);
+        super::antialiasing::install(app);
         super::source_effects::install(app);
         super::gpu_timing::install(app);
         let render = app.sub_app_mut(RenderApp);
@@ -248,6 +249,7 @@ pub fn spawn_cameras(
     pose: Transform,
     fov_degrees: f32,
     far: f32,
+    antialiasing: super::antialiasing::Antialiasing,
 ) {
     let record = &reference.render_lighting;
     let sky = &record.cameras[0];
@@ -271,7 +273,7 @@ pub fn spawn_cameras(
             ..default()
         }),
         Transform::from_rotation(pose.rotation),
-        Msaa::from_samples(super::render_targets::MSAA_SAMPLES),
+        antialiasing.msaa(),
         bevy::core_pipeline::tonemapping::Tonemapping::None,
     ));
     let mut image = Image::new_fill(
@@ -296,7 +298,7 @@ pub fn spawn_cameras(
                 world.fov_degrees,
                 world.mask,
                 record.cameras[2].order as isize,
-                Msaa::from_samples(super::render_targets::MSAA_SAMPLES),
+                antialiasing.msaa(),
             )
         } else {
             let p = &record.probes[0];
@@ -481,7 +483,7 @@ fn prepare_frame(
             existing
                 .display
                 .rebind(&device, &cache, colors.resolved.sampled.as_ref().unwrap());
-            let texture = sky_depth(&device, colors.width, colors.height);
+            let texture = sky_depth(&device, &colors);
             existing.sky_depth = texture.create_view(&TextureViewDescriptor::default());
             existing._sky_depth = texture;
             existing.colors = colors;
@@ -494,7 +496,7 @@ fn prepare_frame(
         }
         return;
     }
-    let texture = sky_depth(&device, colors.width, colors.height);
+    let texture = sky_depth(&device, &colors);
     let depth = texture.create_view(&TextureViewDescriptor::default());
     let display = FrameCopy::new(
         &device,
@@ -511,16 +513,16 @@ fn prepare_frame(
         display_format: format,
     });
 }
-fn sky_depth(device: &RenderDevice, width: u32, height: u32) -> Texture {
+fn sky_depth(device: &RenderDevice, colors: &super::render_targets::SourceColorTargets) -> Texture {
     device.create_texture(&TextureDescriptor {
         label: Some("source_sky_depth"),
         size: Extent3d {
-            width,
-            height,
+            width: colors.width,
+            height: colors.height,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: super::render_targets::MSAA_SAMPLES,
+        sample_count: colors.samples,
         dimension: TextureDimension::D2,
         format: super::render_targets::DEPTH_FORMAT,
         usage: TextureUsages::RENDER_ATTACHMENT,

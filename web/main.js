@@ -4,6 +4,8 @@ import {installGameMode,installStartCar} from './game-mode.js';
 installGameMode(window,document.querySelector('#biome'));
 import {installSunglassesEffects} from './sunglasses.js';
 installSunglassesEffects(window,()=>localStorage,document.querySelector('#sunglasses-effects'));
+import {installAntialiasing} from './antialiasing.js';
+installAntialiasing(window,()=>localStorage,document.querySelector('#antialiasing'));
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
 import {manifestStamp,createSaveStorage,AUTOSAVE} from './save-storage.js';

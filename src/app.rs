@@ -316,6 +316,7 @@ fn setup(
     gltf_extensions: Res<bevy::gltf::extensions::GltfExtensionHandlers>,
     reference: Res<RuntimeReference>,
     drive: Res<Drive>,
+    antialiasing: Res<presentation::antialiasing::Antialiasing>,
 ) {
     commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
     commands.insert_resource(presentation::spawned::SpawnedVisuals::default());
@@ -350,6 +351,7 @@ fn setup(
         presentation::transform(drive.startup.view),
         drive.startup.fov_degrees,
         drive.startup.far_plane,
+        *antialiasing,
     );
 }
 
