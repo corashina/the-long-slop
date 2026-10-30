@@ -1558,6 +1558,10 @@ impl WorldStream {
     pub fn presentation_credit(&self) -> PresentationAllocation {
         self.presentation
     }
+    /// Renderer use of the last report.
+    pub fn presentation_used(&self) -> PresentationAllocation {
+        self.presentation_used
+    }
     fn bind_prototype(&mut self, source: &SourceId) -> Result<(), ReferenceError> {
         let bound = self.prototype_holds.get_mut(source).ok_or_else(|| {
             ReferenceError(format!(
