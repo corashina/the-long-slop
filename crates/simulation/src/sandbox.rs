@@ -5,6 +5,7 @@ use crate::reference::{
 };
 use crate::starting_area::GarageRuntime;
 use crate::vehicle::{VehiclePose, to_rapier};
+use crate::world::{ObjectKey, WorldLayer};
 use rapier3d::math::{Rotation, Vector};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -156,7 +157,7 @@ fn apply(
     }
 }
 
-/// Moves the player body on foot and asks the stream for the new area. The step waits for the world.
+/// Moves the player on foot, with the cars that hold an area, and asks the stream for the new area.
 fn place_player(runtime: &mut GarageRuntime, absolute: [f64; 3]) -> Result<(), String> {
     if runtime.area.player.seated() {
         return Err("Get out of the seat first.".into());
@@ -173,16 +174,31 @@ fn place_player(runtime: &mut GarageRuntime, absolute: [f64; 3]) -> Result<(), S
         body.set_position(to_rapier(pose), true);
         body.set_linvel(Vector::ZERO, true);
     });
+    // Cars that hold an area come along: the step waits until each active car's area is loaded.
+    let held: Vec<_> = runtime
+        .vehicles
+        .keys()
+        .filter(|key| {
+            Some(*key) == runtime.vehicle.as_ref()
+                || matches!(key, ObjectKey::Generated(id) if id.layer == WorldLayer::Startup)
+        })
+        .cloned()
+        .collect();
+    for (index, key) in held.iter().enumerate() {
+        let x = absolute[0] + CAR_SPACING as f64 * (index + 1) as f64;
+        let (height, _) = runtime.stream.terrain_sample([x, 0., absolute[2]]);
+        let rotation = runtime.physics.snapshot(key).pose.rotation;
+        let position = runtime
+            .stream
+            .origin
+            .local([x, f64::from(height) + 1.5, absolute[2]]);
+        runtime
+            .physics
+            .reset_preserving_wheels(key, VehiclePose { position, rotation });
+    }
     runtime.physics.refresh_queries();
     // The step waits for a supported world, so the stream must ask for the new area here.
-    let car = runtime.vehicle.as_ref().map_or(absolute, |key| {
-        runtime.persistent_world.absolute_vehicle_position(
-            &runtime.physics,
-            &runtime.stream.origin,
-            key,
-        )
-    });
-    runtime.stream.request_at(absolute, car);
+    runtime.request_world(absolute);
     let focus = runtime.area.player.focus_position(&runtime.physics);
     runtime.rebase_to(focus);
     Ok(())

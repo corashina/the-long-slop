@@ -1734,31 +1734,7 @@ impl GarageRuntime {
                 .cycle
                 .set_terrain_color(&reference.lighting.cycle, &color, 0.);
         }
-        let car = self.vehicle.as_ref().map_or(absolute, |key| {
-            self.persistent_world
-                .absolute_vehicle_position(&self.physics, &self.stream.origin, key)
-        });
-        self.stream.request_at(absolute, car);
-        let (world, physics, origin) = (&self.persistent_world, &self.physics, self.stream.origin);
-        // Only the start car and the last seated car hold the area. Roadside cars follow the item rule.
-        let last = self.vehicle.as_ref();
-        let cars = self.vehicles.keys().filter(|key| {
-            Some(*key) == last
-                || matches!(key, ObjectKey::Generated(id) if id.layer == crate::world::WorldLayer::Startup)
-        });
-        let cars = cars.map(|key| {
-            (
-                physics.chassis_handle(key),
-                world.absolute_vehicle_position(physics, &origin, key),
-            )
-        });
-        self.stream.request_cars(cars);
-        let last_car = self
-            .vehicle
-            .as_ref()
-            .map(|key| self.physics.chassis_handle(key));
-        self.stream
-            .request_kept([self.area.player.seat_body(), last_car]);
+        self.request_world(absolute);
         self.persistent_world
             .sync(
                 reference,
@@ -2851,6 +2827,34 @@ impl GarageRuntime {
                 .expect("engine item")
                 .temperature = Some(part.state.temperature);
         }
+    }
+    /// Asks the stream for the area of `absolute` (the player), the cars that hold an area and the kept bodies.
+    pub fn request_world(&mut self, absolute: [f64; 3]) {
+        let car = self.vehicle.as_ref().map_or(absolute, |key| {
+            self.persistent_world
+                .absolute_vehicle_position(&self.physics, &self.stream.origin, key)
+        });
+        self.stream.request_at(absolute, car);
+        let (world, physics, origin) = (&self.persistent_world, &self.physics, self.stream.origin);
+        // Only the start car and the last seated car hold the area. Roadside cars follow the item rule.
+        let last = self.vehicle.as_ref();
+        let cars = self.vehicles.keys().filter(|key| {
+            Some(*key) == last
+                || matches!(key, ObjectKey::Generated(id) if id.layer == crate::world::WorldLayer::Startup)
+        });
+        let cars = cars.map(|key| {
+            (
+                physics.chassis_handle(key),
+                world.absolute_vehicle_position(physics, &origin, key),
+            )
+        });
+        self.stream.request_cars(cars);
+        let last_car = self
+            .vehicle
+            .as_ref()
+            .map(|key| self.physics.chassis_handle(key));
+        self.stream
+            .request_kept([self.area.player.seat_body(), last_car]);
     }
     /// Moves the world origin near `focus` when it is far from the origin.
     pub fn rebase_to(&mut self, focus: [f32; 3]) {
