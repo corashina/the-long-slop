@@ -32,7 +32,7 @@ use bevy::render::{
 use bevy::{ecs as bevy_ecs, prelude::*};
 use std::sync::{
     Arc, OnceLock,
-    atomic::{AtomicU32, Ordering},
+    atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
@@ -880,6 +880,9 @@ fn submitted(
             state.audit.first_token = state.audit.token;
         }
         acks.main_submitted(state.audit.token);
+        if THUMBNAIL.swap(false, Ordering::Relaxed) {
+            crate::browser::game_thumbnail_frame();
+        }
         if crate::app::cpu_profile::enabled() {
             crate::browser::game_cpu_submitted(state.audit.token);
         }
@@ -1017,6 +1020,14 @@ struct SourceDiagnostics {
     gate: SourceExecutionGate,
 }
 static SOURCE_DIAGNOSTICS: OnceLock<SourceDiagnostics> = OnceLock::new();
+
+static THUMBNAIL: AtomicBool = AtomicBool::new(false);
+
+/// The canvas holds a frame only in the task that drew it, so the next presented frame calls back.
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn request_thumbnail() {
+    THUMBNAIL.store(true, Ordering::Relaxed);
+}
 
 /// Browser graphics failures use the same terminal state as native device errors.
 #[wasm_bindgen::prelude::wasm_bindgen]

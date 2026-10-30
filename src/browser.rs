@@ -187,6 +187,9 @@ extern "C" {
     /// Copies the received frame into `out` and drops it.
     #[wasm_bindgen(js_namespace = window, js_name = gameSimRead)]
     pub fn game_sim_read(out: &mut [u8]);
+    /// Called in the task that presented the frame, while the canvas still holds it.
+    #[wasm_bindgen(js_namespace = window, js_name = gameThumbnailFrame)]
+    pub fn game_thumbnail_frame();
     #[wasm_bindgen(js_namespace = window, js_name = gameCpuSubmitted)]
     pub fn game_cpu_submitted(token: u32);
     #[wasm_bindgen(js_namespace = window, js_name = gamePerformanceFrame)]

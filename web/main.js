@@ -199,9 +199,10 @@ async function load(){
  const bytes=new Uint8Array(await response.arrayBuffer());
  status.textContent='Loading game code...';
  loading.stage(status.textContent);
- const [{default:init,run,manifest_shell,source_render_failure,source_render_audit,cpu_profile},module]=await code;
+ const [{default:init,run,manifest_shell,source_render_failure,source_render_audit,cpu_profile,request_thumbnail},module]=await code;
  const exports=await init({module_or_path:module});wasmMemory=exports.memory;renderFailure=source_render_failure;renderAudit=source_render_audit;
  rustCpuProfile=cpu_profile;if(startupCpuProfile)rustCpuProfile(true);
+ window.gameThumbnailFrame=()=>thumbnail.frame();thumbnail.connect(request_thumbnail);
  // Rust copies only the shell fields, so JS does not parse the world records.
  const text=manifest_shell(bytes),manifest=JSON.parse(text);
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);

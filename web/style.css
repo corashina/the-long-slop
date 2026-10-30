@@ -59,7 +59,9 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 #save-tiles {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
 .save-tile {display:flex;flex-direction:column;gap:4px;padding:4px;border:1px solid #888;background:#0008;text-align:left;font-size:16px;overflow-wrap:anywhere;}
 .save-tile.selected {border:2px solid #fff;}
-.save-tile.last>span:last-child {color:#e0a050;}
+.save-tile small {color:#bbb;font-size:12px;}
+.save-tile strong {font-weight:400;}
+.save-tile.last strong {color:#e0a050;}
 .save-thumb {display:grid;place-items:center;aspect-ratio:16/9;width:100%;background:#000;}
 .save-thumb img {width:100%;height:100%;object-fit:cover;}
 .save-tile.no-image .save-thumb::before {content:'No image';color:#888;}
