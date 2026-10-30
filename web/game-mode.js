@@ -11,11 +11,11 @@ export function installGameMode(target,select){
  select.addEventListener('change',()=>writeBiome(storage,Number(select.value)));
  target.gameBiome=()=>readBiome(storage);
 }
-// `fields` are the manifest start car fields, such as StartCar01. The list shows Car01.
-export function installStartCar(target,select,fields){
+// `names` are the manifest shell start car names, in start field order.
+export function installStartCar(target,select,names){
  const storage=localStorageOf(target);
- fields.forEach((field,i)=>select.add(new Option(field.replace(/^Start/,''),String(i))));
- select.value=String(readStartCar(storage,fields.length));
+ names.forEach((name,i)=>select.add(new Option(name,String(i))));
+ select.value=String(readStartCar(storage,names.length));
  select.addEventListener('change',()=>writeStartCar(storage,Number(select.value)));
- target.gameStartCar=()=>readStartCar(storage,fields.length);
+ target.gameStartCar=()=>readStartCar(storage,names.length);
 }
