@@ -200,6 +200,14 @@ pub(crate) struct MaterialPrewarmAudit {
     pub(crate) cookies_present: bool,
 }
 impl MaterialLoading {
+    /// Compile the pipelines of a retained mesh and material before loading completes.
+    pub(crate) fn warm(&self, mesh: AssetId<Mesh>, material: UntypedAssetId, label: String) {
+        self.0.lock().unwrap().requests.push(PipelineRequest {
+            mesh,
+            material,
+            label,
+        });
+    }
     pub fn is_ready(&self) -> bool {
         self.0.lock().unwrap().state == RenderingState::Ready
     }
@@ -2259,15 +2267,7 @@ pub(crate) fn warm_retained_material(
 ) {
     world
         .resource::<MaterialLoading>()
-        .0
-        .lock()
-        .unwrap()
-        .requests
-        .push(PipelineRequest {
-            mesh,
-            material,
-            label,
-        });
+        .warm(mesh, material, label);
 }
 
 pub(crate) fn seal_plate_materials(world: &World) {
@@ -2275,6 +2275,9 @@ pub(crate) fn seal_plate_materials(world: &World) {
         && world
             .resource::<super::conditions::ConditionVisuals>()
             .prepared
+        && world
+            .resource::<super::consumables::ConsumableVisuals>()
+            .warmed
     {
         let warmup = world
             .iter_entities()

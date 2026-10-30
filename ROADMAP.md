@@ -66,6 +66,8 @@ Prepare once:
 8. Binoculars: pick up the garage binoculars and hold LMB. The view zooms through the lens with the black two-circle mask, the binoculars and the crosshair hide, and look speed drops. Scroll changes the zoom between 3 and 4 degrees. Release LMB to return. Try it with the binoculars equipped too.
 9. Tune icons: look at the radio volume and tune knobs, the compass and clock knobs, and a tuneable sink tap. Each shows its own mouse wheel image. A tuneable cap without an image shows the cap image.
 10. Garage rest: the garage barrel and the wire brush stay still. Drive the Lada and check that parked cars and dropped items still settle and sleep.
+11. Stairs: walk up stairs without a jump. Duck and walk up again. Prone does not step up.
+12. Press B many times on foot and in the Lada until a turd spawns. The game does not stop. Cut a food with the knife: the piece shows.
 
 ### Car parts and repair
 
@@ -88,6 +90,7 @@ Prepare once:
 17. Save and load. Loot tool paint left, color and wear stay. Drive away and back: they stay.
 18. Start a new game. The Lada body is Used to Old, not 100%, and rust shows. Every new game draws the same state: the startup random is fixed.
 19. Pick two other start cars in the game mode menu. Each starts worn the same way.
+20. Look at the Lada oil cap and coolant cap. Each shows its name and level, like the fuel cap. E opens and closes it.
 
 ### World and terrain
 
@@ -106,6 +109,8 @@ Prepare once:
 13. Metal detector: turn it on and off with use. Check the beep pitch and volume and the needle near metal, buried metal, and behind a wall. Save and load with it on.
 14. Tumbleweeds: check they spawn near the player, roll in gusts, stop near walls, and save with the world.
 15. Drop an item, drive about 10 km out and back, save and reload. The item stays where it was dropped.
+16. Load the game at 500 m and at the largest draw distance, then drive for 5 minutes. The game does not stop with "Source renderer allocation exceeds its resource budget".
+17. Move far in one step (sandbox building('Benzinkut01'), or load a far save). Wait while the area loads. The game does not stop with "validated authored material choice".
 
 ### More cars
 

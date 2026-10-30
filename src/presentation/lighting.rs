@@ -1080,11 +1080,12 @@ fn capture_gpu_errors(device: &RenderDevice, status: Arc<Mutex<RenderingState>>)
 fn extract_lighting(
     source: Extract<Option<Res<SourceLighting>>>,
     conditions: Extract<Res<super::conditions::ConditionVisuals>>,
+    food: Extract<Res<super::consumables::ConsumableVisuals>>,
     mut output: ResMut<ExtractedLighting>,
 ) {
     if let Some(source) = source.as_ref() {
         output.uniform = source.uniform;
-        output.prepared = source.materials_prepared && conditions.prepared;
+        output.prepared = source.materials_prepared && conditions.prepared && food.warmed;
         output.warming = source.warming;
         if source.warming && output.prepared && output.warmups.is_empty() {
             output.warmups.extend(
