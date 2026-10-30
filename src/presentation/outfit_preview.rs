@@ -198,6 +198,7 @@ fn bind(
                 .map_err(|e| e.to_string())
                 .and_then(|e| {
                     outfit_slot(
+                        0,
                         manifest,
                         characters,
                         &clothing.invisible_material,

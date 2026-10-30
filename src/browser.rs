@@ -252,6 +252,12 @@ extern "C" {
     /// Pending `Outfit` JSON, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameOutfit)]
     pub fn game_outfit() -> Option<String>;
+    /// Pending peer outfits JSON `[[slot, outfit], ...]`, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameRemoteLooks)]
+    pub fn game_remote_looks() -> Option<String>;
+    /// Name label of a remote figure in canvas pixels. Negative: hidden.
+    #[wasm_bindgen(js_namespace = window, js_name = gameRemoteLabel)]
+    pub fn game_remote_label(slot: u32, x: f32, y: f32);
     /// Pending "Sunglasses effects" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameSunglassesEffects)]
     pub fn game_sunglasses_effects() -> Option<bool>;

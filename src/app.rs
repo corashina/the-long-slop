@@ -274,7 +274,9 @@ pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
                     presentation::cigarettes::sync,
                     presentation::light_dither::sync,
                     presentation::outfit::poll,
+                    presentation::remote_players::poll,
                     presentation::player_body::sync,
+                    presentation::remote_players::sync,
                     presentation::ragdoll::sync,
                     presentation::outfit_preview::sync,
                     presentation::sky_traffic::sync,
@@ -320,6 +322,8 @@ fn setup(
     commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
     commands.insert_resource(presentation::spawned::SpawnedVisuals::default());
     commands.insert_resource(presentation::player_body::PlayerBody::default());
+    commands.insert_resource(presentation::remote_players::RemoteLooks::default());
+    commands.insert_resource(presentation::remote_players::RemoteFigures::default());
     commands.insert_resource(presentation::ragdoll::RagdollBody::default());
     commands.insert_resource(presentation::outfit::Outfit::defaults(
         &reference.0.clothing.characters,
