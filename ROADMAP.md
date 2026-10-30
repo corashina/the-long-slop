@@ -25,11 +25,15 @@ The starting area, car parts, world and more cars sections are done. Only their 
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| X03 | Creatures | XL | Ground UFO, EMP and green-eyed evil rabbits, human monster (attacks hurt the player), breakablescript `DamageFrom` for AI. Rabbits do not yet sense the player hum. |
-| X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. |
+| X03 | Creatures | XL | Human monster `newAiScript`: patrol, notice, chase, attack, doors, ladders, duck, voice. Its attacks hurt the player. The port only draws its spawn random now. Ground UFO with `empscript`: it jams `electronicsscript` by range and fall-off curve, and makes rabbits evil. Green-eyed evil rabbits. Rabbits sense the player hum (`humscript`). `breakablescript.DamageFrom` for AI. |
+| X07 | Vultures | L | `vultureAI`: fly, flap, land, sit, sleep, search food by smell, eat, food drain, wounds, taming. First check where build 11140890 places vultures. |
+| X04 | Game modes and new game options | M | The Game mode screen has biome and start car only. Add homesick mode (`homesickscript`: the way home from `FirstHome`), peaceful enemies, and the survival switch (`gamemodesettings`). Save each choice. |
+| X08 | Settings and rebinding | L | Add the missing `settingsscript` settings: sound volume, FPS limit, vsync, field of view on foot and in a car, antialiasing, anisotropic filtering. Add switches for fog, shadows, smoke, cloud shadows, sky objects, far terrain, mirrors, reflections, post-processing, DOF, heat haze, grayscale, reduced gibs, help, walk and drive head bob. Add invert mouse, crosshair scale and old crosshair, the always-show survival bars, mirror draw distance, and the custom radio folder. Add keyboard and mouse rebinding. |
+| X09 | Languages, help text, and menu figure | M | `languagetext` translations, `helptextscript` help texts, and the menu player figure with IK (`menuIkScript`). |
+| X10 | Small world systems | M | Snowfall in winter (`snowfallscript`: 9 flake tiles that follow the player). Fire you can put out (`ExtinguishableFire`: 2 s to start, put out, 4 s to start again). Night road follower (`fedospawnscript`: it spawns a `fedoscript` behind the player every `minNight` to `maxNight` nights, by `chance`). First check where the source places each one. |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binocular lens distortion and chromatic aberration, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. |
 
-Not planned: multiplayer, VR, stereo 3D, mod events, Steam features.
+Not planned: multiplayer, VR, stereo 3D (with the 3D depth screenshot), mod events, Steam features, source debug and cheat tools (`Sandworm` key test, fly camera, spawn edit mode, car debug canvas).
 
 ## Test pass
 
@@ -251,6 +255,46 @@ Prepare once:
 12. Start a car engine or hold the horn. Normal rabbits flee from it. Evil rabbits flee from a loud sound far away, but still attack up close.
 13. Turn on a portable radio near rabbits: they react to it like a quiet engine.
 14. Save and load: big rabbits are still evil.
+15. Find a human monster. It patrols, sees you, makes its notice and chase sounds, and chases you.
+16. It opens doors, climbs ladders and ducks under low gaps. Its attack hurts the player. Enough attacks kill you.
+17. Shoot it and hit it with melee weapons. It dies with its death sound and falls as a ragdoll.
+18. Save and load with a live and a dead human monster.
+19. Find a ground UFO. It hums. Near it, car electronics fail: lamps, gauges and radio. They work again when you drive away.
+20. Rabbits near the ground UFO turn evil. Green-eyed evil rabbits attack like red-eyed ones.
+21. Hum near rabbits. They react to the hum.
+22. An AI attack breaks bottles and damages loose items (`DamageFrom`).
+23. Native: one critical test each for the EMP jam fall-off and the human monster attack damage.
+
+### Vultures
+
+1. Find vultures. They fly, flap, land and sit. At night they sleep.
+2. Drop meat or a dead rabbit. A hungry vulture finds it by smell and eats it.
+3. Shoot a vulture. It is wounded or dies.
+4. Tame a vulture as in the source. It follows the source rules.
+5. Save and load with flying, sitting and tamed vultures.
+6. Check F3 with several vultures in view.
+
+### Game modes and settings
+
+1. New game with homesick mode. The game shows the way back to the first home. Save and load keeps the mode.
+2. New game with peaceful enemies. Evil rabbits and human monsters do not attack.
+3. New game with survival off. Food, water, bladder and bowels do not change.
+4. Change each new setting. It takes effect at once and stays after a page reload.
+5. FPS limit and vsync change the F3 frame time as set. Field of view changes on foot and in a car.
+6. Each graphics switch turns its effect off. Check F3 with all of them on and all of them off.
+7. Invert each mouse axis. Change the crosshair scale and use the old crosshair.
+8. Rebind a key and a mouse button. The new binding works. Reload the page: it stays. Reset restores the defaults.
+9. Pick a custom radio folder. The radio plays its songs.
+10. Switch the language. Menus, prompts and help texts change. Help texts show and hide with the help setting.
+11. The start menu shows the player figure with IK. It follows the appearance settings.
+
+### Small world systems
+
+1. Start in Winter. Snow falls around the player and follows you while you drive. No snow falls in Desert. In Mixed, it starts at the biome border.
+2. Check F3 while snow falls.
+3. Find a source fire. Put it out: the fire shrinks over 2 s and smoke plays. After 4 s it starts again.
+4. Stay out for several nights. The night road follower comes from behind and follows the road, then goes away.
+5. Save and load while snow falls, with a fire out, and with the road follower near.
 
 ### Small effects
 
