@@ -362,6 +362,8 @@ impl StateBlock {
     pub const DROP_CAM: u32 = 1 << 14;
     /// The other view is the map view.
     pub const MAP_VIEW: u32 = 1 << 15;
+    /// fpscontroller `Bbinoculars`: the view camera is the binocular camera.
+    pub const BINOCULARS: u32 = 1 << 16;
 }
 
 /// Valve of one opening: 0 closed, 1 open.
@@ -545,7 +547,6 @@ pub struct Feedback {
     pub has_name: bool,
     pub no_text: bool,
     pub fluid_name: String,
-    pub condition: f32,
     pub held_name: String,
     pub throw_charge: f32,
     pub throw_active: bool,
@@ -561,6 +562,10 @@ pub struct Feedback {
     pub lmb_use: bool,
     pub prompts: u8,
     pub computer: u8,
+    /// `interaction::crosshair::Crosshair` layer bits.
+    pub crosshair: u32,
+    /// Source `weightM` of the carried item. It fades the pickup layer children.
+    pub weight: f32,
 }
 
 /// Use and limit of one world budget.
@@ -599,6 +604,8 @@ impl StructureRow {
     pub const DISPLAY_ON: u32 = 1 << 3;
     /// The player wears the item. The camera does not draw its wearable renderers.
     pub const WORN: u32 = 1 << 4;
+    /// The camera does not draw any renderer of the structure.
+    pub const CAMERA_HIDDEN: u32 = 1 << 5;
 }
 
 /// One node write of a structure view. `node` indexes the prototype nodes,

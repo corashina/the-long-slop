@@ -1,6 +1,6 @@
 #import source_float_store::{half4, source_max, source_sat}
 // Installed Uber4653 (main) and Uber4251 (far/foreground), Linear project.
-struct Params { extent: vec4<f32>, noise: vec4<f32>, bloom: vec4<f32>, tint: vec4<f32>, dirt: vec4<f32>, grading: vec4<f32> }
+struct Params { extent: vec4<f32>, noise: vec4<f32>, bloom: vec4<f32>, tint: vec4<f32>, dirt: vec4<f32>, grading: vec4<f32>, vignette: vec4<f32> }
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var source_color: texture_2d<f32>;
 @group(0) @binding(2) var noise_texture: texture_2d<f32>;
@@ -12,6 +12,7 @@ struct Params { extent: vec4<f32>, noise: vec4<f32>, bloom: vec4<f32>, tint: vec
 @group(0) @binding(7) var dirt_texture: texture_2d<f32>;
 @group(0) @binding(8) var lut_texture: texture_3d<f32>;
 @group(0) @binding(9) var linear_repeat: sampler;
+@group(0) @binding(10) var vignette_mask: texture_2d<f32>;
 #endif
 fn f(bits:u32)->f32 { return bitcast<f32>(bits); }
 fn sat3(x:vec3<f32>)->vec3<f32> { return vec3(source_sat(x.x),source_sat(x.y),source_sat(x.z)); }
@@ -41,7 +42,14 @@ fn srgb_to_linear(c:vec3<f32>)->vec3<f32> {
  let exposure=textureLoad(exposure_texture,vec2<i32>(0),0).r;
  color=vec4(color.rgb*exposure,color.a)+vec4(bloom.rgb*params.tint.rgb,bloom.a);
  let dirt=textureSampleLevel(dirt_texture,linear_repeat,fma(uv,params.dirt.xy,params.dirt.zw),0.).rgb*params.bloom.z;
- color=fma(vec4(dirt,0.),bloom,color)*params.grading.z;
+ color=fma(vec4(dirt,0.),bloom,color);
+ // Post stack v2 masked vignette (binocular volume). Unity UV starts at the bottom.
+ if params.vignette.w>0. {
+  let mask=srgb_to_linear(vec3(textureSampleLevel(vignette_mask,linear_clamp,vec2(uv.x,1.-uv.y),0.).a)).x;
+  let masked=color.rgb*mix(params.vignette.rgb,vec3(1.),mask);
+  color=vec4(mix(color.rgb,masked,params.vignette.w),mix(1.,color.a,mask));
+ }
+ color=color*params.grading.z;
  let encoded=sat3(fma(log2(fma(color.rgb,vec3(f(0x40b1c71du)),vec3(f(0x3d449774u)))),vec3(f(0x3d96870eu)),vec3(f(0x3ec5a683u))));
  let lut_uv=fma(encoded*params.grading.y,vec3(params.grading.x),vec3(params.grading.x*.5));
  color=vec4(textureSampleLevel(lut_texture,linear_clamp,lut_uv,0.).rgb,color.a);

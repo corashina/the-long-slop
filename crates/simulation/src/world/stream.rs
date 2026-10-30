@@ -380,7 +380,7 @@ pub struct WorldStream {
     startup: Option<StartupTerrain>,
     /// Fixed prototype placements of the startup list, set with `startup`.
     startup_placements: Vec<Placement>,
-    /// StartSpawnItems world prototype copies, such as the spray bottles: prototype and Transform.
+    /// StartSpawnItems world prototype copies (spray bottles, binoculars): prototype and Transform.
     startup_items: Vec<(crate::reference::SourceId, crate::reference::SourceId)>,
     startup_candidates: Vec<u32>,
     startup_next: usize,
@@ -1027,18 +1027,23 @@ impl WorldStream {
             ready_structures: Vec::with_capacity(32),
             startup: None,
             startup_placements: Vec::new(),
-            startup_items: reference
-                .small_items
-                .spray_bottle
-                .startup
-                .iter()
-                .map(|v| {
-                    (
-                        reference.small_items.spray_bottle.prototype.clone(),
-                        v.transform.clone(),
+            startup_items: {
+                let s = &reference.small_items;
+                let copies = |prototype: &crate::reference::SourceId, transform| {
+                    (prototype.clone(), Clone::clone(transform))
+                };
+                s.spray_bottle
+                    .startup
+                    .iter()
+                    .map(|v| copies(&s.spray_bottle.prototype, &v.transform))
+                    .chain(
+                        s.binoculars
+                            .startup
+                            .iter()
+                            .map(|v| copies(&s.binoculars.prototype, &v.transform)),
                     )
-                })
-                .collect(),
+                    .collect()
+            },
             startup_candidates: Vec::new(),
             startup_next: 0,
             startup_points: Vec::new(),
@@ -4346,7 +4351,7 @@ impl WorldStream {
             self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
             return Err(error);
         }
-        if let Err(error) = self.sync_dial_bindings(items, interaction, physics) {
+        if let Err(error) = self.sync_dial_bindings(&reference.ui, items, interaction, physics) {
             self.binding_reserved = 0;
             return Err(error);
         }
@@ -4374,7 +4379,7 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
-        if let Err(error) = self.sync_radio_bindings(items, interaction, physics) {
+        if let Err(error) = self.sync_radio_bindings(&reference.ui, items, interaction, physics) {
             self.binding_reserved = 0;
             return Err(error);
         }

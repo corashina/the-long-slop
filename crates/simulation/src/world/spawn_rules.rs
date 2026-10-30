@@ -522,6 +522,16 @@ pub fn optional<'a>(
         _ => Err(ReferenceError(format!("Invalid source link {n}"))),
     }
 }
+/// `mainscript.CrossHairStuff`: the GCMMB sprite of a `tuneAble` usablescript.
+pub fn tune_icon<'a>(
+    usable: impl FieldAccess<'a>,
+    ui: &crate::reference::UiReference,
+) -> Result<Option<u32>, ReferenceError> {
+    if !flag(usable, "tuneAble")? {
+        return Ok(None);
+    }
+    Ok(optional(usable, "img")?.and_then(|img| ui.sprite(img)))
+}
 pub fn link<'a>(f: impl FieldAccess<'a>, n: &str) -> Result<&'a SourceId, ReferenceError> {
     optional(f, n)?.ok_or_else(|| ReferenceError(format!("Null source link {n}")))
 }

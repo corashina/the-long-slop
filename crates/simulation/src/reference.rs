@@ -537,6 +537,8 @@ pub struct OpeningRecord {
     pub valve: f32,
     pub can_tune: bool,
     pub tune_rate: f32,
+    /// `img`: the GCMMB sprite of a `canTune` cap. None shows `ICap`.
+    pub tune_icon: Option<SourceId>,
     pub visuals: CapVisualReference,
     pub presentation: FluidPresentation,
 }
@@ -898,6 +900,15 @@ pub struct LibraryProvenance {
     pub source_manifest_sha256: String,
 }
 
+/// Source `PhysicsManager` settings.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhysicsSettings {
+    pub source: SourceId,
+    /// `m_SleepThreshold`: the PhysX mass-normalized kinetic energy below which a body sleeps.
+    pub sleep_threshold: f32,
+}
+
 /// The manifest with all world vehicle prototypes is about 295 MB.
 pub const MAX_MANIFEST_BYTES: usize = 384 * 1024 * 1024;
 
@@ -936,6 +947,7 @@ pub struct ReferenceManifest {
     pub crash: CrashReference,
     pub breakables: Vec<BreakableReference>,
     pub gib_constants: GibConstants,
+    pub physics: PhysicsSettings,
     pub skid: SkidReference,
     pub app_id: u32,
     pub build_id: u32,
@@ -1001,6 +1013,10 @@ fn hash(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+fn valid_tune_icon(can_tune: bool, icon: &Option<SourceId>, ui: &UiReference) -> bool {
+    icon.as_ref()
+        .is_none_or(|icon| can_tune && ui.sprite(icon).is_some())
+}
 fn valid_tuning(valve: f32, can_tune: bool, tune_rate: f32) -> bool {
     valve.is_finite()
         && (0.0..=1.0).contains(&valve)
@@ -1692,7 +1708,8 @@ impl ReferenceManifest {
         }
         for r in &self.openings {
             require(
-                valid_tuning(r.valve, r.can_tune, r.tune_rate),
+                valid_tuning(r.valve, r.can_tune, r.tune_rate)
+                    && valid_tune_icon(r.can_tune, &r.tune_icon, &self.ui),
                 "opening valve/tuning",
             )?;
             validate_cap_visuals(&r.visuals, |id| node_ids.contains(&id))?;
@@ -1964,6 +1981,10 @@ impl ReferenceManifest {
             breakable.validate(self)?;
         }
         self.gib_constants.validate()?;
+        require(
+            self.physics.sleep_threshold.is_finite() && self.physics.sleep_threshold > 0.,
+            "physics sleep threshold",
+        )?;
         wheel_effects::validate(self)?;
         self.conditions.validate(self)?;
         Ok(())

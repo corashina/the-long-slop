@@ -37,7 +37,7 @@ impl ActionMask {
     pub const CRANK: u32 = 1 << 31;
 }
 /// Item prompt bits. Hose: attach on the mount key, coil up on R, drain on LMB.
-/// Ammo: reload on R, unload on E.
+/// Ammo: reload on R, unload on E. Binoculars: use on LMB, focus on MMB.
 pub struct ItemPrompt;
 impl ItemPrompt {
     pub const ATTACH: u8 = 1;
@@ -45,6 +45,10 @@ impl ItemPrompt {
     pub const DRAIN: u8 = 4;
     pub const RELOAD: u8 = 8;
     pub const UNLOAD: u8 = 16;
+    /// Binoculars: LMB use.
+    pub const LOOK: u8 = 32;
+    /// Binoculars in use: MMB focus.
+    pub const FOCUS: u8 = 64;
 }
 /// Computer prompt bits: R turns on or off, LMB uses, E connects or disconnects a held one.
 pub struct ComputerPrompt;
@@ -94,6 +98,10 @@ pub struct ActionAvailability {
     /// `ItemPrompt` bits.
     pub prompts: u8,
     pub(super) hose_cap: Option<OpeningId>,
+    /// The adjust icon of the looked usable.
+    pub adjust: super::crosshair::AdjustIcon,
+    /// GCMMB sprite of the looked knob or cap, as a `UiReference::sprites` index.
+    pub tune_icon: Option<u32>,
 }
 pub struct FluidFeedback<'a> {
     pub amount: f32,
@@ -197,8 +205,9 @@ impl InteractionState {
             };
         }
         if let Some(t) = use_target {
-            if let Some((_, kind)) = self.dial_knob(&t, physics) {
+            if let Some((id, kind)) = self.dial_knob(&t, physics) {
                 use super::Knob;
+                a.tune_icon = self.tune_icons.get(&id).copied();
                 a.context = match kind {
                     Knob::Volume => FeedbackContext::RadioVolume,
                     Knob::Tuning => FeedbackContext::RadioTuning,
@@ -209,6 +218,9 @@ impl InteractionState {
                     Knob::Crank => ActionMask::CRANK,
                     _ => ActionMask::TUNE | ActionMask::SCROLL,
                 };
+                if kind == Knob::Crank {
+                    a.adjust = super::crosshair::AdjustIcon::Rotate;
+                }
             }
             if self.mechanisms.contains(t.item) {
                 a.context = FeedbackContext::Mechanism;
@@ -219,6 +231,7 @@ impl InteractionState {
                     }
                 } else {
                     a.actions.0 |= ActionMask::DOOR;
+                    a.adjust = self.mechanisms.adjust_icon(t.item);
                     if self.mechanisms.scroll_eligible(t.item) {
                         a.actions.0 |= ActionMask::SCROLL;
                     }
@@ -236,6 +249,7 @@ impl InteractionState {
                 }
                 if o.reference.can_tune {
                     a.actions.0 |= ActionMask::TUNE;
+                    a.tune_icon = o.reference.tune_icon;
                 }
             }
             if self
@@ -399,9 +413,7 @@ impl InteractionState {
             && !latched_fill
             && !drink_guard
             && !food_guard
-            && !self
-                .cleaning
-                .reserves_lmb(self.equipment.item(), self.held());
+            && !self.reserves_lmb();
         if self.latched_mechanism.is_none()
             && let Some(t) = aim.light_target
             && t.distance.is_finite()
@@ -418,6 +430,7 @@ impl InteractionState {
                 | ActionMask::SWITCH
                 | ActionMask::PRIMARY_SWITCH
                 | ActionMask::SCROLL);
+            a.adjust = super::crosshair::AdjustIcon::None;
             a.context = FeedbackContext::LightSwitch;
         }
         if player.seated()
@@ -447,6 +460,15 @@ impl InteractionState {
                 Some(185) => a.actions.0 |= ActionMask::WASH,
                 Some(186) => a.actions.0 |= ActionMask::SCRUB,
                 _ => {}
+            }
+        }
+        if self
+            .binoculars
+            .reserves_lmb(self.equipment.item(), self.held())
+        {
+            a.prompts |= ItemPrompt::LOOK;
+            if self.binoculars.active().is_some() {
+                a.prompts |= ItemPrompt::FOCUS;
             }
         }
         if a.active_drag {

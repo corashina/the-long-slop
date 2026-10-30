@@ -63,6 +63,7 @@ pub struct UiReference {
     pub hose_prompts: HosePrompts,
     pub computer_prompts: ComputerPrompts,
     pub ammo_prompts: AmmoPrompts,
+    pub binocular_prompts: BinocularPrompts,
     pub need_sliders: HashMap<String, NeedSlider>,
     pub sprites: Vec<UiSprite>,
     pub pairs: Vec<MenuPair>,
@@ -96,7 +97,20 @@ pub struct AmmoPrompts {
     pub reload: String,
     pub unload: String,
 }
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BinocularPrompts {
+    pub r#use: String,
+    pub focus: String,
+}
 impl UiReference {
+    /// The `sprites` index of a source sprite.
+    pub fn sprite(&self, source: &SourceId) -> Option<u32> {
+        self.sprites
+            .iter()
+            .position(|s| s.source == *source)
+            .map(|i| i as u32)
+    }
     pub fn validate(&self) -> Result<(), ReferenceError> {
         require(
             !self.sprites.is_empty() && !self.pairs.is_empty(),
@@ -117,6 +131,10 @@ impl UiReference {
         require(
             !self.ammo_prompts.reload.is_empty() && !self.ammo_prompts.unload.is_empty(),
             "ammo prompts",
+        )?;
+        require(
+            !self.binocular_prompts.r#use.is_empty() && !self.binocular_prompts.focus.is_empty(),
+            "binocular prompts",
         )?;
         for role in ["food", "water", "hp", "bladder", "bowel", "sleep"] {
             let slider = self
@@ -153,8 +171,25 @@ impl UiReference {
             )?;
         }
         for role in [
-            "default", "door", "mount", "fill", "enter", "exit", "cap", "pickup", "dismount",
+            "default",
+            "door",
+            "slide",
+            "slide-vertical",
+            "switch",
+            "push",
+            "mount",
+            "hose",
+            "attach",
+            "fill",
+            "enter",
+            "exit",
+            "cap",
+            "pickup",
+            "dismount",
             "carrying",
+            "carrying-medium",
+            "carrying-heavy",
+            "too-heavy",
         ] {
             require(
                 self.icons

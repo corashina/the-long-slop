@@ -234,6 +234,8 @@ pub struct PhysicsWorld {
     hits: Vec<HitContact>,
     trigger_enters: Vec<[ColliderHandle; 2]>,
     ignored: mutations::IgnoredCollisions,
+    /// Farthest-point speed below which a body sleeps.
+    sleep_speed: f32,
 }
 
 impl PhysicsWorld {
@@ -253,6 +255,8 @@ impl PhysicsWorld {
             trigger_enters: Vec::with_capacity(HIT_CAPACITY),
             ignored: Default::default(),
             inactive_bodies: std::collections::HashSet::with_capacity(bodies),
+            sleep_speed:
+                rapier3d::prelude::RigidBodyActivation::default_normalized_linear_threshold(),
         };
         physics.physics.integration_parameters.dt = FIXED_DT;
         physics
@@ -280,6 +284,8 @@ impl PhysicsWorld {
             hits: Vec::new(),
             trigger_enters: Vec::new(),
             ignored: Default::default(),
+            sleep_speed:
+                rapier3d::prelude::RigidBodyActivation::default_normalized_linear_threshold(),
         }
     }
     pub fn vehicle_count(&self) -> usize {

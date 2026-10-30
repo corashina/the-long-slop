@@ -229,7 +229,9 @@ impl ViewState {
             .head
             .lerp(self.lean, (dt * self.reference.head_lerp).min(1.));
         (!held && !(self.standing_lean && !seated) && !context.mouse_consumed).then_some(
-            if zooming {
+            if context.binoculars {
+                crate::interaction::binoculars::LOOK_SCALE
+            } else if zooming {
                 self.reference.zoom_multiplier
             } else {
                 1.

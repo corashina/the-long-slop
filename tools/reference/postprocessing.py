@@ -46,7 +46,7 @@ def recover_grading(settings):
 
 def recover_postprocessing(source):
     """Recover the selected main-camera stack after startup settings and volume blending."""
-    from .source import source_id
+    from .source import key, source_id
     def read(file, pid):
         reader = source.get(file, pid)
         return reader, source.read(reader)
@@ -69,6 +69,18 @@ def recover_postprocessing(source):
     if len(blue_noise) != 64 or len({(v['file'], v['path_id']) for v in blue_noise}) != 64:
         raise ValueError('Source dithering requires 64 distinct blue-noise textures')
     dirt = source_id(source.resolve(bloom_reader, p(bloom, 'dirtTexture')))
+    # The binocular volume profile `tavcso`. tavcsoscript.Update sets the mask to defVignette.
+    profile_reader, profile = read('sharedassets0.assets', 1369)
+    vignette_reader, vignette = effect(1373)
+    if (profile['m_Name'] != 'tavcso' or key(vignette_reader) not in
+            [key(source.resolve(profile_reader, s)) for s in profile['settings']]):
+        raise ValueError('Binocular profile vignette differs')
+    if p(vignette, 'mode') != 1:
+        raise ValueError('Binocular vignette requires the masked mode')
+    binoculars_reader, binoculars = read('sharedassets1.assets', 144842)
+    mask = source.resolve(binoculars_reader, binoculars['defVignette']['value'])
+    if mask is None or mask.type.name != 'Texture2D':
+        raise ValueError('Binocular vignette mask is missing')
     filtering = p(exposure, 'filtering')
     return {
         'main_layer': source_id(layer_reader),
@@ -88,6 +100,9 @@ def recover_postprocessing(source):
                       'upsample_tolerance': p(ao, 'upsampleTolerance', -12.),
                       'direct_lighting_strength': p(ao, 'directLightingStrength', 0.)},
         'grading': recover_grading(grading), 'blue_noise': blue_noise,
+        'binoculars': {'profile': source_id(profile_reader),
+                       'color': [p(vignette, 'color')[c] for c in ('r', 'g', 'b', 'a')],
+                       'opacity': p(vignette, 'opacity'), 'mask': source_id(mask)},
         'heat_haze_weight': 0.,
     }
 

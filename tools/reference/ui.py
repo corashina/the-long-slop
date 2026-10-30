@@ -112,10 +112,17 @@ def export_ui(source, output, library):
             'carry':'TextMoveRotateHelp','fluid':'TTankCap','reticle':'GCDef','foot':'TextCF1','driving':'TextCC1'}
     for role,field in fields.items():layout(source.resolve(menu,md[field]),role)
     icons={}
-    for role,field in [('door','IAdjust'),('mount','IMount'),('fill','IFill'),('enter','ISit'),('exit','ISit2'),('cap','ICap')]:
+    # mainscript.CrossHairStuff sets these sprites on the GCE, GCAdjust, GCMMB, GCF and GCLMB images.
+    for role,field in [('door','IAdjust'),('slide','ISlide'),('slide-vertical','ISlideV'),('switch','ISwitch'),('push','IPush'),
+                       ('mount','IMount'),('hose','IHose'),('attach','IAttach'),('fill','IFill'),('enter','ISit'),('exit','ISit2'),('cap','ICap')]:
         icons[role]=sprite(source.resolve(menu,md[field]),role)
-    for role,field in [('default','GCDef'),('pickup','GCCanPickup'),('dismount','GCDismount'),('carrying','GCPickup')]:
-        image=source.resolve(menu,md[field]);icons[role]=sprite(source.resolve(image,source.read(image)['m_Sprite']),role)
+    def image_sprite(image,role):return sprite(source.resolve(image,source.read(image)['m_Sprite']),role)
+    for role,field in [('default','GCDef'),('pickup','GCCanPickup'),('dismount','GCDismount'),('carrying','GCPickup'),('too-heavy','GCTooHeavy')]:
+        icons[role]=image_sprite(source.resolve(menu,md[field]),role)
+    # GCPickups: the children of GCPickup that fade in with the carried weight.
+    pickups=md['GCPickups']
+    if len(pickups)!=2:raise ValueError('GCPickups must hold the medium and heavy images')
+    for role,pointer in zip(('carrying-medium','carrying-heavy'),pickups):icons[role]=image_sprite(source.resolve(menu,pointer),role)
     need_sliders={}
     for role,field in [('food','SFood'),('water','SWater'),('hp','SHp'),('bladder','SPiss'),('bowel','SShit'),('sleep','SSleepValue')]:
         slider=source.resolve(menu,md[field]);d=source.read(slider)
@@ -150,12 +157,14 @@ def export_ui(source, output, library):
     if not pairs:raise ValueError('Missing source menu frames')
     for identity in sorted(getattr(source, 'pickup_icons', set())):
         sprite(source.get(*identity), 'inventory-item')
-    for identity in sorted(getattr(source, 'crosshair_icons', set())):
+    for identity in sorted(source.crosshair_icons):
         sprite(source.get(*identity), 'crosshair')
     from .hose import hose_prompts
     from .caps import word
     from .computer import computer_prompts
     # fpscontroller ammo texts: R (canReload, ls.w.reload) and E (ls.w.unload).
     ammo_prompts={'reload':word(source,'reload'),'unload':word(source,'unload')}
-    return {'hose_prompts':hose_prompts(source),'ammo_prompts':ammo_prompts,'computer_prompts':computer_prompts(source),'need_sliders':need_sliders,'sprites':sprites,'pairs':pairs,'icons':icons,'layouts':layouts,
+    # fpscontroller binoculars: LMB use, MMB focus while used.
+    binocular_prompts={'use':word(source,'use'),'focus':word(source,'focus')}
+    return {'hose_prompts':hose_prompts(source),'ammo_prompts':ammo_prompts,'binocular_prompts':binocular_prompts,'computer_prompts':computer_prompts(source),'need_sliders':need_sliders,'sprites':sprites,'pairs':pairs,'icons':icons,'layouts':layouts,
             'overlay_color':[180/255,128/255,70/255,64/255],'frame_color':[180/255,128/255,70/255,1.]}

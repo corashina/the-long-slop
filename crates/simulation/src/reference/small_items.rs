@@ -1,4 +1,4 @@
-//! Checked spirit level, spray bottle, genie lamp, start pack, and mouth smoke inputs.
+//! Checked spirit level, spray bottle, genie lamp, binoculars, start pack, and mouth smoke inputs.
 use super::*;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -7,6 +7,7 @@ pub struct SmallItemsReference {
     pub spirit_level: SpiritLevelReference,
     pub spray_bottle: SprayBottleReference,
     pub genie_lamp: GenieLampReference,
+    pub binoculars: BinocularsReference,
     pub start_packs: Vec<SmallItemStartReference>,
     pub exhale: ExhaleReference,
     pub washes: Vec<WashTriggerReference>,
@@ -132,6 +133,33 @@ pub struct GenieLampReference {
     pub startup_value: f32,
 }
 
+/// Source `tavcsoscript`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BinocularsReference {
+    pub item: u32,
+    pub prototype: SourceId,
+    pub source: SourceId,
+    /// `CamR` Transform. The view moves to it.
+    pub camera: SourceId,
+    pub focus_distance: f32,
+    pub focus_sensitivity: f32,
+    pub min_focus: f32,
+    pub max_focus: f32,
+    pub min_fov: f32,
+    pub max_fov: f32,
+    pub startup: Vec<BinocularsStartReference>,
+}
+
+/// A StartSpawnItems binoculars copy.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BinocularsStartReference {
+    pub source: SourceId,
+    pub transform: SourceId,
+    pub item_id: u32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExhaleReference {
@@ -145,6 +173,7 @@ pub struct ExhaleReference {
 const SPIRIT_LEVEL_ITEM: u32 = 401;
 const SPRAY_BOTTLE_ITEM: u32 = 121;
 const GENIE_LAMP_ITEM: u32 = 211;
+const BINOCULARS_ITEM: u32 = 85;
 const PACK_ITEM: u32 = 74;
 const START_BOTTLES: usize = 2;
 const START_PACKS: usize = 3;
@@ -313,6 +342,36 @@ impl SmallItemsReference {
             "genie lamp",
         )?;
 
+        let b = &self.binoculars;
+        let p = prototype(BINOCULARS_ITEM, "binoculars", &b.prototype)?;
+        checked(
+            b.item == BINOCULARS_ITEM
+                && class(&b.source, "tavcsoscript")
+                && inside(p, &b.camera)
+                && finite(&[
+                    b.focus_distance,
+                    b.focus_sensitivity,
+                    b.min_focus,
+                    b.max_focus,
+                    b.min_fov,
+                    b.max_fov,
+                ])
+                && b.focus_sensitivity > 0.
+                && b.min_focus < b.max_focus
+                && 0. < b.min_fov
+                && b.min_fov < b.max_fov
+                && b.startup.len() == 1
+                && b.startup.iter().all(|v| {
+                    v.source.file == "level1"
+                        && class(&v.source, "tavcsoscript")
+                        && records
+                            .get(&v.transform)
+                            .is_some_and(|r| r.class_name == "Transform")
+                        && v.item_id == BINOCULARS_ITEM
+                }),
+            "binoculars",
+        )?;
+
         checked(self.start_packs.len() == START_PACKS, "start packs")?;
         for v in &self.start_packs {
             checked(
@@ -324,7 +383,8 @@ impl SmallItemsReference {
             s.startup
                 .iter()
                 .chain(&self.start_packs)
-                .map(|v| &v.transform),
+                .map(|v| &v.transform)
+                .chain(b.startup.iter().map(|v| &v.transform)),
             "duplicate small item start",
         )?;
 

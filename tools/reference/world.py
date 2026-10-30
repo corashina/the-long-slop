@@ -45,7 +45,11 @@ RULE_CLASSES = {'roadscript', 'buildingscript', 'newRandomStuffSpawnScript', 'st
     # Towing (V05): the trailer grip spawns at Start.
     'attachgripscript',
     # Explosions (X02 part 4): explosive props.
-    'explosivescript'}
+    'explosivescript',
+    # Binoculars (S2).
+    'tavcsoscript'}
+# Catalog items that only StartSpawnItems holds. No spawner reaches them.
+START_ONLY_ITEMS = {85}
 # ediblescript components of the selected food prototypes (survival.FOOD_FIELDS and GTurd).
 EDIBLE_COMPONENTS = {('sharedassets1.assets',path_id) for path_id in (134641,134643,134644,134645,134646,134647,149631)}
 def selected_actions(source, scripts, actions):
@@ -401,7 +405,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     # Include direct supported nested prefab links. Keep every rule even for excluded draws.
     excluded=[]
     required_categories=set()
-    required_items=set()
+    required_items=set(START_ONLY_ITEMS)
     def catalog_items(name,is_item):
         if is_item:
             matches=[i['index'] for i in catalog['items'] if i['name']==name]
@@ -564,12 +568,21 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     for identity,record in selected.records.items():
         if identity not in records:records[identity]=record
     world['records']=list(records.values())
+    bind_tune_icons(source,world)
     bind_light_cookies(source,world,output)
     from .world_spawn import project_runtime_receipts
     from .world_fields import project_runtime_fields
     project_runtime_receipts(world)
     project_runtime_fields(world)
     return world
+
+def bind_tune_icons(source, world):
+    """mainscript.CrossHairStuff: GCMMB shows the img of a looked tuneAble usable or canTune cap."""
+    for r in world['records']:
+        flag={'usablescript':'tuneAble','tankcapscript':'canTune'}.get(r['class_name'])
+        img=r['fields'].get('img') if flag else None
+        if img and img['kind']=='link' and r['fields'][flag]['value']:
+            source.crosshair_icons.add(tuple(img['value'].values()))
 
 def bind_light_cookies(source, world, output):
     """Bind each world spot Light cookie to its lighting texture. The renderer packs these textures."""

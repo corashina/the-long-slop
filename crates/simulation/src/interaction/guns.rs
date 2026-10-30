@@ -1631,12 +1631,11 @@ fn gun(
             .map(|f| Ok::<_, ReferenceError>(index(&f.node)? as u32))
             .transpose()?,
         hand,
-        crosshair: record.crosshair.icon.as_ref().and_then(|icon| {
-            r.ui.sprites
-                .iter()
-                .position(|s| s.source == *icon)
-                .map(|i| i as u32)
-        }),
+        crosshair: record
+            .crosshair
+            .icon
+            .as_ref()
+            .and_then(|icon| r.ui.sprite(icon)),
         record: record.clone(),
     })
 }

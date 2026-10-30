@@ -1,4 +1,4 @@
-"""Checked spirit level, spray bottle, genie lamp, start packs, and mouth smoke inputs."""
+"""Checked spirit level, spray bottle, genie lamp, binoculars, start packs, and mouth smoke inputs."""
 from .source import key, source_id
 from .survival import component, managed_evidence
 from .lighting import gradient
@@ -8,9 +8,13 @@ from .particles import particle
 SPIRIT_LEVEL=(401,'waterlevel',147652,'bubbleLevelScript')
 SPRAY_BOTTLE=(121,'jizzonit',142096,'spricniscript')
 GENIE_LAMP=(211,'ginlamp',152760,'ginlampscript')
+BINOCULARS=(85,'binoculars',144842,'tavcsoscript')
 # StartSpawnItems copies: script and ammoscript.
 START_BOTTLES=((71175,78224),(71176,78226))
 START_PACKS=((80187,77156),(70712,70989),(70715,70994))
+# The garage binoculars tavcsoscript.
+START_BINOCULARS=72758
+BINOCULAR_FIELDS=('eyeDist','focusDistance','focusDistanceSens','minfocusDistance','maxfocusDistance','minfov','maxfov')
 START_GROUP=21481
 # World prototype CobWeb wash triggers. Inactive level1 scene copies lie on no prototype.
 COBWEBS=529
@@ -34,7 +38,14 @@ EVIDENCE=[
     'if (repairValue > 1f && !neverRepair)',
     'UnityEngine.Object.Instantiate(particleOnDestroy, transform.position, Quaternion.identity);',
     'if (chanceToStartDisabled > 0f && UnityEngine.Random.Range(0f, 1f) < chanceToStartDisabled)',
-    'if (input.reload && Time.time - lastReloadTime >= ammoscript2.pourTime)']
+    'if (input.reload && Time.time - lastReloadTime >= ammoscript2.pourTime)',
+    'focusDistance = Mathf.Clamp(focusDistance, minfocusDistance, maxfocusDistance);',
+    'currentFov = Mathf.Lerp(minfov, maxfov, Mathf.InverseLerp(maxfocusDistance, minfocusDistance, focusDistance));',
+    'focusDistance += pf * focusDistanceSens;',
+    'pP.tavcso.Focusing(scroll * dt);',
+    'MoveCamParent(currentTavcso.CamR.transform.position);',
+    'RotateCamParent(currentTavcso.CamR.transform.rotation);',
+    'currentFieldOfView = currentTavcso.currentFov;']
 
 
 def animation_curve(data):
@@ -132,6 +143,25 @@ def recover_small_items(source, manifest, output) -> dict:
         'gain':d['gainValue'],'lose':d['loseValue'],'intensity':animation_curve(d['intensity']),'range':animation_curve(d['range']),
         'emission':gradient(d['emission']),'startup_value':d['value']}
 
+    record,reader,d,link=owner(BINOCULARS)
+    camera=node_of(link(d,'CamR','Camera'))
+    hidden=link(d,'makeInvisible','MonoBehaviour');hd=source.read(hidden)
+    if source.class_name(hidden)!='makeinvisible' or not hd['make']:raise ValueError(f'{key(hidden)} is not a set makeinvisible')
+    root=source.transform_for(source.resolve(reader,d['m_GameObject']))
+    renderers={key(c) for n in source.hierarchy(root) for c in n['components'] if c.type.name=='MeshRenderer'}
+    # makeinvisible.R holds every renderer, so the runtime hides the whole item.
+    if {key(source.resolve(hidden,r)) for r in hd['R']}!=renderers:raise ValueError(f'{key(hidden)} renderers differ from the item')
+    if not d['minfocusDistance']<d['maxfocusDistance'] or not 0<d['minfov']<d['maxfov']:raise ValueError(f'{key(reader)} focus range differs')
+    copy=source.get('level1',START_BINOCULARS);cd=source.read(copy)
+    copy_root=source.transform_for(source.resolve(copy,cd['m_GameObject']))
+    if (source.class_name(copy)!='tavcsoscript' or key(source.resolve(copy_root,source.read(copy_root)['m_Father']))!=key(group)
+            or not source.read(source.resolve(copy,cd['m_GameObject']))['m_IsActive'] or any(cd[f]!=d[f] for f in BINOCULAR_FIELDS)):
+        raise ValueError(f'{key(copy)} differs from its catalog prefab')
+    binoculars={**record,'camera':source_id(camera),'focus_distance':d['focusDistance'],'focus_sensitivity':d['focusDistanceSens'],
+        'min_focus':d['minfocusDistance'],'max_focus':d['maxfocusDistance'],'min_fov':d['minfov'],'max_fov':d['maxfov'],
+        'startup':[{'source':source_id(copy),'transform':source_id(copy_root),
+            'item_id':source.read(component(source,copy_root,'tosaveitemscript'))['id']}]}
+
     start_packs=[start_copy(script_id,ammo_id,'cigiscript') for script_id,ammo_id in START_PACKS]
     washes,wash_effects=recover_washes(source,manifest,output,genie_lamp['wash_trigger'])
 
@@ -143,7 +173,7 @@ def recover_small_items(source, manifest, output) -> dict:
     if key(node) not in node_ids:raise ValueError('level1:80125 smokeParticle node is not exported')
     exhale={'controller':source_id(player),'node':node_ids[key(node)],'max_rate':pd['maxSmokeParticleRate'],
         'charge_speed':pd['smokeParticleChargeSpeed'],'particle':particle(source,system,'mouth_smoke',pd['maxSmokeParticleRate'],output,node)}
-    return {'spirit_level':spirit_level,'spray_bottle':spray_bottle,'genie_lamp':genie_lamp,'start_packs':start_packs,'exhale':exhale,
+    return {'spirit_level':spirit_level,'spray_bottle':spray_bottle,'genie_lamp':genie_lamp,'binoculars':binoculars,'start_packs':start_packs,'exhale':exhale,
         'washes':washes,'wash_effects':wash_effects}
 
 
@@ -208,7 +238,7 @@ def _curve(c):
 
 
 def validate_small_items(record, manifest) -> None:
-    _shape(record,'spirit_level spray_bottle genie_lamp start_packs exhale washes wash_effects')
+    _shape(record,'spirit_level spray_bottle genie_lamp binoculars start_packs exhale washes wash_effects')
     clips={(c['source']['file'],c['source']['path_id']) for c in manifest['audio']['clips']}
     l=record['spirit_level'];_shape(l,'item prototype source bubbles')
     if l['item']!=SPIRIT_LEVEL[0] or len(l['bubbles'])!=3:raise ValueError('Spirit level owner differs')
@@ -227,6 +257,13 @@ def validate_small_items(record, manifest) -> None:
     _shape(g,'item prototype source light renderer material wash_trigger gain lose intensity range emission startup_value')
     _curve(g['intensity']);_curve(g['range'])
     if g['item']!=GENIE_LAMP[0] or not g['emission']['colors'] or not 0<g['lose']<g['gain']:raise ValueError('Genie lamp values differ')
+    b=record['binoculars']
+    _shape(b,'item prototype source camera focus_distance focus_sensitivity min_focus max_focus min_fov max_fov startup')
+    for f in ('focus_distance','focus_sensitivity','min_focus','max_focus','min_fov','max_fov'):_number(b[f])
+    if b['item']!=BINOCULARS[0] or not b['min_focus']<b['max_focus'] or not 0<b['min_fov']<b['max_fov'] or b['focus_sensitivity']<=0:
+        raise ValueError('Binocular values differ')
+    if len(b['startup'])!=1 or b['startup'][0]['item_id']!=BINOCULARS[0]:raise ValueError('Start binoculars differ')
+    for c in b['startup']:_shape(c,'source transform item_id')
     if len(record['start_packs'])!=len(START_PACKS) or any(p['item_id']!=74 or p['ammo']['type']!=5 for p in record['start_packs']):
         raise ValueError('Start cigarette packs differ')
     e=record['exhale'];_shape(e,'controller node max_rate charge_speed particle')

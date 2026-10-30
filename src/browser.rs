@@ -318,7 +318,6 @@ extern "C" {
         has_name: bool,
         no_text: bool,
         fluid_name: &str,
-        condition: f32,
         held: &str,
         throw_charge: f32,
         throw_active: bool,
@@ -339,6 +338,8 @@ extern "C" {
         lmb_use: bool,
         prompts: u32,
         computer: u32,
+        crosshair: u32,
+        weight: f32,
     );
 }
 /// The local month and day.

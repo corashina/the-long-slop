@@ -151,8 +151,8 @@ struct Instance {
     gpu: usize,
     objects: usize,
     visible: bool,
-    /// The player wears the item. See `StructureRow::WORN`.
-    worn: bool,
+    /// `StructureRow::WORN` and `StructureRow::CAMERA_HIDDEN` of the last view.
+    hidden: u32,
     origin: [f64; 3],
 }
 impl Instance {
@@ -1129,7 +1129,7 @@ impl SourceInstances {
                                 gpu,
                                 objects,
                                 visible: false,
-                                worn: false,
+                                hidden: 0,
                                 origin: stream.origin.offset,
                             })
                         })();
@@ -1466,21 +1466,24 @@ impl SourceInstances {
                     }
                 }
             }
-            let worn = view.flags & StructureRow::WORN != 0;
-            if worn != instance.worn {
-                instance.worn = worn;
+            let hidden = view.flags & (StructureRow::WORN | StructureRow::CAMERA_HIDDEN);
+            if hidden != instance.hidden {
+                instance.hidden = hidden;
                 for renderer in &instance.renderers {
-                    if !worn_renderer(reference, prototype, renderer.node) {
-                        continue;
-                    }
+                    // Only these flags hide structure renderers, so each renderer takes the new state.
+                    let camera_hidden = hidden & StructureRow::CAMERA_HIDDEN != 0
+                        || (hidden & StructureRow::WORN != 0
+                            && worn_renderer(reference, prototype, renderer.node));
                     match renderer.target {
-                        Target::Entity(entity) if worn => {
+                        Target::Entity(entity) if camera_hidden => {
                             commands.entity(entity).insert(CameraHidden);
                         }
                         Target::Entity(entity) => {
                             commands.entity(entity).remove::<CameraHidden>();
                         }
-                        Target::Row { slot, .. } => self.props.set_camera_hidden(slot, worn),
+                        Target::Row { slot, .. } => {
+                            self.props.set_camera_hidden(slot, camera_hidden)
+                        }
                     }
                 }
             }

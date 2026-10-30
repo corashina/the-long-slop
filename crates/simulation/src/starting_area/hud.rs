@@ -23,12 +23,13 @@ pub(super) struct FeedbackStamp {
     capacity: f32,
     percents: [u32; 6],
     order: u32,
-    condition: u32,
     held: Option<ItemId>,
     throw_charge: u32,
     throw_active: bool,
     rpm: u32,
     engine_flags: [bool; 5],
+    crosshair: u32,
+    weight: u32,
 }
 
 impl GarageRuntime {
@@ -154,10 +155,6 @@ impl GarageRuntime {
             capacity = maximum;
             no_text = false;
         }
-        let condition = available
-            .item
-            .and_then(|id| self.area.interaction.conditions.item_quality(id))
-            .unwrap_or(-1.0);
         let held = self.area.interaction.held();
         let notice = if !self.notice.is_empty() {
             self.notice
@@ -172,13 +169,26 @@ impl GarageRuntime {
         let seated = self.area.player.seated();
         let throw_charge = self.area.interaction.throw_charge();
         let throw_active = self.area.interaction.throw_active();
+        let weight = self.area.interaction.carry.weight_factors(&self.physics);
+        // mainscript.CrossHairStuff hides the crosshair while the player uses binoculars.
+        let crosshair = if self.area.interaction.binoculars.active().is_some() {
+            0
+        } else {
+            crate::interaction::crosshair::crosshair(
+                &available,
+                info.carrying,
+                self.area.interaction.guns.crosshair().is_some(),
+                weight[1],
+            )
+        };
         let stamp = FeedbackStamp {
-            condition: condition.to_bits(),
             held,
             throw_charge: throw_charge.to_bits(),
             throw_active,
             rpm: engine.rpm.to_bits(),
             engine_flags: [ignition, engine.running, engine.starter, seated, handbrake],
+            crosshair,
+            weight: weight[0].to_bits(),
             actions: info.actions.0
                 | if needs.dead || self.sleeping() {
                     0
@@ -238,7 +248,6 @@ impl GarageRuntime {
             has_name,
             no_text,
             fluid_name: fluid_name.into(),
-            condition,
             held_name: held
                 .map(|id| display_name(reference, &self.area.items, id))
                 .unwrap_or("")
@@ -257,6 +266,8 @@ impl GarageRuntime {
             lmb_use: stamp.lmb_use,
             prompts: stamp.prompts,
             computer: stamp.computer,
+            crosshair,
+            weight: weight[0],
         })));
     }
 }

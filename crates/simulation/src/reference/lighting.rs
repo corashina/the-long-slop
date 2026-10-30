@@ -241,17 +241,7 @@ pub struct RoadLampReference {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SwitchSpriteReference {
-    pub source: SourceId,
-    pub path: String,
-    pub sha256: String,
-    pub crop: [f32; 4],
-    pub size: [u32; 2],
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct LightingRecord {
-    pub switch_icon: SwitchSpriteReference,
     pub source: SourceId,
     pub lights_use_linear_intensity: bool,
     pub quality: LightingQualityReference,
@@ -302,17 +292,6 @@ impl LightingRecord {
         let texture_ids = ids(
             self.textures.iter().map(|t| t.id),
             "duplicate lighting texture ID",
-        )?;
-        check(
-            self.switch_icon.source.file == "sharedassets1.assets"
-                && self.switch_icon.source.path_id == 4594
-                && self.switch_icon.path
-                    == "reference/lighting-switch-sharedassets1.assets-4594.png"
-                && hash(&self.switch_icon.sha256)
-                && self.switch_icon.crop == [0., 0., 160., 160.]
-                && self.switch_icon.size == [156, 160],
-            &self.switch_icon.source,
-            "switch sprite",
         )?;
         let light_ids = ids(self.lights.iter().map(|l| l.id), "duplicate light ID")?;
         let control_ids = ids(

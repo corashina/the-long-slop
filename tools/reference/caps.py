@@ -56,11 +56,14 @@ def opening_metadata(source, reader, node_ids, fluid_tune_speed):
         if target.type.name=='GameObject':target=source.transform_for(target)
         if key(target) not in node_ids:raise ValueError(f'Cap visual outside selected hierarchy: {key(target)}')
         return node_ids[key(target)]
+    # mainscript.CrossHairStuff: GCMMB shows img, or ICap when img is null.
+    icon=source.resolve(reader,fields['img']) if fields['canTune'] else None
+    if icon is not None:source.crosshair_icons.add(key(icon))
     def euler(value):
         x,y,z=vector(value)
         return [-x,-y,z]
     return {'valve':fields['valve'],'can_tune':bool(fields['canTune']),'tune_rate':fluid_tune_speed*fields['tuneSpeed'],
-        'presentation':cap_presentation(fields,default_words(source)),
+        'tune_icon':source_id(icon) if icon is not None else None,'presentation':cap_presentation(fields,default_words(source)),
         'visuals':{'open_nodes':[node(pointer) for pointer in fields['GOpen']],
             'closed_nodes':[node(pointer) for pointer in fields['GClosed']],
             'cap_node':node(fields['TCap']),'closed_node':node(fields['TClosed']),'open_node':node(fields['TOpen']),

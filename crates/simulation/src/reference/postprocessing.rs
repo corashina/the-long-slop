@@ -116,6 +116,17 @@ pub struct PostprocessingRecord {
     pub grading: GradingSettings,
     pub blue_noise: Vec<super::SourceId>,
     pub heat_haze_weight: f32,
+    pub binoculars: BinocularVignette,
+}
+/// The masked vignette of the binocular volume profile `tavcso`.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BinocularVignette {
+    pub profile: super::SourceId,
+    pub color: [f32; 4],
+    pub opacity: f32,
+    /// `tavcsoscript.defVignette`. The shader reads its alpha.
+    pub mask: super::SourceId,
 }
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -238,6 +249,13 @@ impl PostprocessingRecord {
                     .iter()
                     .all(|source| textures.contains(source)),
             "postprocessing blue noise resources",
+        )?;
+        let vignette = &self.binoculars;
+        require(
+            finite(&vignette.color)
+                && (0. ..=1.).contains(&vignette.opacity)
+                && textures.contains(&vignette.mask),
+            "postprocessing binocular vignette",
         )?;
         require(
             self.heat_haze_weight == 0.,

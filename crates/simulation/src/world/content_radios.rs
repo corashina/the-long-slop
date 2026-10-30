@@ -3,7 +3,7 @@ use super::WorldStream;
 use super::content_index::ContentSlot;
 use crate::interaction::items::ItemStore;
 use crate::interaction::{InteractionState, Knob};
-use crate::reference::{ColliderId, ItemId, ReferenceError, SourceId, Transform};
+use crate::reference::{ColliderId, ItemId, ReferenceError, SourceId, Transform, UiReference};
 use crate::simulation::radio::{RadioControl, RadioState};
 use crate::vehicle::PhysicsWorld;
 use crate::world::spawn_appearance::NodeAppearance;
@@ -108,6 +108,7 @@ impl WorldStream {
     }
     pub(super) fn sync_radio_bindings(
         &mut self,
+        ui: &UiReference,
         items: &ItemStore,
         interaction: &mut InteractionState,
         physics: &mut PhysicsWorld,
@@ -152,7 +153,8 @@ impl WorldStream {
                 complete = false;
                 continue;
             }
-            let mut binding = self.bind_radio(items, interaction, physics, slot, item, &script)?;
+            let mut binding =
+                self.bind_radio(ui, items, interaction, physics, slot, item, &script)?;
             binding.place_needle();
             self.radio_bindings.push(binding);
             self.show_radio_power(self.radio_bindings.len() - 1);
@@ -162,6 +164,7 @@ impl WorldStream {
     }
     fn bind_radio(
         &self,
+        ui: &UiReference,
         items: &ItemStore,
         interaction: &mut InteractionState,
         physics: &mut PhysicsWorld,
@@ -247,6 +250,7 @@ impl WorldStream {
                 continue;
             }
             let node = rules.root(reference, usable)?;
+            let icon = tune_icon(u, ui)?;
             let colliders = self
                 .structures
                 .iter()
@@ -270,6 +274,9 @@ impl WorldStream {
                     });
                 }
                 interaction.bind_dial_knob(id, kind);
+                if let Some(icon) = icon {
+                    interaction.bind_tune_icon(id, icon);
+                }
                 knobs.push((id, kind));
             }
         }

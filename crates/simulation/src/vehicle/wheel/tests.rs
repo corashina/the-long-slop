@@ -94,6 +94,7 @@ fn lada(assembly: WheelAssembly) -> PhysicsWorld {
         hits: Vec::new(),
         trigger_enters: Vec::new(),
         ignored: Default::default(),
+        sleep_speed: rapier3d::prelude::RigidBodyActivation::default_normalized_linear_threshold(),
     };
     world.insert_box([0.0, -0.5, 0.0], [500.0, 0.5, 500.0]);
     let (chassis, _) = world.insert(

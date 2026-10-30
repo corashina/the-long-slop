@@ -49,6 +49,8 @@ pub struct StructureViews {
     gun_hidden: Vec<u32>,
     /// `GarageRuntime::other_view` of the written worn flags.
     other_view: bool,
+    /// The used binoculars of the written camera hidden flags.
+    binoculars: Option<ItemId>,
 }
 
 impl GarageRuntime {
@@ -111,6 +113,17 @@ impl GarageRuntime {
                 }
             }
         }
+        let binoculars = self.area.interaction.binoculars.active().map(|b| b.item);
+        if views.binoculars != binoculars {
+            for item in [views.binoculars, binoculars].into_iter().flatten() {
+                if let ObjectKey::Generated(id) = self.area.items.object_key(item)
+                    && let Some(&slot) = views.slots.get(&id)
+                {
+                    views.selection.push(slot as usize);
+                }
+            }
+            views.binoculars = binoculars;
+        }
         let inputs = Inputs {
             reference,
             stream: &self.stream,
@@ -122,6 +135,7 @@ impl GarageRuntime {
             flyers: &self.flyers,
             seconds: self.simulation_seconds,
             other_view: self.other_view,
+            binoculars,
         };
         let result = views.write(&inputs, frame);
         self.physics.clear_presentation_bodies();
@@ -143,6 +157,7 @@ struct Inputs<'a> {
     flyers: &'a crate::flyers::Flyers,
     seconds: f64,
     other_view: bool,
+    binoculars: Option<ItemId>,
 }
 
 impl StructureViews {
@@ -408,6 +423,10 @@ impl StructureViews {
                 .is_some_and(|item| matches!(item.location, ItemLocation::Worn(_)))
         {
             row.flags |= StructureRow::WORN;
+        }
+        // Source `makeinvisible` of the used binoculars: the camera does not draw the item.
+        if entry.food.is_some() && entry.food == inputs.binoculars {
+            row.flags |= StructureRow::CAMERA_HIDDEN;
         }
         let poses = &mut frame.structure_poses;
         let start = poses.len() as u32;

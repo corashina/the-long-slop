@@ -38,6 +38,8 @@ pub struct PlayerStepContext {
     pub picked_up: bool,
     pub recenter_consumed: bool,
     pub movement_multiplier: f32,
+    /// fpscontroller `Bbinoculars`: `Sight()` is 0.1.
+    pub binoculars: bool,
 }
 impl PlayerStepContext {
     pub fn can_duck(input: FrameInput, tuning_available: bool, picked_up: bool) -> bool {
@@ -56,6 +58,7 @@ impl Default for PlayerStepContext {
             picked_up: false,
             recenter_consumed: false,
             movement_multiplier: 1.0,
+            binoculars: false,
         }
     }
 }

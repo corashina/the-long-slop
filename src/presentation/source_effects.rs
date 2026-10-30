@@ -31,6 +31,7 @@ struct EffectInput {
     grading_temperature: Option<f32>,
     dead_weight: f32,
     glasses: Option<u32>,
+    binoculars: bool,
 }
 fn snapshot_input(
     frame: Res<SourceViewFrame>,
@@ -59,6 +60,8 @@ fn snapshot_input(
         .then(|| sim.frame.state.glasses())
         .flatten()
         .map(|g| g.profile);
+    // The binocular `PP` volume holds the camera while the player uses binoculars.
+    input.binoculars = sim.frame.state.flags & simulation::boundary::StateBlock::BINOCULARS != 0;
     input.frame = frame.frame;
 }
 
@@ -225,7 +228,9 @@ fn prepare(
             .get(id)
             .and_then(|handle| images.get(handle.id()))
     };
-    let Some(dirt) = image(&record.bloom.dirt) else {
+    let (Some(dirt), Some(vignette_mask)) =
+        (image(&record.bloom.dirt), image(&record.binoculars.mask))
+    else {
         return;
     };
     if record.blue_noise.iter().any(|id| image(id).is_none()) {
@@ -238,6 +243,7 @@ fn prepare(
             dirt.texture_descriptor.size.width,
             dirt.texture_descriptor.size.height,
         ],
+        vignette_mask: &vignette_mask.texture_view,
     };
     let colors = surfaces.targets.world.clone();
     let extent = [colors.width, colors.height];
@@ -383,6 +389,7 @@ fn encode_post(
             grading_temperature: input.grading_temperature,
             dead_weight: input.dead_weight,
             glasses: input.glasses,
+            binoculars: input.binoculars,
         },
         targets.colors.attachment(),
         targets.colors.resolve_target().unwrap(),

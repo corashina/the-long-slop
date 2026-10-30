@@ -3,7 +3,7 @@ use super::WorldStream;
 use super::content_index::ContentSlot;
 use crate::interaction::InteractionState;
 use crate::interaction::items::ItemStore;
-use crate::reference::{ColliderId, ItemId, ReferenceError, SourceId, Transform};
+use crate::reference::{ColliderId, ItemId, ReferenceError, SourceId, Transform, UiReference};
 use crate::simulation::dials::*;
 use crate::vehicle::PhysicsWorld;
 use crate::world::spawn_rules::*;
@@ -81,6 +81,7 @@ impl DialBinding {
 impl WorldStream {
     pub(super) fn sync_dial_bindings(
         &mut self,
+        ui: &UiReference,
         items: &ItemStore,
         interaction: &mut InteractionState,
         physics: &mut PhysicsWorld,
@@ -142,7 +143,7 @@ impl WorldStream {
                 complete = false;
                 continue;
             }
-            let binding = self.bind_dial(items, interaction, physics, slot, item, &script)?;
+            let binding = self.bind_dial(ui, items, interaction, physics, slot, item, &script)?;
             self.dial_bindings.push(binding);
         }
         self.dial_scan = complete.then_some(revision);
@@ -150,6 +151,7 @@ impl WorldStream {
     }
     fn bind_dial(
         &self,
+        ui: &UiReference,
         items: &ItemStore,
         interaction: &mut InteractionState,
         physics: &mut PhysicsWorld,
@@ -276,6 +278,7 @@ impl WorldStream {
         };
         // The knob is every collider on the usable's own transform.
         let knob_node = rules.root(reference, link(usable, "usable")?)?;
+        let icon = tune_icon(rules.get(reference, link(usable, "usable")?)?.fields, ui)?;
         let body = items.get(item).and_then(|i| i.body);
         let mut knobs = Vec::new();
         let colliders = self
@@ -300,6 +303,9 @@ impl WorldStream {
                 });
             }
             interaction.bind_dial_knob(id, crate::interaction::Knob::Dial);
+            if let Some(icon) = icon {
+                interaction.bind_tune_icon(id, icon);
+            }
             knobs.push(id);
         }
         let value = self
