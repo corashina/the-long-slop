@@ -228,6 +228,36 @@ pub struct SourceInstances {
     /// Indices of instances with a Grass displacement writer.
     writer_instances: Vec<usize>,
     writers_dirty: bool,
+    /// glTF nodes that move with each body, per prototype index.
+    body_nodes: HashMap<usize, Vec<Vec<u32>>>,
+}
+/// The glTF nodes of each body node and its descendants, in prototype node order.
+fn body_nodes(prototype: &crate::reference::WorldPrototypeReference) -> Vec<Vec<u32>> {
+    prototype
+        .bodies
+        .iter()
+        .map(|body| {
+            let gltf_node = prototype.nodes[body.node as usize].gltf_node;
+            prototype
+                .nodes
+                .iter()
+                .filter(|descendant| {
+                    let mut cursor = descendant.parent;
+                    let mut belongs = descendant.gltf_node == gltf_node;
+                    for _ in 0..prototype.nodes.len() {
+                        let Some(parent) = cursor else { break };
+                        if parent == body.node {
+                            belongs = true;
+                            break;
+                        }
+                        cursor = prototype.nodes[parent as usize].parent;
+                    }
+                    belongs
+                })
+                .map(|descendant| descendant.gltf_node)
+                .collect()
+        })
+        .collect()
 }
 impl SourceInstances {
     pub fn props(&self) -> &GpuProps {
@@ -1367,24 +1397,17 @@ impl SourceInstances {
                             let source_changed = source_world != instance.source_worlds[index];
                             let source_delta =
                                 source_world * instance.source_worlds[index].inverse();
-                            for descendant in &prototype.nodes {
-                                let mut cursor = descendant.parent;
-                                let mut belongs = descendant.gltf_node == node.gltf_node;
-                                for _ in 0..prototype.nodes.len() {
-                                    let Some(parent) = cursor else { break };
-                                    if parent == body.node {
-                                        belongs = true;
-                                        break;
-                                    }
-                                    cursor = prototype.nodes[parent as usize].parent;
-                                }
-                                if belongs {
-                                    let target = descendant.gltf_node as usize;
-                                    instance.worlds[target] = delta * instance.worlds[target];
-                                    if source_changed {
-                                        instance.source_worlds[target] =
-                                            source_delta * instance.source_worlds[target];
-                                    }
+                            let targets = &self
+                                .body_nodes
+                                .entry(instance.prototype)
+                                .or_insert_with(|| body_nodes(prototype))
+                                [row.node as usize];
+                            for &target in targets {
+                                let target = target as usize;
+                                instance.worlds[target] = delta * instance.worlds[target];
+                                if source_changed {
+                                    instance.source_worlds[target] =
+                                        source_delta * instance.source_worlds[target];
                                 }
                             }
                             instance.worlds[index] = world;
