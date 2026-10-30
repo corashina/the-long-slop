@@ -43,9 +43,11 @@ pub struct SourcePrototypes {
     io: IoLedger,
     control_cpu: usize,
     /// Inputs of the last `retire_unused` pass.
-    unused_key: Option<[u64; 6]>,
+    unused_key: Option<[u64; 8]>,
     /// Prototype indices with an instance or a pending or published structure.
     used: Vec<bool>,
+    /// Prototype indices whose queued request may stay. See `retire_unused`.
+    queued: Vec<bool>,
 }
 pub struct SourcePrototypePlugin;
 impl Plugin for SourcePrototypePlugin {
@@ -343,6 +345,7 @@ impl SourcePrototypes {
             )
         });
         let (session, structures, pending) = stream.structure_membership();
+        let required_ready = stream.required_ready();
         let key = [
             session,
             structures,
@@ -350,6 +353,8 @@ impl SourcePrototypes {
             instances.revision(),
             active,
             shared,
+            u64::from(required_ready),
+            stream.required_structure_count() as u64,
         ];
         if self.unused_key == Some(key) {
             return;
@@ -358,26 +363,37 @@ impl SourcePrototypes {
         let prototypes = &reference.world.prototypes;
         self.used.clear();
         self.used.resize(prototypes.len(), false);
+        self.queued.clear();
+        self.queued.resize(prototypes.len(), false);
         for index in instances.prototypes() {
             self.used[index] = true;
+            self.queued[index] = true;
         }
         let frame = stream.frame();
-        for source in stream
-            .pending_structures()
-            .iter()
-            .map(|p| &p.prototype)
-            .chain(frame.structures.iter().map(|s| &s.placement.prototype))
-        {
-            if let Some(index) = prototypes.index(source) {
+        // While the world is not ready, only required structures request descriptors. A queued
+        // request of another structure holds a pending claim that a required request needs.
+        let queued_wanted = |id: &crate::world::GeneratedId| {
+            required_ready || stream.structure_required(id) || stream.structure_replay_required(id)
+        };
+        for placement in stream.pending_structures() {
+            if let Some(index) = prototypes.index(&placement.prototype) {
                 self.used[index] = true;
+                self.queued[index] |= queued_wanted(&placement.id);
+            }
+        }
+        for structure in frame.structures {
+            if let Some(index) = prototypes.index(&structure.placement.prototype) {
+                self.used[index] = true;
+                self.queued[index] = true;
             }
         }
         for entry in &mut self.entries {
+            let queued = matches!(entry.state, State::Queued);
             if held(entry)
                 || reference.world.road.prototypes.contains(&entry.source)
                 || prototypes
                     .index(&entry.source)
-                    .is_some_and(|index| self.used[index])
+                    .is_some_and(|index| self.used[index] && (!queued || self.queued[index]))
             {
                 continue;
             }
@@ -408,7 +424,8 @@ impl SourcePrototypes {
             self.entries.iter().map(|e| e.source.file.capacity()).sum(),
             self.retired_sources.capacity(),
             self.retired_sources.iter().map(|s| s.file.capacity()).sum(),
-        ) + self.used.capacity();
+        ) + self.used.capacity()
+            + self.queued.capacity();
         let mut allocation = ledger.allocation();
         allocation.prototype_cpu = allocation
             .prototype_cpu
