@@ -1,13 +1,14 @@
 import {verifyRecord} from './save-storage.js';
 const two=value=>String(value).padStart(2,'0');
 function formatDate(date){return `${date.getFullYear()}.${two(date.getMonth()+1)}.${two(date.getDate())}. ${two(date.getHours())}:${two(date.getMinutes())}`;}
-function lastName({saves,autosave,last},buildId){
+export function lastSave({saves,autosave,last},buildId){
  const entry=[...saves,autosave].find(entry=>entry&&entry.name===last);
  return entry&&entry.version===buildId?last:null;
 }
-export function canLoadLast(list,buildId){return lastName(list,buildId)!==null;}
+export function canLoadLast(list,buildId){return lastSave(list,buildId)!==null;}
 
-export function createSaveSession({storage,runtime,drawDistance,onStatus=()=>{}}){
+// `reload` starts the page again from a stored save. It does not resolve.
+export function createSaveSession({storage,runtime,drawDistance,reload,onStatus=()=>{}}){
  let sequence=0,active=null,writes=Promise.resolve();
  const current=operation=>active===operation&&operation.id===sequence;
  async function run(name,work){
@@ -40,8 +41,8 @@ export function createSaveSession({storage,runtime,drawDistance,onStatus=()=>{}}
   const record=await storage.read(name);
   if(!current(operation))return;
   if(record===null)throw new Error('No saved game.');
-  const save=await verifyRecord(record);
-  if(current(operation))await prepare(operation,()=>runtime.prepare(save,operation.controller.signal,drawDistance()));
+  await verifyRecord(record);
+  if(current(operation))await reload(name);
  });
  return {
   get pending(){return active!==null;},
@@ -64,7 +65,7 @@ export function createSaveSession({storage,runtime,drawDistance,onStatus=()=>{}}
   join(save){return run('join',operation=>prepare(operation,()=>runtime.prepare(save,operation.controller.signal,drawDistance())));},
   remove(name){return run('remove',async()=>{await storage.remove(name);});},
   async loadLast(buildId){
-   const name=lastName(await storage.list(),buildId);
+   const name=lastSave(await storage.list(),buildId);
    if(name===null)throw new Error('No saved game.');
    return load(name);
   },

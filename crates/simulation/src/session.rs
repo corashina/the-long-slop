@@ -2,7 +2,7 @@
 use crate::boundary::{DecodeError, FrameEncoder, SimInit, SimStartup, decode_command};
 use crate::driver::SimDriver;
 use crate::reference::{ReferenceError, ReferenceManifest};
-use crate::save::SourceStamp;
+use crate::save::{SaveError, SaveSnapshot, SourceStamp};
 use crate::starting_area::GarageRuntime;
 use std::sync::Arc;
 
@@ -14,6 +14,8 @@ pub struct Session {
     encoder: FrameEncoder,
     bytes: Vec<u8>,
     net_out: Vec<u8>,
+    /// The save of `SimInit` did not load. The garage of a new game starts.
+    load_error: Option<String>,
 }
 
 impl Session {
@@ -21,10 +23,31 @@ impl Session {
         reference: Arc<ReferenceManifest>,
         init: SimInit,
     ) -> Result<(Self, SimStartup), ReferenceError> {
-        let mut runtime = GarageRuntime::new(&reference, init.mode, init.draw_distance)
-            .map_err(|e| ReferenceError(e.to_string()))?;
-        runtime.set_game_options(init.options);
         let source = SourceStamp::new(&reference, init.manifest_sha256);
+        let mut load_error = None;
+        let saved = (!init.save.is_empty()).then(|| {
+            let saved = serde_json::from_slice::<SaveSnapshot>(&init.save)
+                .map_err(|e| SaveError::CorruptData(e.to_string()))?;
+            let mut runtime = GarageRuntime::from_save(
+                &reference,
+                &source,
+                &saved,
+                init.mode,
+                init.draw_distance,
+            )?;
+            runtime.started = true;
+            runtime.paused = true;
+            Ok::<_, SaveError>(runtime)
+        });
+        let mut runtime = match saved {
+            Some(Ok(runtime)) => runtime,
+            other => {
+                load_error = other.and_then(Result::err).map(|e| e.to_string());
+                GarageRuntime::new(&reference, init.mode, init.draw_distance)
+                    .map_err(|e| ReferenceError(e.to_string()))?
+            }
+        };
+        runtime.set_game_options(init.options);
         let driver = SimDriver::new(runtime, source);
         let startup = driver.startup();
         let session = Self {
@@ -34,8 +57,13 @@ impl Session {
             encoder: FrameEncoder::default(),
             bytes: Vec::new(),
             net_out: Vec::new(),
+            load_error,
         };
         Ok((session, startup))
+    }
+
+    pub fn load_error(&self) -> Option<&str> {
+        self.load_error.as_deref()
     }
 
     /// Starts or ends a multiplayer session. `role`: 0 off, 1 host, 2 guest.
@@ -89,6 +117,7 @@ mod tests {
             options: Default::default(),
             draw_distance: reference.world.draw_distance.default,
             manifest_sha256: String::new(),
+            save: Vec::new(),
         };
         let (mut session, startup) = Session::new(reference, init).unwrap();
         let mut command = Vec::new();
@@ -130,6 +159,7 @@ mod tests {
             options: Default::default(),
             draw_distance: reference.world.draw_distance.default,
             manifest_sha256: String::new(),
+            save: Vec::new(),
         };
         let (mut session, _) = Session::new(reference, init).unwrap();
         let sandbox = serde_json::json!([

@@ -6,10 +6,13 @@ installShadowQuality(window,()=>localStorage,document.querySelector('#shadow-qua
 import {installGrassQuality} from './grass-quality.js';
 installGrassQuality(window,()=>localStorage,document.querySelector('#grass-quality'));
 import {gameFields,installGameMode,installGameOptions,installSeed,installStartCar} from './game-mode.js';
-// New game reloads the page with its seed, as the source loads the game scene again.
-// The garage then starts in the menu game mode, and the new game takes it.
-const NEW_GAME_KEY='tls-new-game';
-const newGameSeed=(()=>{try{const v=Number(sessionStorage.getItem(NEW_GAME_KEY)??NaN);sessionStorage.removeItem(NEW_GAME_KEY);return Number.isInteger(v)?v:undefined;}catch{return undefined;}})();
+// New game and Load reload the page, as the source loads the game scene again. The simulation
+// then starts in the menu game mode or from the save, so one world exists at a time.
+const NEW_GAME_KEY='tls-new-game',LOAD_KEY='tls-load';
+const takeSession=key=>{try{const v=sessionStorage.getItem(key);sessionStorage.removeItem(key);return v;}catch{return null;}};
+const reloadWith=(key,value)=>{try{sessionStorage.setItem(key,value);}catch{}location.reload();return new Promise(()=>{});};
+const newGameSeed=(()=>{const v=Number(takeSession(NEW_GAME_KEY)??NaN);return Number.isInteger(v)?v:undefined;})();
+const loadName=takeSession(LOAD_KEY);
 const seed=installSeed(window,document.querySelector('#seed'),Math.random,newGameSeed);
 import {installSunglassesEffects} from './sunglasses.js';
 import {installScreenEffects} from './screen-effects.js';
@@ -34,8 +37,8 @@ import {createSettings,installSettingsBridge} from './settings.js';
 import {actionIndex,compileBindings,inputsField} from './bindings.js';
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
-import {manifestStamp,createSaveStorage,AUTOSAVE} from './save-storage.js';
-import {createSaveSession} from './save-session.js';
+import {manifestStamp,createSaveStorage,verifyRecord,AUTOSAVE} from './save-storage.js';
+import {createSaveSession,lastSave} from './save-session.js';
 import {createSaveBridge} from './save-bridge.js';
 import {createThumbnail} from './thumbnail.js';
 import {createAutosave} from './autosave.js';
@@ -50,7 +53,8 @@ import {installSteeringWheel} from './steering-wheel.js';
 const gamepad=createGamepad(()=>navigator.getGamepads?.());
 let slider,worldDrawDistance,drivingSettings,steeringWheel,settings;
 // The slider is locked while a request is pending, so its value is the one the new world uses.
-const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRuntime,drawDistance:()=>slider.value(),onStatus:({operation,state})=>{if(state!=='success'||operation==='remove')return;autosave.reset(performance.now()/1000);if(operation!=='save'){worldDrawDistance=slider.value();slider.store();}}});
+const saveStorage=createSaveStorage();
+const saveSession=createSaveSession({storage:saveStorage,runtime:saveRuntime,reload:name=>reloadWith(LOAD_KEY,name),drawDistance:()=>slider.value(),onStatus:({operation,state})=>{if(state!=='success'||operation==='remove')return;autosave.reset(performance.now()/1000);if(operation!=='save'){worldDrawDistance=slider.value();slider.store();}}});
 const autosave=createAutosave(),autosaveNotice=document.querySelector('#autosave-notice');
 // Source `BAutoSave` and `BDisableAutoSaveInCar`, kept current by the settings store.
 const toggles={autosave:false,inCar:false};
@@ -251,13 +255,18 @@ async function load(){
  // The simulation parses its own manifest copy while this thread loads the interface.
  worldDrawDistance=slider.value();
  const garageMode=[worldDrawDistance,window.gameBiome(),window.gameStartCar(),window.gameSeed()];
- const simulationStarted=simulation.start(bytes.slice(),manifestHash,...garageMode,gameOptions.bits());
+ // The save of a Load reload, or of Load last at start.
+ let startSave=new Uint8Array(),startError='';
+ try{
+  const name=loadName??(newGameSeed===undefined&&settings.values.BAutoLoad?lastSave(await saveStorage.list(),manifest.build_id):null);
+  if(name!==null){const record=await saveStorage.read(name);if(record===null)throw new Error('No saved game.');startSave=new TextEncoder().encode(JSON.stringify(await verifyRecord(record)));}
+ }catch(error){startError=error?.message??String(error);}
+ const simulationStarted=simulation.start(bytes.slice(),manifestHash,...garageMode,gameOptions.bits(),startSave);
  // False: the garage is the new game world.
  const reloadNewGame=started=>{
   const mode=[slider.value(),window.gameBiome(),window.gameStartCar(),window.gameSeed()];
   if(!started&&mode.every((v,i)=>v===garageMode[i]))return false;
-  try{sessionStorage.setItem(NEW_GAME_KEY,String(window.gameSeed()));}catch{}
-  location.reload();return true;
+  reloadWith(NEW_GAME_KEY,String(window.gameSeed()));return true;
  };
  simulationStarted.catch(()=>{});
  fetched({path:'assets/reference/manifest.json',requiredBytes:bytes.byteLength,receivedBytes:bytes.byteLength});
@@ -292,7 +301,8 @@ async function load(){
  startup.end('interface');
  if(failed)return;status.textContent='Loading the garage...';loading.stage(status.textContent);
  startup.begin('generation');startup.begin('decodeUpload');startup.begin('pipeline');
- const startupBytes=await simulationStarted;
+ const {startup:startupBytes,loadError}=await simulationStarted;
+ if(startSave.length||startError)menu.started(startError||loadError);
  if(failed)return;run(bytes,startupBytes);
  cpuProfile.end('startup');
 }

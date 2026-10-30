@@ -5,7 +5,7 @@ export function createSimulation(worker,onFailure){
  worker.addEventListener('message',({data})=>{
   if(failed)return;
   if(data.error!==undefined){fail(data.error);return;}
-  if(data.startup){starting?.resolve(data.startup);starting=null;return;}
+  if(data.startup){starting?.resolve({startup:data.startup,loadError:data.loadError});starting=null;return;}
   frame=data.frame;tickMs+=data.tickMs;ticks++;wasmBytes=data.wasmBytes;
   if(data.net?.length)onNet?.(data.net);
   if(data.clearInput)hooks.clearInput?.();
@@ -17,9 +17,10 @@ export function createSimulation(worker,onFailure){
   // Hooks of the CPU profile: the worker reports input use with the frame.
   hooks(value){hooks=value;},
   profile(enabled){worker.postMessage({cpuProfile:Boolean(enabled)});},
-  // `manifest` moves to the worker. Resolves with the encoded startup values.
-  start(manifest,hash,drawDistance,biome,startCar,seed,options){
-   return new Promise((resolve,reject)=>{starting={resolve,reject};worker.postMessage({start:{manifest,hash,drawDistance,biome,startCar,seed,options}},[manifest.buffer]);});
+  // `manifest` and `save` move to the worker. `save` is the save JSON, or empty for a new game.
+  // Resolves with the encoded startup values and why the save did not load.
+  start(manifest,hash,drawDistance,biome,startCar,seed,options,save){
+   return new Promise((resolve,reject)=>{starting={resolve,reject};worker.postMessage({start:{manifest,hash,drawDistance,biome,startCar,seed,options,save}},[manifest.buffer,save.buffer]);});
   },
   // The command is a view of WASM memory, so copy it before transfer.
   send(command){
