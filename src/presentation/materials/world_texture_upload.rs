@@ -130,16 +130,11 @@ impl Plugin for WorldTextureUploadPlugin {
 }
 fn extract(
     source: Extract<Option<Res<super::SourceMaterials>>>,
-    requests: Extract<Res<crate::app::save::SaveRequests>>,
     mut uploads: ResMut<RenderUploads>,
     images: Res<RenderAssets<GpuImage>>,
     queue: Res<RenderQueue>,
 ) {
-    for materials in source
-        .as_deref()
-        .into_iter()
-        .chain(requests.hidden().map(|p| &p.materials))
-    {
+    if let Some(materials) = source.as_deref() {
         for texture in materials.textures.iter() {
             if texture
                 .image
@@ -154,12 +149,7 @@ fn extract(
     }
     uploads.0 = source
         .as_ref()
-        .map(|s| Arc::clone(s.world_textures.upload_queue()))
-        .or_else(|| {
-            requests
-                .hidden()
-                .map(|p| Arc::clone(p.materials.world_textures.upload_queue()))
-        });
+        .map(|s| Arc::clone(s.world_textures.upload_queue()));
 }
 fn upload(
     uploads: Res<RenderUploads>,

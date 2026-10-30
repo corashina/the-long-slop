@@ -57,8 +57,6 @@ pub struct SimDriver {
     failure: Option<String>,
     failed: bool,
     pub(crate) save: crate::save_requests::SaveState,
-    /// Renderer input of the next candidate step.
-    candidate: Option<crate::boundary::CandidateCommand>,
     /// The renderer world copy of the last frame.
     pub(crate) sent: crate::world::RendererWorld,
     /// Camera position of the last rendered frame.
@@ -109,7 +107,6 @@ impl SimDriver {
             failure: None,
             failed: false,
             save: crate::save_requests::SaveState::new(source),
-            candidate: None,
             listener: None,
             sandbox: Vec::new(),
             net: crate::net::Net::default(),
@@ -147,12 +144,6 @@ impl SimDriver {
     /// Save requests run after the input, so a pause in the same command counts.
     pub fn accept(&mut self, reference: &ReferenceManifest, mut command: SimCommand) {
         let saves = std::mem::take(&mut command.save);
-        if let Some(candidate) = command.candidate.take() {
-            match &mut self.candidate {
-                Some(pending) => pending.merge(candidate),
-                None => self.candidate = Some(candidate),
-            }
-        }
         self.accept_input(reference, command);
         self.accept_saves(reference, saves);
     }
@@ -332,15 +323,10 @@ impl SimDriver {
 
     /// Runs the world step of the accepted renderer input, after the fixed steps.
     pub fn advance_world(&mut self, reference: &ReferenceManifest) {
-        let candidate = self.candidate.take();
-        self.advance_candidate(reference, candidate);
         self.world_ms = 0.;
         if let Some(failure) = self.world.take_failure() {
             self.runtime.stream.fail(ReferenceError(failure));
             self.runtime.clear_input();
-        }
-        if self.world.frozen() {
-            return;
         }
         let started = now();
         let budget_ms = if self.ready { 0. } else { LOADING_BUDGET_MS };
@@ -420,7 +406,7 @@ impl SimDriver {
             frame.changes.push(Change::Failure(failure));
         }
         self.camera.fill(&mut frame.state);
-        self.fill_saves(reference, frame);
+        self.fill_saves(frame);
     }
 
     /// Drops queued input and restarts the step clock at the player view.

@@ -147,17 +147,6 @@ impl SourceLighting {
                 .sum::<usize>()
             + self.road_lamps.clone_bytes()
     }
-    pub(crate) fn prepare_copy(&self) -> Self {
-        let mut copy = self.clone();
-        copy.status = Arc::new(Mutex::new(self.state.clone()));
-        copy.road_lamps.clear_owned();
-        copy.lights.retain(|light| light.world.is_none());
-        for light in self.lights.iter().filter(|light| light.world.is_some()) {
-            copy.uniform.lights[light.index] = GpuLight::default();
-        }
-        copy.uniform.counts.x = copy.road_lamps.fixed_lights as u32;
-        copy
-    }
 
     /// Replace owned light instances. Retain loaded scenes and prepared assets.
     pub fn reset_instances(&mut self, commands: &mut Commands) {

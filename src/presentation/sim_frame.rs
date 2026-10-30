@@ -142,7 +142,7 @@ impl SimFrameResource {
                     self.grant = Some(self.grant.map_or(*grant, |g| g.merge(*grant)));
                 }
                 // The save requests read these from the frame.
-                Change::SaveResult { .. } | Change::Restarted => {}
+                Change::SaveResult { .. } => {}
             }
         }
         let frame = &self.frame;

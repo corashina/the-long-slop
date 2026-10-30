@@ -415,21 +415,10 @@ pub(crate) fn bind_generated_cap(
 pub fn sync_caps(
     frame: &SimFrame,
     dt: f32,
-    caps: &mut Query<
-        (&mut CapVisual, &mut Transform),
-        (
-            Without<BodyVisual>,
-            Without<ItemVisual>,
-            Without<super::save::HiddenWorld>,
-        ),
-    >,
+    caps: &mut Query<(&mut CapVisual, &mut Transform), (Without<BodyVisual>, Without<ItemVisual>)>,
     visibility: &mut Query<
         (&ValveVisibility, &mut Visibility),
-        (
-            Without<BodyVisual>,
-            Without<ItemVisual>,
-            Without<super::save::HiddenWorld>,
-        ),
+        (Without<BodyVisual>, Without<ItemVisual>),
     >,
 ) {
     for (mut cap, mut transform) in caps {

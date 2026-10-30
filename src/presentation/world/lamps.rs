@@ -44,16 +44,6 @@ impl RoadLamps {
             + self.prototype_nodes.capacity()
                 * std::mem::size_of::<(crate::reference::NodeId, Entity)>()
     }
-    pub fn clear_owned(&mut self) {
-        self.overlap = self.source_proxies.len();
-        self.source_proxies.clear();
-        self.required.clear();
-        self.allocation.fill(None);
-        self.preflight_ready = false;
-    }
-    pub fn end_overlap(&mut self) {
-        self.overlap = 0;
-    }
     pub fn ready(&self) -> bool {
         self.preflight_ready
             && self.required.len() == self.source_proxies.len()
@@ -61,9 +51,6 @@ impl RoadLamps {
                 .required
                 .iter()
                 .all(|id| self.source_proxies.iter().any(|p| &p.id == id))
-    }
-    pub fn roots(&self) -> impl Iterator<Item = Entity> + '_ {
-        self.source_proxies.iter().flat_map(|p| [p.node, p.light])
     }
 
     pub fn admitted_lights(&self) -> Option<&[crate::world::GeneratedId]> {

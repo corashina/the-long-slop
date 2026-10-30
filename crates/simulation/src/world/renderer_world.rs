@@ -206,10 +206,6 @@ impl RendererWorld {
             lamp_materials: Mutex::default(),
         }))
     }
-    /// An empty copy that shares the fixed lookups.
-    pub fn fork(&self) -> Self {
-        Self::with_lookups(self.lookups.clone())
-    }
     fn with_lookups(lookups: Arc<Lookups>) -> Self {
         Self {
             lookups,

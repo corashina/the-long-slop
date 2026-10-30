@@ -47,9 +47,6 @@ impl GpuPreparation {
             p.lock().unwrap().error.get_or_insert(message);
         }
     }
-    pub fn candidate() -> Self {
-        Self(Some(Arc::default()))
-    }
     pub fn isolated(&self) -> bool {
         self.0.as_ref().is_some_and(|s| !s.lock().unwrap().promoted)
     }

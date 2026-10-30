@@ -91,26 +91,6 @@ impl SourceMaterials {
             + self.world_primary.borrowed_records.capacity() * (size_of::<SourceAssetId>() + 1)
             + self.world_primary.materials.capacity() * (size_of::<(SourceAssetId, u32)>() + 1)
     }
-    pub(super) fn reserve_fork(
-        &self,
-        ledger: &mut PresentationLedger,
-    ) -> Result<(), ReferenceError> {
-        let (cpu, gpu) = self.primary_bytes();
-        let (deferred_cpu, deferred_gpu) = self.world_textures.bytes();
-        let mut allocation = ledger.allocation();
-        allocation.prototype_cpu += cpu + deferred_cpu;
-        allocation.prototype_gpu += gpu + deferred_gpu;
-        ledger.set_allocation(allocation)
-    }
-    pub(super) fn account_fork(&mut self) -> Result<(), ReferenceError> {
-        let (cpu, gpu) = self.primary_bytes();
-        self.world_primary.cpu = cpu;
-        self.world_primary.gpu = gpu;
-        let (cpu, gpu) = self.world_textures.bytes();
-        self.world_deferred.cpu = cpu;
-        self.world_deferred.gpu = gpu;
-        Ok(())
-    }
     fn primary_bytes(&self) -> (usize, usize) {
         let cpu = self
             .textures

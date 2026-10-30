@@ -103,7 +103,6 @@ pub struct WorldPresentation<'w, 's> {
     pub lighting_assets: ResMut<'w, crate::presentation::lighting_assets::LightingAssets>,
     pub imported_meshes: Query<'w, 's, (Entity, &'static ChildOf, &'static Mesh3d)>,
     pub world_poses: Query<'w, 's, &'static GlobalTransform>,
-    pub saved_poses: Res<'w, crate::presentation::save::CandidateImportedPoses>,
     pub allocation: ResMut<'w, SourcePresentationAllocation>,
     pub screens: ResMut<'w, crate::presentation::computer::ComputerScreens>,
 }
@@ -602,12 +601,12 @@ impl WorldPresentation<'_, '_> {
         }
         let allocation = &mut *self.allocation;
         for (entity, mesh) in &allocation.imported_writers {
-            if let Some(pose) = self.saved_poses.0.get(entity).copied().or_else(|| {
-                self.world_poses
-                    .get(*entity)
-                    .ok()
-                    .map(GlobalTransform::to_matrix)
-            }) {
+            if let Some(pose) = self
+                .world_poses
+                .get(*entity)
+                .ok()
+                .map(GlobalTransform::to_matrix)
+            {
                 self.writers.request(
                     &mut allocation.ledger,
                     *entity,

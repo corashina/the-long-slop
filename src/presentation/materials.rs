@@ -322,13 +322,6 @@ impl SourceMaterials {
         sort.layer_and_order = (layer << 16) | order;
         Ok(Some(sort))
     }
-    pub(crate) fn owns_image(&self, id: AssetId<Image>) -> bool {
-        self.textures.iter().any(|t| {
-            !t.persistent
-                && Arc::strong_count(&t.owner) == 1
-                && t.image.as_ref().is_some_and(|h| h.id() == id)
-        }) || self.world_textures.owns_image(id)
-    }
 }
 pub struct SourceMaterialPlugin;
 impl Plugin for SourceMaterialPlugin {
@@ -343,7 +336,6 @@ impl Plugin for SourceMaterialPlugin {
             grass::writers::GrassDisplacementPlugin,
             world_texture_upload::WorldTextureUploadPlugin,
             super::fixed_assets::FixedAssetsPlugin,
-            super::candidate_upload::CandidateUploadPlugin,
         ))
         .insert_resource(MaterialLoading(Arc::new(Mutex::new(LoadingData {
             requests: Vec::new(),
@@ -2050,21 +2042,7 @@ pub struct LampMaterialChoice {
     receivers: Vec<LampReceiverChoice>,
 }
 
-impl LampMaterialChoice {
-    pub(crate) fn validate_assets(
-        &self,
-        materials: &Assets<SourceMaterial>,
-    ) -> Result<(), crate::save::SaveError> {
-        for receiver in &self.receivers {
-            if !materials.contains(receiver.material.id()) {
-                return Err(crate::save::SaveError::MissingAssets(
-                    "lamp material choice".into(),
-                ));
-            }
-        }
-        Ok(())
-    }
-}
+impl LampMaterialChoice {}
 
 /// Prepare source selections and actual mesh pipeline variants during loading.
 pub(crate) fn prepare_lamp_materials(
@@ -2497,50 +2475,5 @@ impl SourceMaterials {
             .iter()
             .all(|t| !t.failed && t.image.is_some() && primary::pending_texture_cpu(t) == 0)
             && self.world_textures.settled()
-    }
-    pub fn shared_bytes(&self) -> (usize, usize) {
-        let pixels: usize = self
-            .textures
-            .iter()
-            .filter(|t| Arc::strong_count(&t.owner) > 1)
-            .map(|t| t.payload_bytes)
-            .sum();
-        let record_bytes: usize = self
-            .records
-            .iter()
-            .filter(|r| Arc::strong_count(r) > 1)
-            .map(|r| primary::record_bytes(r))
-            .sum();
-        let texture_metadata: usize = self
-            .textures
-            .iter()
-            .filter(|t| Arc::strong_count(&t.record) > 1)
-            .map(|t| primary::texture_metadata(&t.record))
-            .sum();
-        let (cpu, gpu) = self.world_textures.shared_bytes();
-        (
-            cpu + self
-                .textures
-                .iter()
-                .filter(|t| Arc::strong_count(&t.owner) > 1)
-                .map(primary::pending_texture_cpu)
-                .sum::<usize>()
-                + record_bytes
-                + texture_metadata,
-            gpu + pixels,
-        )
-    }
-    pub fn fork(
-        &self,
-        ledger: &mut crate::ownership::PresentationLedger,
-    ) -> Result<Self, source::ReferenceError> {
-        let world_textures = self.world_textures.fork()?;
-        self.reserve_fork(ledger)?;
-        let mut copy = self.clone();
-        copy.preparation = super::gpu_prepare::GpuPreparation::candidate();
-        copy.world_textures = world_textures;
-        copy.begin_world_session();
-        copy.account_fork()?;
-        Ok(copy)
     }
 }

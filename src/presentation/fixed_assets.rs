@@ -303,10 +303,6 @@ impl SourceFixedAssets {
             && self.cookie_receipt.completed()
             && self.shaders_bound
     }
-    pub fn shared_bytes(&self) -> (usize, usize) {
-        let a = self.allocation().expect("admitted fixed ownership totals");
-        (a.cpu, a.gpu)
-    }
     fn allocation(&self) -> Result<FixedAllocation, ReferenceError> {
         let mut a = FixedAllocation {
             cpu: self.control,

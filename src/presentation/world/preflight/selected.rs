@@ -86,12 +86,6 @@ impl<P, A> SelectedMetadata<P, A> {
         };
         *self = Self::Ready(Arc::new(LoadedPrototype { plan, asset }));
     }
-    pub fn fork_ready(&self) -> Option<Self> {
-        match self {
-            Self::Ready(loaded) => Some(Self::Ready(Arc::clone(loaded))),
-            _ => None,
-        }
-    }
     /// A retired physical load still owns its IO charge until the asset backend settles.
     pub fn can_retire(&self, terminal: bool) -> bool {
         !matches!(self, Self::PlanLoading(_) | Self::Loading { .. }) || terminal
