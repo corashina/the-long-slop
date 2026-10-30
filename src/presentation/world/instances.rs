@@ -1537,12 +1537,13 @@ impl SourceInstances {
                         .iter()
                         .any(|v| v.source.as_ref() == selected)
                 {
+                    // A condition material can be exported with another asset only.
                     let initial = selected.and_then(|source| {
-                        reference
-                            .rendering
-                            .materials
+                        let materials = &reference.rendering.materials;
+                        materials
                             .iter()
                             .find(|m| &m.source == source && m.asset == prototype.asset)
+                            .or_else(|| materials.iter().find(|m| &m.source == source))
                             .map(|m| (m.asset, m.gltf_material))
                     });
                     // The new material was not admitted with the instance. Admit it first.
