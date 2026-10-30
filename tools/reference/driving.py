@@ -249,17 +249,13 @@ def recover_driving(source):
     refresh=bodies['public void RefreshSettings()']
     if 'S.BAutoShift = tabControls.toggles[1].toggle.isOn && S.BAutoClutch;' not in refresh:
         raise ValueError('Driving assist refresh differs')
-    slider=source.resolve(settings_reader,settings['tabControls']['sliders'][7])
-    if slider is None:raise ValueError('Unresolved steering slider')
-    steering=source.read(slider)
-    steering_rate=steering['defValue']*(steering['valueMultipler'] if steering['valueMultipler'] else 1.)
     if any(line not in drive for line in MOUSE_DRIVE_LINES):raise ValueError('Mouse driving source differs')
     mouse_x,mouse_x_slider=slider_range(source,settings_reader,settings,'tabControls',8)
     mouse_y,mouse_y_slider=slider_range(source,settings_reader,settings,'tabControls',9)
     bindings,binding_evidence=recover_bindings(text,bodies['private void InitDefault()'])
     if any(line not in drive for line in STEERING_WHEEL_LINES):raise ValueError('Steering wheel source differs')
     steering_wheel,steering_wheel_evidence=recover_steering_wheel(source,settings_reader,settings,refresh)
-    global_record={'source':source_id(settings_reader),'pedal_rate':rates[0],'keyboard_steering_rate':steering_rate, 'force_manual':toggles[2]['default'],
+    global_record={'source':source_id(settings_reader),'pedal_rate':rates[0],'force_manual':toggles[2]['default'],
         'min_motor_torque_nm':minimum,'default_assists':{'automatic_clutch':toggles[0]['default'],
             'automatic_gears':toggles[1]['default'] and toggles[0]['default']},'bindings':bindings,
         'mouse_drive':{'sensitivity_x':mouse_x,'sensitivity_y':mouse_y},'steering_wheel':steering_wheel,
@@ -267,6 +263,6 @@ def recover_driving(source):
     return {'global':global_record,
         'evidence':{'assembly_sha256':ASSEMBLY_SHA256,'decompiled_sha256':DECOMPILED_SHA256,
             'methods':methods,'assist_toggles':toggles,'bindings':binding_evidence,
-            'steering_source':source_id(slider),'mouse_drive_sources':[source_id(mouse_x_slider),source_id(mouse_y_slider)],'steering_wheel_controls':steering_wheel_evidence,'serialized_assists':{name:bool(settings['S'][name]) for name in ('BAutoClutch','BAutoShift','BForceManual')},
+            'mouse_drive_sources':[source_id(mouse_x_slider),source_id(mouse_y_slider)],'steering_wheel_controls':steering_wheel_evidence,'serialized_assists':{name:bool(settings['S'][name]) for name in ('BAutoClutch','BAutoShift','BForceManual')},
             'startup':'FStart -> LoadSettings -> ResetSettings(true) -> DoReset (one yielded frame) -> tab.PressedReset -> togglesetting.ResetToDefault -> ResetCustomRadioPath -> OnChangedAnything -> RefreshSettings. The settled fresh reset applies true/true; serialized S contains true/false. Static source evidence, without a native startup measurement.',
             'shift_sounds':'Private bool has no initializer or assignment; CLR startup value is false.'}}

@@ -60,6 +60,7 @@ pub struct UiElement {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UiReference {
+    pub crosshair_colors: CrosshairColors,
     pub hose_prompts: HosePrompts,
     pub computer_prompts: ComputerPrompts,
     pub ammo_prompts: AmmoPrompts,
@@ -71,6 +72,16 @@ pub struct UiReference {
     pub layouts: HashMap<String, UiElement>,
     pub overlay_color: [f32; 4],
     pub frame_color: [f32; 4],
+}
+/// Source `mainscript` old crosshair colors: `defCrosshairColor`, `canECrosshairColor`,
+/// `canFCrosshairColor` and `canMMBCrosshairColor`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrosshairColors {
+    pub default: [f32; 4],
+    pub e: [f32; 4],
+    pub f: [f32; 4],
+    pub mmb: [f32; 4],
 }
 /// Source `ls.w` default English hose prompts.
 #[derive(Clone, Debug, Serialize, Deserialize)]

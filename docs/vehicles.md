@@ -63,7 +63,7 @@ Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. 
 - The group holds one `carscript` root, a scene copy. The entry has its scene pose, the prefab of the catalog item, and `start_car` set.
 - The stream spawns only the picked start car, as a fixed placement on the `Startup` layer.
 - The start pack of a group spawns only with its start car (`StartCar01`, `StartCar02`).
-- The Game mode screen has a `#start-car` list: Random, then each manifest start placement. Browser storage keeps it (`gameMode.startCar`, -1 = Random). The menu default is Random.
+- The Game mode screen has a `#start-car` list: Random, then each manifest start placement. The settings store keeps it (`startCar`, -1 = Random). The menu default is Random.
 - `crates/simulation/src/world/start_car.rs` picks the start car. Random follows `mainmenuscript.RandomStartCar`:
 
 | Field | Chance |
