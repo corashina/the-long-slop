@@ -35,7 +35,6 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | X06b | Lamp shadows | L | Point and spot lights with a shadow mode cast shadows. |
 | X06c | Live reflection probes | M | Only 1 probe is live. Make every building and car probe live, with the 5 s disable distance check and the Reflections toggle. |
 | X06e | Motion blur | M | Uses the motion target of `motion_vectors.rs`. Shutter angle follows car speed. Off where the source turns it off. |
-| X06f | Depth of field and binocular lens | M | Main DoF with focus ray, night clamp and Dof toggle. Binocular DoF, lens distortion and chromatic aberration. |
 | X06g | Heat haze and LUT options | M | Heat haze pass weighted by temperature, old particle heat haze, LUT option (Default, C64, Sepia), grayscale. |
 
 Not planned: multiplayer, VR, stereo 3D, mod events, Steam features.
@@ -276,3 +275,8 @@ Prepare once:
 4. Watch another moving car or a falling item from a standing view. It shows no trail.
 5. Teleport (sandbox `building`), load a save and switch the car camera with C. The first frame after each shows no smear.
 6. Turn Antialiasing off and reload. The image has hard edges and no TAA. Check F3 frame time with it on and off, standing and driving.
+7. Depth of field is off by default. Turn it on. Look at the dashboard from the driver seat: it stays sharp and the far road softens a little. Look out of the window: the focus moves out over a short time.
+8. At night and at dusk with Depth of field on: the focus stays closer than by day.
+9. Check F3 frame time with Depth of field on and off, with Antialiasing on and off. With Antialiasing on, the soft edges do not flicker.
+10. Use the binoculars with Depth of field off: near and far things blur with the focus, and scroll moves the sharp distance. The image bulges at the center and edges show color fringes.
+11. Release the binoculars: the lens effects stop, and DoF returns to the setting.
