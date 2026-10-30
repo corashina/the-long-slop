@@ -18,7 +18,7 @@ Add only items that increase render FPS or remove hitches. Remove an item when i
 - Physics steps at 50 Hz, at most 2 steps per frame (`STEP_BUDGET` in `crates/simulation/src/simulation.rs`).
 - Terrain tiles and grass meshes are built in their own workers.
 - WebGPU is the only renderer. MSAA is 4x. The "Antialiasing" setting turns it off after a reload (`src/presentation/antialiasing.rs`). No TAA, motion blur or camera-depth pass.
-- Display settings for weak GPUs: scene resolution 100% to 50% (`render_scale.rs`) and "Shadows" high, medium, low (world view atlas side halved per step, `shadow_quality.rs`).
+- Display settings for weak GPUs, default at full quality: scene resolution 100% to 50% (`render_scale.rs`), "Shadows" high, medium, low (world view atlas side halved per step, `shadow_quality.rs`), "Ambient occlusion" on or off (`ambient_occlusion.rs`), "Grass" high, medium, low (blade spacing and fade distance, after a reload, `materials/grass/settings.rs`).
 - World props draw through the own GPU path: compute cull and indirect draws (`src/presentation/prop_draws.rs`). Each view pass runs its prop draws as one render bundle. The bundle records again only when its commands change.
 - Shadow cascades 0 and 1 render each frame, 2 and 3 every 2nd and 4th frame (`crates/simulation/src/reference/shadow_cadence.rs`).
 - Release build: fat LTO, simd128, wasm-opt -O3.
@@ -35,15 +35,6 @@ Impact is an estimate from the code. No item has F3 numbers yet.
 | 1 | Render bundles for Bevy phase draws | L | Medium-high if CPU bound | GPU prop rows use bundles (`render_bundles.rs`). Terrain, roads and entity renderers (LOD buildings, parked cars) still encode each draw each frame. Bevy makes new mesh bind groups each frame, and skinned draws share the phases. A bundle needs stable mesh bind groups and a static-only draw list. |
 | 2 | Skip unchanged item visuals | S | Low | The renderer still does a pose lookup and interpolation for every item visual each frame (`src/presentation/reference.rs`, `spawned.rs`). Use the changed pose rows to skip the rest. |
 | 3 | Reuse static shadow cascades | M | Medium if shadow bound | Skip a cascade when its fit and its casters did not change. Builds on the prop render bundles. |
-
-### Optional quality settings
-
-The default stays as now. Each item adds one menu option.
-
-| # | Item | Size | Impact | Notes |
-| --- | --- | --- | --- | --- |
-| 8 | AO quality option | M | Medium on weak GPUs | Multi-scale AO at full resolution. |
-| 9 | Grass density and distance option | S | Medium in grass areas | |
 
 Rejected: async compute, bindless, Hi-Z occlusion, f16, subgroups, GPU grass, own QueryBounds BVH removal.
 
