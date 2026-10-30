@@ -44,7 +44,7 @@ export class MenuState {
  }
 }
 export async function captureWithAudio(model,action,request,audio){const success=await model.capture(action,request,()=>audio?.unlock());if(!success)audio?.pause();return success;}
-export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId,thumbnail=()=>null,sleeping=()=>false,seated=()=>false,slider,audio,drivingBindings,onPause,onNewGame,appearance}) {
+export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId,thumbnail=()=>null,sleeping=()=>false,seated=()=>false,slider,audio,drivingBindings,onPause,onNewGame,appearance,figure}) {
  const model=new MenuState(),menu=document.querySelector('#menu'),controls=document.querySelector('#controls-screen'),gameMode=document.querySelector('#game-mode-screen'),savesNode=document.querySelector('#save-screen'),appearanceNode=document.querySelector('#appearance-screen'),startLast=document.querySelector('#start-load-last');
  const initial=document.querySelector('#start-actions'),paused=document.querySelector('#pause-actions'),error=document.querySelector('#capture-error'),status=document.querySelector('#status');
  const art=document.querySelector('#menu-art'),frame=document.querySelector('#menu-frame'),hud=document.querySelector('#hud');
@@ -89,6 +89,7 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId
  function paint(){
   const state=model.state;menu.hidden=state==='playing';controls.hidden=state!=='controls';gameMode.hidden=state!=='game-mode';savesNode.hidden=state!=='saves';appearanceNode.hidden=state!=='appearance';initial.hidden=!['loading','start-menu','error'].includes(state);paused.hidden=state!=='pause-menu';
   if(hud&&state!=='playing')hud.hidden=true;
+  figure?.toggle(state==='start-menu');
   clutch.disabled=model.pending;gears.disabled=model.pending||!clutch.checked;
   slider.lock(model.pending||model.started||!(state==='start-menu'||state==='controls'&&model.origin==='start-menu'));
   for(const [selector] of actionNodes)document.querySelector(selector).disabled=!model.readyFlag||model.pending;

@@ -27,6 +27,7 @@ import {installDrawDistance} from './draw-distance.js';
 import {installDrivingSettings} from './driving-settings.js';
 import {installOutfit} from './outfit.js';
 import {createAppearance} from './appearance.js';
+import {createMenuFigure} from './menu-figure.js';
 import {createGamepad} from './gamepad.js';
 import {installSteeringWheel} from './steering-wheel.js';
 const gamepad=createGamepad(()=>navigator.getGamepads?.());
@@ -240,7 +241,8 @@ async function load(){
  if(sandbox?.calendar)window.gameAudioCalendar=()=>sandbox.calendar;
  window.addEventListener('pagehide',()=>audio.dispose());
  const appearance=createAppearance({target:window,document,canvas,edit:outfit,characters:manifest.clothing.characters});
- menu=createMenu({canvas,appearance,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,slider,audio,onNewGame:()=>seed.reroll(),onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+ const figure=createMenuFigure({target:window,canvas});
+ menu=createMenu({canvas,appearance,figure,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,slider,audio,onNewGame:()=>seed.reroll(),onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  feedback=createFeedback(manifest.ui,manifest);
  startup.end('interface');
  if(failed)return;status.textContent='Loading the garage...';loading.stage(status.textContent);
