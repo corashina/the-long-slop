@@ -38,7 +38,7 @@ pub struct Evil {
 }
 
 impl Evil {
-    /// `GetEvil`: once per rabbit. The port has no peaceful-enemies setting yet.
+    /// `GetEvil`: once per rabbit. The caller skips it in peaceful mode.
     pub(crate) fn get_evil(
         &mut self,
         r: &EvilReference,

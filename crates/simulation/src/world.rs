@@ -67,24 +67,75 @@ pub use ::terrain::{
 };
 pub use terrain::{terrain_evaluator, terrain_output_bound, terrain_settings, terrain_tile};
 
-/// Game mode. Biome: 0 Mixed, 1 Desert, 2 Winter, 3 Grass.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// Game mode of a new world. Biome: 0 Mixed, 1 Desert, 2 Winter, 3 Grass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GameMode {
     pub biome: u8,
     pub start_car: StartCarChoice,
+    /// World seed. The browser menu sends the seed field value.
+    pub seed: i32,
+}
+
+impl Default for GameMode {
+    fn default() -> Self {
+        Self {
+            biome: 0,
+            start_car: StartCarChoice::default(),
+            seed: DEFAULT_SEED as i32,
+        }
+    }
 }
 
 impl GameMode {
     /// The mode of the browser menu values. -1 or an unknown car is Random.
-    pub fn from_menu(world: &crate::reference::WorldReference, biome: u32, start_car: i32) -> Self {
+    pub fn from_menu(
+        world: &crate::reference::WorldReference,
+        biome: u32,
+        start_car: i32,
+        seed: i32,
+    ) -> Self {
         Self {
             biome: if biome > 3 { 0 } else { biome as u8 },
             start_car: StartCarChoice::from_index(world, start_car),
+            seed,
         }
     }
     /// Biome index for `biome`: 0 desert, 1 winter, 2 grass. Mixed uses the terrain color.
     pub fn biome_override(self) -> Option<u8> {
         self.biome.checked_sub(1)
+    }
+}
+
+/// Game options. They apply at once and are not part of a save, as in the original.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct GameOptions {
+    /// `peacefulEnemies == 2`.
+    pub peaceful: bool,
+    /// `survival == 2`.
+    pub survival: bool,
+}
+
+impl Default for GameOptions {
+    /// `gamemodesettingsscript.defS`.
+    fn default() -> Self {
+        Self {
+            peaceful: false,
+            survival: true,
+        }
+    }
+}
+
+impl GameOptions {
+    /// Browser bits: 1 peaceful, 2 survival.
+    pub fn from_bits(bits: u32) -> Self {
+        Self {
+            peaceful: bits & 1 != 0,
+            survival: bits & 2 != 0,
+        }
+    }
+    /// Source `peacefulEnemies` value: 1 off, 2 on.
+    pub fn peaceful_enemies(self) -> i32 {
+        if self.peaceful { 2 } else { 1 }
     }
 }
 

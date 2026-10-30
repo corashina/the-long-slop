@@ -26,7 +26,6 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X03 | Creatures | XL | Ground UFO, EMP and green-eyed evil rabbits, human monster (attacks hurt the player), breakablescript `DamageFrom` for AI. Rabbits do not yet sense the player hum. |
-| X04a | New game options | M | Peaceful, survival and homesick toggles, seed field. Homesick builds home copies along the road. |
 | X04b | Settings screen | M | Settings store and screen: sensitivities, invert, FOV, crosshair, head bob, help, always-show stats, volume, FPS limit, reset per tab. |
 | X04c | Rebinding | M | Original action list and default keys. Rebind on the Controls screen. HUD hints show bound keys. After X04b. |
 | X04d | Languages and help text | M | 10 language files, language dropdown, word table for all menu and HUD text. Help text follows the assists. After X04c. |
@@ -182,6 +181,14 @@ Prepare once:
 4. Play 2 minutes on foot. The autosave tile appears. Check the F3 cost of the autosave frame.
 5. Turn on "Load last save at start" and reload the page. The last save loads.
 6. Sleep, wake, save and load: the sleep hint stays off until the cooldown ends.
+
+### Game options
+
+1. Game mode screen defaults on a fresh profile: Peaceful enemies off, Survival on, Homesick off. The seed field shows a random number.
+2. Type a seed, start a new game, note the road. Start again with the same seed: the same road. Type `abc`: the field shows 2147483647.
+3. Pause > Game mode > Survival off: the food and water bars hide, and food and water stay full. Turn it on again: they drain.
+4. Peaceful on, then drive out: no big rabbit has evil eyes. No human monster spawns in new buildings.
+5. Toggles persist after a page reload. Load a save: the current toggles stay, the save does not change them.
 
 ### Player body and outfit
 
