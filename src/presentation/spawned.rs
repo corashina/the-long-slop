@@ -40,12 +40,6 @@ pub struct SpawnedVisuals {
 }
 
 impl SpawnedVisuals {
-    pub(crate) fn reset(&mut self, world: &mut World) {
-        self.generation = self.generation.wrapping_add(1);
-        for (_, instance) in self.instances.drain() {
-            world.despawn(instance.root);
-        }
-    }
     /// Bound scene node of a spawned item, for item-specific presentation.
     pub fn node(&self, item: ItemId, node: NodeId) -> Option<Entity> {
         let instance = self.instances.get(&item)?;

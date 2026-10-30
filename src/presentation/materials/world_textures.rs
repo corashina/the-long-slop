@@ -124,12 +124,6 @@ impl WorldTextures {
         })
     }
 
-    pub(crate) fn owns_image(&self, id: AssetId<Image>) -> bool {
-        self.arrays.iter().flatten().any(|a| {
-            Arc::strong_count(&a.owner) == 1 && a.image.as_ref().is_some_and(|h| h.id() == id)
-        })
-    }
-
     pub fn cancel(&mut self) {
         self.cancelled = true;
         self.uploads.lock().unwrap().ownership.cancel(self.session);
@@ -175,53 +169,6 @@ impl WorldTextures {
                 .iter()
                 .flatten()
                 .any(|j| j.identity.session == self.session)
-    }
-    pub fn fork(&self) -> Result<Self, ReferenceError> {
-        if !self.settled() {
-            return Err(ReferenceError(
-                "Texture fork requires settled owners".into(),
-            ));
-        }
-        let mut copy = self.clone();
-        copy.session = NEXT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        copy.cancelled = false;
-        Ok(copy)
-    }
-    pub fn shared_bytes(&self) -> (usize, usize) {
-        let arrays = self
-            .arrays
-            .iter()
-            .flatten()
-            .filter(|a| Arc::strong_count(&a.owner) > 1)
-            .fold((0, 0), |n, a| {
-                (
-                    n.0 + a
-                        .layers
-                        .iter()
-                        .filter(|l| Arc::strong_count(&l.batches) > 1)
-                        .map(|l| {
-                            l.batches.len() * std::mem::size_of::<TextureBatchReference>()
-                                + l.batches
-                                    .iter()
-                                    .map(|c| {
-                                        c.descriptor.file.capacity()
-                                            + c.descriptor.sha256.capacity()
-                                    })
-                                    .sum::<usize>()
-                        })
-                        .sum::<usize>(),
-                    n.1 + a.bytes,
-                )
-            });
-        (
-            arrays.0
-                + if Arc::strong_count(&self.uploads) > 1 {
-                    queue_bytes()
-                } else {
-                    0
-                },
-            arrays.1,
-        )
     }
 
     pub(crate) fn measurement_images(&self) -> impl Iterator<Item = AssetId<Image>> + '_ {

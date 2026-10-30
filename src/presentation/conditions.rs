@@ -456,24 +456,6 @@ fn apply_owner(owner: &Owner, state: &ConditionState, bank: usize, world: &mut W
     bind_owner(owner, state, bank, world);
 }
 impl ConditionVisuals {
-    fn visibility_count(&self) -> usize {
-        self.washes
-            .iter()
-            .map(|(_, nodes)| nodes.len())
-            .sum::<usize>()
-            + self
-                .tools
-                .iter()
-                .map(|(_, model, disabled)| {
-                    usize::from(model.is_some()) + usize::from(disabled.is_some())
-                })
-                .sum::<usize>()
-    }
-    pub(crate) fn candidate_bytes(&self) -> usize {
-        self.owners.len() * std::mem::size_of::<OwnerUpdate>()
-            + self.visibility_count() * std::mem::size_of::<(Entity, Visibility)>()
-            + self.sprays.len() * std::mem::size_of::<(crate::reference::ItemId, [f32; 4])>()
-    }
     pub fn validate_assets(&self, world: &World) -> Result<(), SaveError> {
         if !self.prepared {
             return Err(fail("Condition bindings are not ready"));
@@ -501,39 +483,6 @@ impl ConditionVisuals {
             }
         }
         Ok(())
-    }
-    fn visibility(&self, frame: &SimFrameResource) -> Vec<(Entity, Visibility)> {
-        let mut result = Vec::with_capacity(self.visibility_count());
-        for (index, (_, objects)) in self.washes.iter().enumerate() {
-            let visible = frame.frame.washes[index] != 0;
-            for &entity in objects {
-                result.push((
-                    entity,
-                    if visible {
-                        Visibility::Inherited
-                    } else {
-                        Visibility::Hidden
-                    },
-                ));
-            }
-        }
-        for (id, model, disabled) in &self.tools {
-            let worn = frame.condition(*id).state == 5;
-            if let Some(model) = model {
-                result.push((*model, Visibility::Inherited));
-            }
-            if let Some(disabled) = disabled {
-                result.push((
-                    *disabled,
-                    if worn {
-                        Visibility::Hidden
-                    } else {
-                        Visibility::Inherited
-                    },
-                ));
-            }
-        }
-        result
     }
     fn apply_visibility(&self, world: &mut World) {
         // Retained identities are hidden; source destruction never removes a binding.
@@ -563,47 +512,6 @@ impl ConditionVisuals {
                 }
             }
         }
-    }
-    /// Writes the conditions of the candidate `frame` into the candidate bank.
-    pub(crate) fn prepare_candidate(
-        &self,
-        frame: &SimFrameResource,
-        world: &mut World,
-    ) -> Result<PreparedConditions, SaveError> {
-        self.validate_assets(world)?;
-        let bank = 1 - self.bank;
-        let owners = self
-            .owners
-            .iter()
-            .map(|o| OwnerUpdate {
-                id: o.id,
-                state: *frame.condition(o.id),
-            })
-            .collect::<Vec<_>>();
-        for update in &owners {
-            update_colors(
-                &self.owners[self.indices[&update.id]],
-                &update.state,
-                bank,
-                world,
-            );
-        }
-        let sprays = self
-            .sprays
-            .iter()
-            .enumerate()
-            .map(|(index, (id, receivers))| {
-                let color = frame.frame.spray_colors[index];
-                apply_spray(receivers, color, bank, world, false);
-                (*id, color)
-            })
-            .collect();
-        Ok(PreparedConditions {
-            bank,
-            owners,
-            visibility: self.visibility(frame),
-            sprays,
-        })
     }
 }
 impl PreparedConditions {

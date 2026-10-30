@@ -42,7 +42,6 @@ pub struct WorldMetrics {
     pub grass_worker_cache_bytes: usize,
     /// Subset of active CPU: estimated grass worker capacity high-water charge.
     pub grass_worker_reserved_bytes: usize,
-    pub shared_input_cpu_bytes: usize,
     /// Subset of active CPU: imported item snapshots retained for change capture.
     pub imported_snapshot_bytes: usize,
     pub road_checkpoints: usize,

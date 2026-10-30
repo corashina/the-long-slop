@@ -65,11 +65,6 @@ impl SourceWorldVisuals {
         })
     }
 
-    pub(crate) fn drained(&self) -> bool {
-        self.pending
-            .as_ref()
-            .is_none_or(|p| p.continuation.drained())
-    }
     pub fn ready(&self, stream: &RendererWorld) -> bool {
         self.pending.is_none() && self.surfaces.len() == stream.frame().surfaces.len()
     }

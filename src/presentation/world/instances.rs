@@ -309,11 +309,6 @@ impl SourceInstances {
             + self.lods.retained_bytes()
             + self.props.retained_bytes()
     }
-    pub(crate) fn drained(&self) -> bool {
-        self.instances
-            .iter()
-            .all(|i| i.continuation.as_ref().is_none_or(|c| c.drained()))
-    }
     pub(crate) fn startup_audit(&self, grass: &GrassJobs) -> serde_json::Value {
         serde_json::json!({
             "pending_owner": self.pending.as_ref().map(|p| &p.prototype),

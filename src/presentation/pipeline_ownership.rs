@@ -48,44 +48,6 @@ impl PipelineOwners {
         owner.fail(message);
         true
     }
-    fn claim(
-        &self,
-        cache: &PipelineCache,
-        base: CachedRenderPipelineId,
-        owner: &GpuPreparation,
-    ) -> bool {
-        if !cache.render_pipeline_is_held(base) {
-            return false;
-        }
-        let mut entries = self.entries.lock().unwrap();
-        let entry = entries.entry(base).or_insert_with(|| Entry {
-            base,
-            owner: None,
-            phase: HeldEntryPhase::Held,
-        });
-        if entry.phase == HeldEntryPhase::Held
-            && entry
-                .owner
-                .as_ref()
-                .is_some_and(|old| old.same_owner(owner))
-        {
-            return false;
-        }
-        for (&id, entry) in entries.iter_mut() {
-            if id != base && entry.base != base {
-                continue;
-            }
-            if let Some(old) = entry.owner.take() {
-                if entry.phase == HeldEntryPhase::Held {
-                    old.release_pipeline();
-                }
-            }
-            entry.phase = HeldEntryPhase::Held;
-            owner.retain_pipeline();
-            entry.owner = Some(owner.clone());
-        }
-        true
-    }
     fn companion(
         &self,
         base: CachedRenderPipelineId,
@@ -151,42 +113,14 @@ impl PipelineOwners {
         reclaimed
     }
 }
-pub(crate) enum PipelineUse<'a> {
-    Active,
-    Candidate(&'a GpuPreparation),
-}
 pub(crate) fn specialize_base(
     world: &mut World,
-    usage: PipelineUse<'_>,
     specialize: impl FnOnce(&mut World) -> Result<CachedRenderPipelineId, ReferenceError>,
 ) -> Result<Option<CachedRenderPipelineId>, ReferenceError> {
-    let owner = match usage {
-        PipelineUse::Active => None,
-        PipelineUse::Candidate(owner) => Some(owner),
-    };
-    if owner.is_some_and(|owner| owner.cancelled()) {
-        return Ok(None);
-    }
-    let _queue = owner
-        .map(|_| queue_scope(world.resource::<PipelineCache>()))
-        .transpose()
-        .map_err(|error| ReferenceError(error.into()))?;
     let id = specialize(world)?;
-    let changed = if let Some(owner) = owner {
-        let owners = world.resource::<PipelineOwners>();
-        let changed = owners.claim(world.resource::<PipelineCache>(), id, owner);
-        if owners.isolated(id) {
-            world
-                .resource_mut::<PipelineOwners>()
-                .isolated_bases
-                .insert(id);
-        }
-        changed
-    } else {
-        world.resource_scope(|world, owners: Mut<PipelineOwners>| {
-            owners.reclaim_active(&mut world.resource_mut::<PipelineCache>(), id)
-        })
-    };
+    let changed = world.resource_scope(|world, owners: Mut<PipelineOwners>| {
+        owners.reclaim_active(&mut world.resource_mut::<PipelineCache>(), id)
+    });
     if changed {
         world
             .resource_mut::<super::caster::CasterPasses>()

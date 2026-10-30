@@ -85,17 +85,10 @@ pub struct WorldPipelines {
     cache_reserved: bool,
     session: u64,
 }
-#[derive(Resource, Clone, ExtractResource, Default)]
-pub struct CandidatePipelines(
-    pub Option<WorldPipelines>,
-    pub Option<crate::presentation::gpu_prepare::GpuPreparation>,
-);
 pub struct WorldPipelinePlugin;
 impl Plugin for WorldPipelinePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<CandidatePipelines>()
-            .add_plugins(ExtractResourcePlugin::<CandidatePipelines>::default())
-            .init_resource::<WorldPipelines>()
+        app.init_resource::<WorldPipelines>()
             .add_plugins(ExtractResourcePlugin::<WorldPipelines>::default());
         app.sub_app_mut(RenderApp)
             .init_resource::<super::super::pipeline_ownership::PipelineOwners>()
@@ -325,15 +318,6 @@ impl WorldPipelines {
         }
         Ok(Some(ticket))
     }
-    pub(crate) fn drained(&self) -> bool {
-        self.jobs.as_ref().is_none_or(|bank| {
-            bank.lock()
-                .unwrap()
-                .batches
-                .iter()
-                .all(|batch| batch.operation.physical.completed())
-        })
-    }
     pub fn prepare(
         &mut self,
         stream: &RendererWorld,
@@ -455,31 +439,18 @@ fn compile(world: &mut World) {
     let Some(active) = world.get_resource::<WorldPipelines>().cloned() else {
         return;
     };
-    let candidate = world.resource::<CandidatePipelines>().0.clone();
     super::super::pipeline_ownership::refresh_isolation(world);
-    for (bank, input) in std::iter::once(active).chain(candidate).enumerate() {
-        let Some(shared) = &input.jobs else {
-            continue;
+    {
+        let Some(shared) = &active.jobs else {
+            return;
         };
         let mut shared = shared.lock().unwrap();
-        let owner = (bank != 0).then(|| {
-            world
-                .resource::<CandidatePipelines>()
-                .1
-                .as_ref()
-                .unwrap()
-                .clone()
-        });
-        let candidate_cancelled = owner.as_ref().is_some_and(|owner| owner.cancelled());
         for batch in &mut shared.batches {
-            if candidate_cancelled {
-                batch.operation.physical.stop();
-            }
             if batch.operation.physical.completed() {
                 continue;
             }
             batch.open = false;
-            let cancelled = candidate_cancelled || batch.operation.physical.stopped();
+            let cancelled = batch.operation.physical.stopped();
             if cancelled {
                 batch.stopped = true;
             }
@@ -490,7 +461,7 @@ fn compile(world: &mut World) {
                     job.waiting = "cancelled";
                 }
                 if !cancelled && job.state == RenderingState::Loading {
-                    compile_pair(world, &mut job, bank, None);
+                    compile_pair(world, &mut job, None);
                 }
                 if matches!(job.state, RenderingState::Failed(_)) {
                     batch.stopped = true;
@@ -509,8 +480,7 @@ fn compile(world: &mut World) {
                     Ok(Some(keys)) => match batch.select(Some(keys.len)) {
                         Ok(true) => {
                             job.dispatched = true;
-                            batch.dispatched_keys +=
-                                compile_pair(world, &mut job, bank, Some(&keys));
+                            batch.dispatched_keys += compile_pair(world, &mut job, Some(&keys));
                             if job.physical.stopped()
                                 || matches!(job.state, RenderingState::Failed(_))
                             {
@@ -560,10 +530,7 @@ fn compile(world: &mut World) {
                 (cancelled || job.state != RenderingState::Loading)
                     && physical_pipelines_settled(world, &job)
             });
-            let candidate_drained = owner
-                .as_ref()
-                .is_none_or(|owner| !owner.cancelled() || owner.drained());
-            if batch.register(settled.chain(std::iter::once(candidate_drained))) {
+            if batch.register(settled.chain(std::iter::once(true))) {
                 let receipt = batch.operation.physical.clone();
                 world
                     .resource::<RenderQueue>()
@@ -572,12 +539,7 @@ fn compile(world: &mut World) {
         }
     }
 }
-fn compile_pair(
-    world: &mut World,
-    job: &mut PipelineJob,
-    bank: usize,
-    keys: Option<&PairKeys>,
-) -> usize {
+fn compile_pair(world: &mut World, job: &mut PipelineJob, keys: Option<&PairKeys>) -> usize {
     let mut dispatched = 0;
     if let Some(keys) = keys {
         let layout = world
@@ -593,19 +555,7 @@ fn compile_pair(
             .properties
             .clone();
         for (mesh_key, shadow) in keys.iter() {
-            let owner = (bank != 0).then(|| {
-                world
-                    .resource::<CandidatePipelines>()
-                    .1
-                    .as_ref()
-                    .unwrap()
-                    .clone()
-            });
-            let usage = match &owner {
-                Some(owner) => super::super::pipeline_ownership::PipelineUse::Candidate(owner),
-                None => super::super::pipeline_ownership::PipelineUse::Active,
-            };
-            let result = super::super::pipeline_ownership::specialize_base(world, usage, |world| {
+            let result = super::super::pipeline_ownership::specialize_base(world, |world| {
                 let key = ErasedMaterialPipelineKey {
                     type_id: job.material.type_id(),
                     mesh_key: ErasedMeshPipelineKey::new(mesh_key),

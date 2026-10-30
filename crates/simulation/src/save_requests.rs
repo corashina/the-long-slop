@@ -1,28 +1,16 @@
-//! Browser save requests in the simulation: capture, prepare and commit.
-use crate::boundary::{Change, SaveCommand, SimFrame, StateBlock};
-use crate::candidate::CandidateDriver;
+//! Browser save requests in the simulation: capture, new game and commit.
+use crate::boundary::{Change, SaveCommand, SimFrame};
 use crate::driver::SimDriver;
 use crate::reference::ReferenceManifest;
 use crate::save::fresh_permit::FreshSessionPermit;
 use crate::save::{SaveError, SaveSnapshot, SourceStamp};
-use crate::starting_area::GarageRuntime;
 use crate::world::GameMode;
 use serde::{Deserialize, Serialize};
 
-/// The prepared session.
-enum Prepared {
-    /// A new game in the current runtime.
-    Fresh(FreshSessionPermit),
-    /// A loaded or new runtime that the renderer prepares offscreen.
-    Candidate {
-        id: u32,
-        driver: Box<CandidateDriver>,
-    },
-}
-
 pub(crate) struct SaveState {
     source: SourceStamp,
-    prepared: Option<Prepared>,
+    /// The new game in the current runtime.
+    prepared: Option<FreshSessionPermit>,
     /// Results that the next frame carries.
     results: Vec<Change>,
 }
@@ -86,12 +74,7 @@ impl SimDriver {
                     });
                 }
                 SaveCommand::Cancel(id) => {
-                    let current = match &self.save.prepared {
-                        Some(Prepared::Fresh(permit)) => permit.request_id,
-                        Some(Prepared::Candidate { id, .. }) => *id,
-                        None => continue,
-                    };
-                    if current == id {
+                    if self.save.prepared.is_some_and(|p| p.request_id == id) {
                         self.save.prepared = None;
                     }
                 }
@@ -99,7 +82,7 @@ impl SimDriver {
         }
     }
 
-    /// Runs one request. `None`: the renderer answers when the candidate is ready.
+    /// Runs one request. `None`: no answer.
     fn request(
         &mut self,
         reference: &ReferenceManifest,
@@ -117,43 +100,30 @@ impl SimDriver {
                     .payload
                     .as_u64()
                     .and_then(|id| u32::try_from(id).ok());
-                match self.save.prepared.take() {
-                    Some(Prepared::Fresh(permit)) => {
-                        let id = id.ok_or_else(|| invalid("Prepared session is stale"));
-                        let result = id.and_then(|id| {
-                            if !self.ready {
-                                return Err(invalid("The garage is not ready"));
-                            }
-                            permit.commit(id, &mut self.runtime, epoch)
-                        });
-                        if let Err(error) = result {
-                            self.save.prepared = Some(Prepared::Fresh(permit));
-                            return Err(error);
-                        }
-                        self.clear_input();
-                        self.frame_steps = 0;
-                        Ok(Some(String::new()))
+                let permit = self
+                    .save
+                    .prepared
+                    .take()
+                    .ok_or_else(|| invalid("Prepared session is missing"))?;
+                let id = id.ok_or_else(|| invalid("Prepared session is stale"));
+                let result = id.and_then(|id| {
+                    if !self.ready {
+                        return Err(invalid("The garage is not ready"));
                     }
-                    Some(Prepared::Candidate {
-                        id: prepared,
-                        driver,
-                    }) if Some(prepared) == id => {
-                        self.commit(reference, *driver);
-                        Ok(Some(String::new()))
-                    }
-                    other => {
-                        self.save.prepared = other;
-                        Err(invalid("Prepared session is missing"))
-                    }
-                }
-            }
-            "Capture" | "Prepare" | "PrepareNewGame" => {
-                #[cfg(target_arch = "wasm32")]
-                let _profile = crate::cpu_profile::Timer::new(if request.kind == "Prepare" {
-                    crate::cpu_profile::Stage::LoadPrepare
-                } else {
-                    crate::cpu_profile::Stage::SavePrepare
+                    permit.commit(id, &mut self.runtime, epoch)
                 });
+                if let Err(error) = result {
+                    self.save.prepared = Some(permit);
+                    return Err(error);
+                }
+                self.clear_input();
+                self.frame_steps = 0;
+                Ok(Some(String::new()))
+            }
+            "Capture" | "PrepareNewGame" => {
+                #[cfg(target_arch = "wasm32")]
+                let _profile =
+                    crate::cpu_profile::Timer::new(crate::cpu_profile::Stage::SavePrepare);
                 if !self.ready {
                     return Err(invalid("The garage is not ready"));
                 }
@@ -204,104 +174,23 @@ impl SimDriver {
                 let runtime = &self.runtime;
                 // A new game starts the garage world. The browser reloads the page for a
                 // started game or another game mode, so the garage has the new mode.
-                if request.kind == "PrepareNewGame" {
-                    if runtime.started
-                        || runtime.stream.mode() != mode
-                        || !runtime
-                            .distances
-                            .matches(&reference.world.draw_distance, draw_distance)
-                    {
-                        return Err(invalid("New game needs a garage in its game mode"));
-                    }
-                    let permit = FreshSessionPermit::prepare(request.id, runtime, epoch)?;
-                    self.save.prepared = Some(Prepared::Fresh(permit));
-                    return Ok(Some(request.id.to_string()));
+                if runtime.started
+                    || runtime.stream.mode() != mode
+                    || !runtime
+                        .distances
+                        .matches(&reference.world.draw_distance, draw_distance)
+                {
+                    return Err(invalid("New game needs a garage in its game mode"));
                 }
-                let saved = payload.get("save").ok_or_else(|| invalid("Missing save"))?;
-                let saved = SaveSnapshot::deserialize(saved)
-                    .map_err(|error| SaveError::CorruptData(error.to_string()))?;
-                let mut runtime = GarageRuntime::from_save(
-                    reference,
-                    &self.save.source,
-                    &saved,
-                    mode,
-                    draw_distance,
-                )?;
-                runtime.set_game_options(self.runtime.options);
-                runtime.started = true;
-                runtime.paused = true;
-                self.save.prepared = Some(Prepared::Candidate {
-                    id: request.id,
-                    driver: Box::new(CandidateDriver::new(runtime, self.sent.fork())),
-                });
-                Ok(None)
+                self.save.prepared = Some(FreshSessionPermit::prepare(request.id, runtime, epoch)?);
+                Ok(Some(request.id.to_string()))
             }
             _ => Err(invalid("Unknown save request")),
         }
     }
 
-    /// Replaces the runtime with the prepared candidate. The renderer prepared its scene.
-    fn commit(&mut self, reference: &ReferenceManifest, driver: CandidateDriver) {
-        let session = self
-            .runtime
-            .audio
-            .as_ref()
-            .map_or(1, |audio| audio.session.wrapping_add(1));
-        let settings = self.runtime.driving_input.settings;
-        let options = self.runtime.options;
-        let player_settings = self.runtime.player_settings;
-        // Assignment drops the old stream and terminates its road actor first.
-        self.runtime = driver.runtime;
-        // The renderer takes the candidate copy with the candidate scene.
-        self.sent = driver.sent;
-        // The candidate renderer becomes the active renderer. Its input and credit answer go on.
-        // The input of the old renderer belongs to the dropped stream.
-        self.world = driver.world;
-        self.grant = driver.grant;
-        self.runtime.driving_input.settings = settings;
-        // A change during preparation reached only the old runtime.
-        self.runtime.set_game_options(options);
-        self.runtime.set_player_settings(player_settings);
-        self.runtime
-            .stream
-            .set_overlap(crate::world::WorldMetrics::default())
-            .expect("retired world overlap only removes charges");
-        let runtime = &mut self.runtime;
-        if let Some(audio) = &mut runtime.audio {
-            audio.reset(session);
-            audio.sync_lamps(&reference.lighting, &runtime.lighting);
-        }
-        self.restart();
-        self.runtime.advance_instruments(reference, 0., true);
-        // The candidate frames consumed the sent state of the new frame stream.
-        self.runtime.reset_frame_outputs();
-        self.save.results.push(Change::Restarted);
-    }
-
-    /// One candidate step from the renderer input, after the active world step.
-    pub(crate) fn advance_candidate(
-        &mut self,
-        reference: &ReferenceManifest,
-        command: Option<crate::boundary::CandidateCommand>,
-    ) {
-        let (Some(command), Some(Prepared::Candidate { driver, .. })) =
-            (command, &mut self.save.prepared)
-        else {
-            return;
-        };
-        driver.accept(command);
-        driver.advance(reference, self.runtime.stream.metrics(), self.calendar);
-    }
-
-    /// Writes the save results and the candidate frame into `frame`.
-    pub(crate) fn fill_saves(&mut self, reference: &ReferenceManifest, frame: &mut SimFrame) {
+    /// Writes the save results into `frame`.
+    pub(crate) fn fill_saves(&mut self, frame: &mut SimFrame) {
         frame.changes.append(&mut self.save.results);
-        match &mut self.save.prepared {
-            Some(Prepared::Candidate { driver, .. }) => {
-                frame.state.flags |= StateBlock::CANDIDATE;
-                driver.fill(reference, frame.candidate.get_or_insert_default());
-            }
-            _ => frame.candidate = None,
-        }
     }
 }

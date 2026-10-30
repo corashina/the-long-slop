@@ -9,7 +9,7 @@ export function createSaveBridge(host=window){
     pending.delete(id);
     const index=queue.findIndex(item=>item.id===id);
     if(index!==-1)queue.splice(index,1);
-    else if(kind==='Prepare'||kind==='PrepareNewGame'){
+    else if(kind==='PrepareNewGame'){
      request('Discard',id).catch(()=>{});queue.unshift(queue.pop());
     }
     reject(new DOMException('Save operation canceled.','AbortError'));
@@ -36,7 +36,6 @@ export function createSaveBridge(host=window){
  };
  return {
   capture:(autosave=false)=>request('Capture',{date:new Date().toISOString(),autosave}),
-  prepare:(save,signal,drawDistance)=>request('Prepare',{save,draw_distance:drawDistance},undefined,signal),
   prepareNewGame:(signal,drawDistance)=>request('PrepareNewGame',{draw_distance:drawDistance},undefined,signal),
   commit(token,onDispatch){return request('Commit',token,onDispatch).finally(()=>committing.delete(token));},
   discard(token){

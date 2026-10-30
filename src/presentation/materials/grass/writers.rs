@@ -77,15 +77,12 @@ struct WriterPass {
     writer_layout: BindGroupLayout,
     writers: HashMap<Entity, WriterGpu>,
 }
-#[derive(Resource, Default)]
-struct HiddenWriterPass(Option<WriterPass>);
 pub struct GrassDisplacementPlugin;
 impl Plugin for GrassDisplacementPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GrassWriters>();
         app.sub_app_mut(RenderApp)
             .init_resource::<GrassGpu>()
-            .init_resource::<HiddenWriterPass>()
             .add_systems(
                 ExtractSchedule,
                 (init, extract)
@@ -189,9 +186,7 @@ fn init(
 }
 fn extract(
     input: Extract<Res<GrassWriters>>,
-    requests: Extract<Res<crate::app::save::SaveRequests>>,
     pass: Option<ResMut<WriterPass>>,
-    mut hidden: ResMut<HiddenWriterPass>,
     mut gpu: ResMut<GrassGpu>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
@@ -199,48 +194,8 @@ fn extract(
     let Some(mut pass) = pass else {
         return;
     };
-    if hidden
-        .0
-        .as_ref()
-        .is_some_and(|p| p.session == input.session)
-    {
-        std::mem::swap(&mut *pass, hidden.0.as_mut().unwrap());
-    }
     extract_one(&input, &mut pass, &mut gpu, &device, &queue);
-    if let Some(candidate) = requests.hidden() {
-        let input = &candidate.writers;
-        if hidden.0.as_ref().is_none_or(|p| p.session != input.session) {
-            hidden.0 = Some(WriterPass {
-                session: input.session,
-                active: false,
-                pipeline: pass.pipeline,
-                frame_group: None,
-                frame_layout: pass.frame_layout.clone(),
-                status: Arc::default(),
-                revision: Arc::default(),
-                pending_gpu: Arc::default(),
-                encoded: AtomicBool::new(false),
-                callback_registered: AtomicBool::new(false),
-                submitted_revision: AtomicU64::new(0),
-                writer_layout: pass.writer_layout.clone(),
-                writers: HashMap::new(),
-            });
-        }
-        if !candidate.materials.preparation.cancelled()
-            && input.status.lock().unwrap().is_none()
-            && !input.pending_gpu.load(Ordering::Acquire)
-        {
-            let _scope = candidate.materials.preparation.scope(&device);
-            extract_one(input, hidden.0.as_mut().unwrap(), &mut gpu, &device, &queue);
-            queue.submit([]);
-            candidate.materials.preparation.submitted(&queue);
-        }
-    } else {
-        hidden.0 = None;
-    }
-    gpu.0.retain(|session, _| {
-        *session == input.session || hidden.0.as_ref().is_some_and(|p| p.session == *session)
-    });
+    gpu.0.retain(|session, _| *session == input.session);
 }
 fn extract_one(
     input: &GrassWriters,
@@ -333,77 +288,14 @@ fn extract_one(
 }
 fn draw(
     pass: Option<Res<WriterPass>>,
-    hidden: Res<HiddenWriterPass>,
     gpu: Res<GrassGpu>,
     cache: Res<PipelineCache>,
-    device: Res<RenderDevice>,
-    queue: Res<RenderQueue>,
-    candidate: Res<crate::presentation::world::pipelines::CandidatePipelines>,
     mut context: RenderContext,
 ) {
     let Some(pass) = pass else {
         return;
     };
     draw_one(&pass, &gpu, &cache, &mut context);
-    if let Some(hidden) = &hidden.0 {
-        if !hidden.active
-            || hidden.status.lock().unwrap().is_some()
-            || hidden.pending_gpu.load(Ordering::Acquire)
-            || candidate.1.as_ref().is_some_and(|owner| owner.cancelled())
-        {
-            return;
-        }
-        let Some(gpu) = gpu.0.get(&hidden.session) else {
-            return;
-        };
-        let Some(pipeline) = cache.get_render_pipeline(hidden.pipeline) else {
-            return;
-        };
-        let owner = candidate.1.as_ref();
-        let _scope = owner.and_then(|o| o.scope(&device));
-        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
-            label: Some("hidden source Grass displacement"),
-        });
-        {
-            let colors = [Some(RenderPassColorAttachment {
-                view: &gpu.color_view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: Operations {
-                    load: LoadOp::Clear(LinearRgba::new(0., 0., 1., 1.).into()),
-                    store: StoreOp::Store,
-                },
-            })];
-            let mut descriptor = writer_descriptor(gpu);
-            descriptor.color_attachments = &colors;
-            let raw = encoder.begin_render_pass(&descriptor);
-            let mut render = bevy::render::render_phase::TrackedRenderPass::new(&device, raw);
-            encode(hidden, pipeline, &mut render);
-        }
-        queue.submit([encoder.finish()]);
-        hidden.encoded.store(true, Ordering::Release);
-        if let Some(owner) = owner {
-            owner.submitted(&queue);
-        }
-    }
-}
-fn writer_descriptor(gpu: &GrassGpuData) -> RenderPassDescriptor<'_> {
-    RenderPassDescriptor {
-        label: Some("source Grass displacement"),
-        color_attachments: &[],
-        depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-            view: &gpu.depth_view,
-            depth_ops: Some(Operations {
-                load: LoadOp::Clear(1.),
-                store: StoreOp::Discard,
-            }),
-            stencil_ops: Some(Operations {
-                load: LoadOp::Clear(0),
-                store: StoreOp::Discard,
-            }),
-        }),
-        ..default()
-    }
 }
 fn draw_one(pass: &WriterPass, gpu: &GrassGpu, cache: &PipelineCache, context: &mut RenderContext) {
     if !pass.active {
@@ -475,11 +367,11 @@ fn encode<'a>(
     }
 }
 
-fn complete(pass: Option<Res<WriterPass>>, hidden: Res<HiddenWriterPass>, queue: Res<RenderQueue>) {
+fn complete(pass: Option<Res<WriterPass>>, queue: Res<RenderQueue>) {
     let Some(pass) = pass else {
         return;
     };
-    for pass in std::iter::once(&*pass).chain(hidden.0.as_ref()) {
+    for pass in std::iter::once(&*pass) {
         if !pass.encoded.load(Ordering::Acquire)
             || pass.callback_registered.swap(true, Ordering::AcqRel)
         {

@@ -24,9 +24,6 @@ impl WorldInput {
         }
         self.pending.merge(command);
     }
-    pub fn frozen(&self) -> bool {
-        self.pending.freeze
-    }
     pub fn take_failure(&mut self) -> Option<String> {
         self.pending.failure.take()
     }
