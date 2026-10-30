@@ -565,10 +565,10 @@ fn evaluate(
     }
 }
 
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
+pub(crate) fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t.clamp(0., 1.)
 }
-fn inverse_lerp(a: f32, b: f32, value: f32) -> f32 {
+pub(crate) fn inverse_lerp(a: f32, b: f32, value: f32) -> f32 {
     if a == b {
         0.
     } else {

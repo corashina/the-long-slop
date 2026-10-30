@@ -7,6 +7,7 @@ pub mod bloom;
 pub mod chain;
 pub mod copy;
 pub mod dither;
+pub mod dof;
 pub mod exposure;
 pub mod lut;
 pub mod motion_blur;
