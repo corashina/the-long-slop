@@ -3,6 +3,8 @@
 mod bikes;
 #[path = "stream_tests/breakables.rs"]
 mod breakables;
+#[path = "stream_tests/car_entry.rs"]
+mod car_entry;
 #[path = "stream_tests/car_types.rs"]
 mod car_types;
 #[path = "stream_tests/cargo.rs"]
