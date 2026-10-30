@@ -1194,7 +1194,7 @@ fn complete_probe_union_preserves_revision_and_fresh_cycles() {
         scene: 1,
         native_extent: [800, 600],
         scene_extent: [800, 600],
-        scale: SceneScale::Native,
+        scale: SceneScale::default(),
     };
     let mut request = ReadinessRequest {
         render: key,

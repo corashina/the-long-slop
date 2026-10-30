@@ -514,7 +514,7 @@ mod tests {
             scene: 1,
             extent: [800, 600],
             native_extent: [800, 600],
-            scale: SceneScale::Native,
+            scale: SceneScale::default(),
         }
     }
     #[test]

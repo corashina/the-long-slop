@@ -1,5 +1,7 @@
 import {installSceneResolution} from './scene-resolution.js';
 installSceneResolution(window,document.querySelector('#scene-resolution'));
+import {installShadowQuality} from './shadow-quality.js';
+installShadowQuality(window,()=>localStorage,document.querySelector('#shadow-quality'));
 import {installGameMode,installStartCar} from './game-mode.js';
 installGameMode(window,document.querySelector('#biome'));
 import {installSunglassesEffects} from './sunglasses.js';
