@@ -32,15 +32,12 @@ pub fn last_skip(cache: &PipelineCache) -> String {
         _ => "additive partner",
     };
     let id = (value & 0xffff_ffff) as usize;
-    let state = cache
-        .pipelines()
-        .find(|p| p.id() == id)
-        .map_or("unknown".into(), |p| match &p.state {
-            CachedPipelineState::Queued => "queued".into(),
-            CachedPipelineState::Creating(_) => "creating".into(),
-            CachedPipelineState::Ok(_) => "ok".into(),
-            CachedPipelineState::Err(error) => format!("error {error}"),
-        });
+    let state = match cache.get_render_pipeline_state(CachedRenderPipelineId::new(id)) {
+        CachedPipelineState::Queued => "queued".into(),
+        CachedPipelineState::Creating(_) => "creating".into(),
+        CachedPipelineState::Ok(_) => "ok".into(),
+        CachedPipelineState::Err(error) => format!("error {error}"),
+    };
     format!("{reason} {id} {state}")
 }
 
