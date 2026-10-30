@@ -47,3 +47,25 @@ fn parked_lada_rests() {
         "parked car stays awake"
     );
 }
+
+/// The garage barrel and wire brush rest and sleep (source `m_SleepThreshold`).
+#[test]
+#[ignore = "requires the installed source export"]
+fn garage_items_rest() {
+    let (reference, mut run) = garage_controls::load_garage();
+    for _ in 0..(15. / FIXED_DT) as usize {
+        frame(&mut run, &reference);
+    }
+    for name in ["BARREL (7)", "Drotkefe (1)"] {
+        let item = run
+            .area
+            .items
+            .iter()
+            .find(|i| run.area.items.name(i.id) == Some(name))
+            .expect(name);
+        assert!(
+            run.physics.rapier().bodies[item.body.expect(name)].is_sleeping(),
+            "{name} stays awake"
+        );
+    }
+}

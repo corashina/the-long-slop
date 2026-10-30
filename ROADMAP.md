@@ -22,11 +22,7 @@ Size: S is up to a day. M is a few days. L is about a week. XL is several weeks.
 
 ## 1. Starting area, player, and movement
 
-Finish the home, garage, Lada, and nearby driving first. The 2026-10-29 audit found these gaps.
-
-| ID | Task | Size | Remaining work |
-| --- | --- | --- | --- |
-| S4 | Garage creep | S | Barrel `BARREL (7)` creeps and wire brush `Drotkefe (1)` spins on its shelf. |
+All tasks are done. The section test pass remains.
 
 ## 2. Car parts and repair
 
@@ -72,6 +68,7 @@ Prepare once:
 8. Crosshair icons (S1): look at a car door, a sliding and a vertical sliding usable, a light switch, a radio knob, a tuneable cap and a seat. Push the Lada, hold the hose at a cap and a trailer grip at the hitch, fill a can. Carry a light, a medium and a heavy item. Each case shows the source icons together, and the heavy item shows the too heavy icon. No name or condition line shows above the crosshair.
 9. Binoculars (S2): pick up the garage binoculars and hold LMB. The view zooms through the lens with the black two-circle mask, the binoculars and the crosshair hide, and look speed drops. Scroll changes the zoom between 3 and 4 degrees. Release LMB to return. Try it with the binoculars equipped too.
 10. Tune icons (S3): look at the radio volume and tune knobs, the compass and clock knobs, and a tuneable sink tap. Each shows its own mouse wheel image. A tuneable cap without an image shows the cap image.
+11. Garage rest (S4): run `cargo test --release --lib garage_items_rest -- --ignored`. In game, the garage barrel and the wire brush stay still. Drive the Lada and check that parked cars and dropped items still settle and sleep.
 
 ### Car parts and repair (section 2)
 

@@ -253,7 +253,7 @@ def verify_reference(output: Path, library) -> None:
 def _export_selected(source, output: Path, library, snapshot) -> None:
     from .gltf import export_gltf
     from .lighting import recover_lighting, road_source, validate_lighting_export
-    from .source import key
+    from .source import key, source_id
     from .parameters import recover_parameters
     from .manifest import build_manifest
     from .conditions import prepare_conditions, prepare_cleaning_roots, bind_condition_audio
@@ -385,6 +385,10 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     # Before audio: breakable clips join source.item_clips.
     manifest['breakables'] = recover_breakables(source, manifest)
     manifest['gib_constants'] = recover_gib_constants(source)
+    # PhysicsManager: PhysX puts a body to sleep below this mass-normalized kinetic energy.
+    physics=source.get('globalgamemanagers',10)
+    if physics.type.name!='PhysicsManager':raise ValueError('globalgamemanagers 10 is not PhysicsManager')
+    manifest['physics']={'source':source_id(physics),'sleep_threshold':source.read(physics)['m_SleepThreshold']}
     # Before audio: the rabbit die clips get clip ids there.
     manifest['creatures'] = recover_creatures(source, manifest, output)
     from .wheel_effects import recover_skid, validate_skid

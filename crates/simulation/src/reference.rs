@@ -900,6 +900,15 @@ pub struct LibraryProvenance {
     pub source_manifest_sha256: String,
 }
 
+/// Source `PhysicsManager` settings.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhysicsSettings {
+    pub source: SourceId,
+    /// `m_SleepThreshold`: the PhysX mass-normalized kinetic energy below which a body sleeps.
+    pub sleep_threshold: f32,
+}
+
 /// The manifest with all world vehicle prototypes is about 295 MB.
 pub const MAX_MANIFEST_BYTES: usize = 384 * 1024 * 1024;
 
@@ -938,6 +947,7 @@ pub struct ReferenceManifest {
     pub crash: CrashReference,
     pub breakables: Vec<BreakableReference>,
     pub gib_constants: GibConstants,
+    pub physics: PhysicsSettings,
     pub skid: SkidReference,
     pub app_id: u32,
     pub build_id: u32,
@@ -1971,6 +1981,10 @@ impl ReferenceManifest {
             breakable.validate(self)?;
         }
         self.gib_constants.validate()?;
+        require(
+            self.physics.sleep_threshold.is_finite() && self.physics.sleep_threshold > 0.,
+            "physics sleep threshold",
+        )?;
         wheel_effects::validate(self)?;
         self.conditions.validate(self)?;
         Ok(())

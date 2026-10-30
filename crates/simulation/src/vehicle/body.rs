@@ -111,6 +111,8 @@ impl PhysicsWorld {
             0,
             reference.bodies.len() + reference.parts.len() + reference.wheel_parts.len(),
         );
+        // PhysX sleeps a body below a mass-normalized kinetic energy, 0.5 * v * v.
+        physics.sleep_speed = (2. * reference.physics.sleep_threshold).sqrt();
         physics.refresh_queries();
         physics
     }

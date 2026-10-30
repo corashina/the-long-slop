@@ -78,6 +78,11 @@ impl PhysicsWorld {
         Some(edit(collider))
     }
     pub fn insert_body(&mut self, body: impl Into<RigidBody>) -> RigidBodyHandle {
+        let mut body = body.into();
+        // A negative threshold is a body that never sleeps.
+        if body.activation().normalized_linear_threshold >= 0. {
+            body.activation_mut().normalized_linear_threshold = self.sleep_speed;
+        }
         let handle = self.physics.insert_body(body);
         self.query_bounds.mark_body(handle);
         self.presentation_bodies.mark(handle);
