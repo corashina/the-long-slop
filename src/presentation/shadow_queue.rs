@@ -3,7 +3,6 @@ use super::shadow_cache::SpecializationKey;
 use super::surface_views::{PROBE_START, VIEW_COUNT};
 use super::{
     caster::{CasterPasses, CasterUniform, CasterViews},
-    lighting_scene::SourceSceneLighting,
     readiness::RendererStateHandle,
     shadow_phase::{self, ShadowBatchKey, ShadowDrawState, SourceShadow},
     shadow_scene::ShadowScene,
@@ -443,7 +442,6 @@ fn cascade_world_from_view(
 pub fn write_cascades(
     scene: Res<ShadowScene>,
     frame: Res<SourceViewFrame>,
-    live: Res<SourceSceneLighting>,
     assets: Option<Res<super::lighting_assets::LightingRenderAssets>>,
     mut views: Query<(
         &mut SourceSurfaceView,
@@ -456,11 +454,11 @@ pub fn write_cascades(
     if scene.frame == 0 || scene.frame != frame.frame {
         return;
     }
-    let (Some(assets), Some(live)) = (assets, live.0) else {
+    let Some(assets) = assets else {
         return;
     };
     let light = &assets.record.lights[0];
-    let rotation = live.sun_rotation;
+    let rotation = scene.sun;
     let h = |v: Vec3| Vec3::new(v.x, v.y, -v.z);
     let basis = [
         h(rotation * Vec3::X),
@@ -499,7 +497,7 @@ pub fn write_cascades(
         slots.shadow_key = Some(key);
         for (index, cascade) in fit.cascades.iter().enumerate() {
             // A stale slot keeps the values of its atlas tile.
-            if !cadence.render[index] {
+            if !cadence.plan.render[index] {
                 continue;
             }
             let (projection, device_e22) = cascade_projection(cascade, basis);

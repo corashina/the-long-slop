@@ -98,8 +98,15 @@ pub struct ShadowViewCache {
     result: Option<ShadowFrame>,
     caster_min: [f32; 3],
     caster_max: [f32; 3],
+    /// Masks before the last preparation. Retained storage.
+    previous: Vec<u8>,
+    split_changes: u8,
 }
 impl ShadowViewCache {
+    /// Splits with a caster that entered or left them in the last `prepare`.
+    pub fn split_changes(&self) -> u8 {
+        self.split_changes
+    }
     pub fn revision(&self) -> u64 {
         self.revision
     }
@@ -142,13 +149,19 @@ impl ShadowViewCache {
         {
             fit.caster_min = self.caster_min;
             fit.caster_max = self.caster_max;
+            self.split_changes = 0;
             return Ok(self.result);
         }
         self.input = None;
         self.result = None;
         // Failed preparation can also change masks. Recovery must invalidate extraction.
         self.advance_revision();
+        self.previous.clear();
+        self.previous.extend_from_slice(masks);
+        self.split_changes = 0b1111;
         let result = prepare_frame(casters, masks, &planes, light_mask, view_mask, fit)?;
+        self.split_changes = (self.previous.iter().zip(masks.iter()))
+            .fold(0, |changes, (old, new)| changes | (old ^ new));
         self.input = Some(input);
         self.result = result;
         self.caster_min = fit.caster_min;

@@ -1,7 +1,6 @@
 //! Source sun shadow cascades for each view, written before the view's surface draws.
 use super::{
     lighting_assets::LightingRenderAssets,
-    lighting_scene::SourceSceneLighting,
     readiness::RendererStateHandle,
     render_targets::SourceViewTargets,
     shadow_atlas::ShadowCadence,
@@ -49,7 +48,6 @@ fn prepare(
     mut commands: Commands,
     scene: Res<ShadowScene>,
     frame: Res<SourceViewFrame>,
-    live: Res<SourceSceneLighting>,
     assets: Option<Res<LightingRenderAssets>>,
     mut views: Query<(
         Entity,
@@ -67,11 +65,11 @@ fn prepare(
     {
         return;
     }
-    let (Some(assets), Some(live)) = (assets, live.0) else {
+    let Some(assets) = assets else {
         return;
     };
     let light = &assets.record.lights[0];
-    let rotation = live.sun_rotation;
+    let rotation = scene.sun;
     let h = |v: Vec3| Vec3::new(v.x, v.y, -v.z);
     let basis = [
         h(rotation * Vec3::X),
@@ -116,7 +114,7 @@ fn prepare(
             value.params.w = 1.;
             for (index, cascade) in fit.cascades.iter().enumerate() {
                 // A stale cascade keeps the transform and sphere of its atlas tile.
-                if let Some(old) = stale.filter(|_| !cadence.render[index]) {
+                if let Some(old) = stale.filter(|_| !cadence.plan.render[index]) {
                     value.world_to_shadow[index] = old.world_to_shadow[index];
                     value.spheres[index] = old.spheres[index];
                     value.radii_squared[index] = old.radii_squared[index];
