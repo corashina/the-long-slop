@@ -1,5 +1,6 @@
 # Project roadmap
 
+Goal: recreate The Long Drive for the web.
 Behavior authority: Steam build `11140890` and its decompiled code in `.cache/reference-library/records/managed/Assembly-CSharp.cs`.
 Save format authority: [save schema](crates/simulation/src/save/schema.rs).
 
