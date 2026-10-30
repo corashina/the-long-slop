@@ -19,7 +19,8 @@ Add only items that increase render FPS or remove hitches. Remove an item when i
 - Terrain tiles and grass meshes are built in their own workers.
 - WebGPU is the only renderer. MSAA is 4x. The "Antialiasing" setting turns it off after a reload (`src/presentation/antialiasing.rs`). No TAA, motion blur or camera-depth pass.
 - Display settings for weak GPUs, default at full quality: scene resolution 100% to 50% (`render_scale.rs`), "Shadows" high, medium, low (world view atlas side halved per step, `shadow_quality.rs`), "Ambient occlusion" on or off (`ambient_occlusion.rs`), "Grass" high, medium, low (blade spacing and fade distance, after a reload, `materials/grass/settings.rs`).
-- World props draw through the own GPU path: compute cull and indirect draws (`src/presentation/prop_draws.rs`). Each view pass runs its prop draws as one render bundle. The bundle records again only when its commands change.
+- World props draw through the own GPU path: compute cull and indirect draws (`src/presentation/prop_draws.rs`). Each view pass runs its prop draws as one render bundle.
+- Static draws use render bundles (`src/presentation/render_bundles.rs`). A bundle records again only when its commands change. In the camera pass, unskinned meshes without morph targets run as one bundle per view (`static_draws.rs`); skinned meshes draw directly. The prop draws of each pass and cascade run as bundles.
 - Shadow cascades 0 and 1 render each frame, 2 and 3 every 2nd and 4th frame (`crates/simulation/src/reference/shadow_cadence.rs`).
 - Release build: fat LTO, simd128, wasm-opt -O3.
 
@@ -32,9 +33,8 @@ Impact is an estimate from the code. No item has F3 numbers yet.
 
 | # | Item | Size | Impact | Notes |
 | --- | --- | --- | --- | --- |
-| 1 | Render bundles for Bevy phase draws | L | Medium-high if CPU bound | GPU prop rows use bundles (`render_bundles.rs`). Terrain, roads and entity renderers (LOD buildings, parked cars) still encode each draw each frame. Bevy makes new mesh bind groups each frame, and skinned draws share the phases. A bundle needs stable mesh bind groups and a static-only draw list. |
 | 2 | Skip unchanged item visuals | S | Low | The renderer still does a pose lookup and interpolation for every item visual each frame (`src/presentation/reference.rs`, `spawned.rs`). Use the changed pose rows to skip the rest. |
-| 3 | Reuse static shadow cascades | M | Medium if shadow bound | Skip a cascade when its fit and its casters did not change. Builds on the prop render bundles. |
+| 3 | Reuse static shadow cascades | M | Medium if shadow bound | Skip a cascade when its fit and its casters did not change. Can use `DrawBundle` and `render_filtered` for the caster phase. |
 
 Rejected: async compute, bindless, Hi-Z occlusion, f16, subgroups, GPU grass, own QueryBounds BVH removal.
 
@@ -42,4 +42,4 @@ Rejected: async compute, bindless, Hi-Z occlusion, f16, subgroups, GPU grass, ow
 
 Do on Tomasz's PC after the open items are done: F3 frame time and "GPU ms" before and after each item, in a town and in a grass area.
 Also check that a part condition change, such as rust, shows the new material without a frame freeze. The old material shows until the new pipelines compile.
-Also check the prop render bundles: no WebGPU errors in the console, and props and their shadows draw as before, also with Antialiasing off.
+Also check the render bundles: no WebGPU errors in the console, and terrain, roads, buildings, cars, props and their shadows draw as before, also with Antialiasing off and in reflection probes. F3 "WASM main" should drop in a town.

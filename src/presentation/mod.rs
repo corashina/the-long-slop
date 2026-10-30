@@ -79,6 +79,7 @@ pub(crate) mod source_io;
 pub mod source_lighting;
 pub mod source_sky;
 pub mod stained_glass;
+pub mod static_draws;
 pub mod surface_graph;
 pub mod surface_pass;
 pub mod surface_views;

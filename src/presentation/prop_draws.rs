@@ -4,7 +4,7 @@ use super::{
     caster::CasterPasses,
     lighting_assets::LightingRenderAssets,
     readiness::RendererStateHandle,
-    render_bundles::{BundleTarget, DrawBundle, Encoder},
+    render_bundles::{BundleTarget, DrawBundle},
     render_targets::{DEPTH_FORMAT, HDR_FORMAT, SHADOW_FORMAT},
     shadow_cache::SpecializationKey,
     shadow_scene::ShadowScene,
@@ -854,7 +854,7 @@ pub(crate) fn map_readback(mut draws: ResMut<PropDraws>, device: Res<RenderDevic
 /// Bind the row group and the mesh buffers of one batch draw.
 fn bind_batch<'w>(
     world: &'w World,
-    encoder: &mut Encoder<'w, '_>,
+    pass: &mut TrackedRenderPass<'w>,
     buffers: &'w Buffers,
     list: u32,
     batch: usize,
@@ -868,9 +868,9 @@ fn bind_batch<'w>(
     ) else {
         return false;
     };
-    encoder.set_vertex_buffer(vertices.buffer);
-    encoder.set_index_buffer(indices.buffer, format);
-    encoder.set_bind_group(2, &buffers.draw, &[list, (batch as u64 * ALIGN) as u32]);
+    pass.set_vertex_buffer(0, vertices.buffer.slice(..));
+    pass.set_index_buffer(indices.buffer.slice(..), format);
+    pass.set_bind_group(2, &buffers.draw, &[list, (batch as u64 * ALIGN) as u32]);
     true
 }
 fn material_group(world: &World, id: bevy::asset::UntypedAssetId) -> Option<&BindGroup> {
@@ -883,9 +883,19 @@ fn material_group(world: &World, id: bevy::asset::UntypedAssetId) -> Option<&Bin
         .get(material.binding.group)?
         .bind_group()
 }
-fn count(state: &ViewState, (attempted, issued): (u32, u32)) {
+/// Count the draws of one bundle. A failed bundle fails the renderer.
+fn bundle_counts(
+    world: &World,
+    state: &ViewState,
+    counts: Result<(u32, u32), String>,
+) -> (u32, u32) {
+    let (attempted, issued) = counts.unwrap_or_else(|error| {
+        world.resource::<RendererStateHandle>().fail(error);
+        (0, 0)
+    });
     state.draws[0].fetch_add(attempted, Ordering::Relaxed);
     state.draws[1].fetch_add(issued, Ordering::Relaxed);
+    (attempted, issued)
 }
 
 /// Base and additive draws of each shown batch, after the Bevy phases of the camera pass.
@@ -917,7 +927,7 @@ pub(crate) fn draw_camera<'w>(
         world.resource::<RenderDevice>(),
         target,
         pass,
-        |encoder| {
+        |pass| {
             let mut counts = (0, 0);
             for (batch, entry) in draws.batches.iter().enumerate() {
                 if entry.shown == 0 {
@@ -947,13 +957,13 @@ pub(crate) fn draw_camera<'w>(
                     else {
                         continue;
                     };
-                    encoder.set_pipeline(pipeline);
-                    encoder.set_bind_group(0, camera, &[offset.offset]);
-                    encoder.set_bind_group(1, lighting.bind_group(), &[]);
-                    encoder.set_bind_group(3, material, &[]);
+                    pass.set_render_pipeline(pipeline);
+                    pass.set_bind_group(0, camera, &[offset.offset]);
+                    pass.set_bind_group(1, lighting.bind_group(), &[]);
+                    pass.set_bind_group(3, material, &[]);
                     if !bind_batch(
                         world,
-                        encoder,
+                        pass,
                         buffers,
                         buffers.list_offset(index, 0),
                         batch,
@@ -962,7 +972,7 @@ pub(crate) fn draw_camera<'w>(
                     ) {
                         continue;
                     }
-                    encoder.draw_indexed_indirect(
+                    pass.draw_indexed_indirect(
                         &buffers.args,
                         buffers.args_offset(index, 0, batch, draws.batches.len()),
                     );
@@ -972,8 +982,7 @@ pub(crate) fn draw_camera<'w>(
             counts
         },
     );
-    count(state, counts);
-    counts
+    bundle_counts(world, state, counts)
 }
 /// Caster draws of each batch with rows in this cascade, after the caster phase.
 pub(crate) fn draw_cascade<'w>(
@@ -1004,7 +1013,7 @@ pub(crate) fn draw_cascade<'w>(
         world.resource::<RenderDevice>(),
         target,
         pass,
-        |encoder| {
+        |pass| {
             let mut counts = (0, 0);
             for (batch, entry) in draws.batches.iter().enumerate() {
                 let pipelines = state.pipelines.get(batch).copied().unwrap_or_default();
@@ -1038,13 +1047,13 @@ pub(crate) fn draw_cascade<'w>(
                 else {
                     continue;
                 };
-                encoder.set_pipeline(pipeline);
-                encoder.set_bind_group(0, camera, &[offset.offset]);
-                encoder.set_bind_group(1, caster.binding(cascade), &[]);
-                encoder.set_bind_group(3, material, &[]);
+                pass.set_render_pipeline(pipeline);
+                pass.set_bind_group(0, camera, &[offset.offset]);
+                pass.set_bind_group(1, caster.binding(cascade), &[]);
+                pass.set_bind_group(3, material, &[]);
                 if !bind_batch(
                     world,
-                    encoder,
+                    pass,
                     buffers,
                     buffers.list_offset(index, 1 + cascade),
                     batch,
@@ -1053,7 +1062,7 @@ pub(crate) fn draw_cascade<'w>(
                 ) {
                     continue;
                 }
-                encoder.draw_indexed_indirect(
+                pass.draw_indexed_indirect(
                     &buffers.args,
                     buffers.args_offset(index, 1 + cascade, batch, draws.batches.len()),
                 );
@@ -1062,8 +1071,7 @@ pub(crate) fn draw_cascade<'w>(
             counts
         },
     );
-    count(state, counts);
-    counts
+    bundle_counts(world, state, counts)
 }
 
 pub fn install(app: &mut SubApp) {

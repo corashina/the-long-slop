@@ -10,7 +10,7 @@ use bevy::material::labels::DrawFunctionLabel;
 use bevy::pbr::{
     DrawMesh, MainPassAlphaMaskDrawFunction, MainPassOpaqueDrawFunction,
     MainPassTransmissiveDrawFunction, MainPassTransparentDrawFunction, PreparedMaterial,
-    SetMeshBindGroup, Transmissive3d,
+    Transmissive3d,
 };
 use bevy::prelude::*;
 use bevy::render::{
@@ -198,7 +198,7 @@ pub(crate) type DrawSourceMaterial = (
     SetItemPipeline,
     SetSourceViewCamera,
     SetSourceViewLighting,
-    SetMeshBindGroup<2>,
+    super::static_draws::SetSourceMeshBindGroup<2>,
     bevy::pbr::SetMaterialBindGroup<3>,
     DrawMesh,
     SourceDrawMark<false, true>,
@@ -215,7 +215,7 @@ pub(crate) type DrawSourceBase = (
     SetItemPipeline,
     SetSourceViewCamera,
     SetSourceViewLighting,
-    SetMeshBindGroup<2>,
+    super::static_draws::SetSourceMeshBindGroup<2>,
     bevy::pbr::SetMaterialBindGroup<3>,
     DrawMesh,
     SourceDrawMark<false, true>,
@@ -224,7 +224,7 @@ pub(crate) type DrawSourceWorld = (
     SetItemPipeline,
     SetSourceViewCamera,
     SetSourceViewLighting,
-    SetMeshBindGroup<2>,
+    super::static_draws::SetSourceMeshBindGroup<2>,
     bevy::pbr::SetMaterialBindGroup<3>,
     DrawMesh,
 );
@@ -234,7 +234,7 @@ pub(crate) type DrawSourcePlate = (
     SetItemPipeline,
     SetSourceViewCamera,
     SetSourceViewLighting,
-    SetMeshBindGroup<2>,
+    super::static_draws::SetSourceMeshBindGroup<2>,
     bevy::pbr::SetMaterialBindGroup<3>,
     DrawMesh,
     SourceDrawMark<false, true>,
@@ -245,7 +245,7 @@ pub(crate) type DrawSourceGlass = (
     SetItemPipeline,
     SetSourceViewCamera,
     super::stained_glass::SetSourceGlassView,
-    SetMeshBindGroup<2>,
+    super::static_draws::SetSourceMeshBindGroup<2>,
     bevy::pbr::SetMaterialBindGroup<3>,
     DrawMesh,
     SourceDrawMark<false, true>,
@@ -257,7 +257,7 @@ pub(crate) type DrawSourceAdd = (
     super::surface_pass::SetSourceAdditivePipeline,
     SetSourceViewCamera,
     SetSourceViewLighting,
-    SetMeshBindGroup<2>,
+    super::static_draws::SetSourceMeshBindGroup<2>,
     bevy::pbr::SetMaterialBindGroup<3>,
     DrawMesh,
     SourceDrawMark<true, true>,
@@ -288,6 +288,7 @@ impl Plugin for SourceLightingPlugin {
             super::surface_graph::install(render_app);
             super::depth_resolve::install(render_app);
             super::prop_draws::install(render_app);
+            super::static_draws::install(render_app);
             render_app
                 .init_resource::<SourceViewCamera>()
                 .add_systems(

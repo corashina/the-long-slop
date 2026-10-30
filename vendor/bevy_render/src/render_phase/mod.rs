@@ -1062,6 +1062,18 @@ where
         world: &'w World,
         view: Entity,
     ) -> Result<(), DrawError> {
+        self.render_filtered(render_pass, world, view, |_| true)
+    }
+
+    /// Encodes the GPU commands of the items whose entity passes `filter`.
+    /// A batch passes when its representative entity passes.
+    pub fn render_filtered<'w>(
+        &self,
+        render_pass: &mut TrackedRenderPass<'w>,
+        world: &'w World,
+        view: Entity,
+        filter: impl Fn(MainEntity) -> bool,
+    ) -> Result<(), DrawError> {
         {
             let draw_functions = world.resource::<DrawFunctions<BPI>>();
             let mut draw_functions = draw_functions.write();
@@ -1070,9 +1082,9 @@ where
             // locks.
         }
 
-        self.render_batchable_meshes(render_pass, world, view)?;
-        self.render_unbatchable_meshes(render_pass, world, view)?;
-        self.render_non_meshes(render_pass, world, view)?;
+        self.render_batchable_meshes(render_pass, world, view, &filter)?;
+        self.render_unbatchable_meshes(render_pass, world, view, &filter)?;
+        self.render_non_meshes(render_pass, world, view, &filter)?;
 
         Ok(())
     }
@@ -1083,6 +1095,7 @@ where
         render_pass: &mut TrackedRenderPass<'w>,
         world: &'w World,
         view: Entity,
+        filter: &impl Fn(MainEntity) -> bool,
     ) -> Result<(), DrawError> {
         let draw_functions = world.resource::<DrawFunctions<BPI>>();
         let mut draw_functions = draw_functions.write();
@@ -1103,6 +1116,9 @@ where
                     self.batchable_meshes.keys().zip(batch_sets.iter())
                 {
                     for batch in batch_set {
+                        if !filter(batch.representative_entity.1) {
+                            continue;
+                        }
                         let binned_phase_item = BPI::new(
                             batch_set_key.clone(),
                             bin_key.clone(),
@@ -1127,6 +1143,9 @@ where
                 for (batch, (batch_set_key, bin_key)) in
                     batch_set.iter().zip(self.batchable_meshes.keys())
                 {
+                    if !filter(batch.representative_entity.1) {
+                        continue;
+                    }
                     let binned_phase_item = BPI::new(
                         batch_set_key.clone(),
                         bin_key.clone(),
@@ -1158,6 +1177,9 @@ where
                     .zip(batch_sets.iter())
                 {
                     let batch = &batch_set.first_batch;
+                    if !filter(batch.representative_entity.1) {
+                        continue;
+                    }
 
                     let batch_set_index = if multi_draw_indirect_count_supported {
                         NonMaxU32::new(batch_set.index)
@@ -1205,6 +1227,7 @@ where
         render_pass: &mut TrackedRenderPass<'w>,
         world: &'w World,
         view: Entity,
+        filter: &impl Fn(MainEntity) -> bool,
     ) -> Result<(), DrawError> {
         let draw_functions = world.resource::<DrawFunctions<BPI>>();
         let mut draw_functions = draw_functions.write();
@@ -1213,6 +1236,9 @@ where
             let unbatchable_entities =
                 &self.unbatchable_meshes[&(batch_set_key.clone(), bin_key.clone())];
             for (entity_index, entity) in unbatchable_entities.entities.iter().enumerate() {
+                if !filter(*entity.0) {
+                    continue;
+                }
                 let unbatchable_dynamic_offset = match &unbatchable_entities.buffer_indices {
                     UnbatchableBinnedEntityIndexSet::NoEntities => {
                         // Shouldn't happen…
@@ -1271,12 +1297,16 @@ where
         render_pass: &mut TrackedRenderPass<'w>,
         world: &'w World,
         view: Entity,
+        filter: &impl Fn(MainEntity) -> bool,
     ) -> Result<(), DrawError> {
         let draw_functions = world.resource::<DrawFunctions<BPI>>();
         let mut draw_functions = draw_functions.write();
 
         for ((batch_set_key, bin_key), non_mesh_entities) in &self.non_mesh_items {
             for (main_entity, entity) in non_mesh_entities.entities.iter() {
+                if !filter(*main_entity) {
+                    continue;
+                }
                 // Come up with a fake batch range and extra index. The draw
                 // function is expected to manage any sort of batching logic itself.
                 let binned_phase_item = BPI::new(
