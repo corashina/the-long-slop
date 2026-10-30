@@ -737,6 +737,7 @@ mod save;
 
 pub struct GarageRuntime {
     pub driving_assists: crate::reference::DrivingAssists,
+    pub options: crate::world::GameOptions,
     pub survival: crate::survival::SurvivalState,
     pub hearing: crate::hearing::HearingState,
     pub sleep: crate::sleep::SleepState,
@@ -829,6 +830,12 @@ impl GarageRuntime {
         self.clear_input();
         Ok(())
     }
+    /// Applies the game options at once, as `gamemodesettingsscript.SetInMain`.
+    pub fn set_game_options(&mut self, options: crate::world::GameOptions) {
+        self.options = options;
+        self.creatures.peaceful = options.peaceful;
+        self.stream.set_peaceful_enemies(options.peaceful_enemies());
+    }
     pub fn new(
         reference: &ReferenceManifest,
         mode: crate::world::GameMode,
@@ -837,7 +844,7 @@ impl GarageRuntime {
         Self::new_candidate(
             reference,
             true,
-            DEFAULT_SEED as i32,
+            mode.seed,
             new_game_date(reference),
             mode,
             draw_distance,
@@ -920,6 +927,7 @@ impl GarageRuntime {
         );
         let mut run = Self {
             driving_assists: reference.driving.default_assists,
+            options: Default::default(),
             urine,
             urine_reference,
             urine_emission: [0.; 2],

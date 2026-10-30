@@ -264,12 +264,18 @@ extern "C" {
     /// Pending "Ambient occlusion" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameAmbientOcclusion)]
     pub fn game_ambient_occlusion() -> Option<bool>;
+    /// Pending "Motion blur" setting, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameMotionBlur)]
+    pub fn game_motion_blur() -> Option<bool>;
     /// Pending "Depth of field" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameDepthOfField)]
     pub fn game_depth_of_field() -> Option<bool>;
     /// Pending "Sunglasses effects" setting, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameSunglassesEffects)]
     pub fn game_sunglasses_effects() -> Option<bool>;
+    /// Pending "Lamp shadows" setting, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameLampShadows)]
+    pub fn game_lamp_shadows() -> Option<bool>;
     /// Fills the appearance preview rect: x, y, width and height in canvas fractions.
     /// False while the appearance screen is closed.
     #[wasm_bindgen(js_namespace = window, js_name = gameAppearancePreview)]
@@ -281,6 +287,11 @@ extern "C" {
     pub fn game_biome() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gameStartCar)]
     pub fn game_start_car() -> i32;
+    #[wasm_bindgen(js_namespace = window, js_name = gameSeed)]
+    pub fn game_seed() -> i32;
+    /// Changed game option bits (1 peaceful, 2 survival), or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameOptions)]
+    pub fn game_options() -> Option<u32>;
     /// `steer` to `handbrake` are the last `DrivingControls` (steer positive left).
     #[wasm_bindgen(js_namespace = window, js_name = gameDrivingState)]
     pub fn game_driving_state(

@@ -12,7 +12,7 @@
 
 #import source_float_store::half4
 
-#import source_view_lighting::{lighting, diffuse_sh, indirect_specular, direct_attenuation, fog_factor, sun_cookie, sun_cookie_sampler}
+#import source_view_lighting::{lighting, diffuse_sh, indirect_specular, direct_attenuation, lamp_shadow, fog_factor, sun_cookie, sun_cookie_sampler}
 
 #import "shaders/source_lighting.wgsl"::{lamp_lighting, object_first_light, receiver, cookie_uv_gradient, cookies, cookie_sampler, attenuation, default_cookie, default_sampler, attenuation_sampler}
 
@@ -266,6 +266,7 @@ fn fragment(
             if d2 >= range2 { continue; }
             direction = delta * inverseSqrt(max(d2, 0.000001));
             weight = textureSampleLevel(attenuation, attenuation_sampler, vec2(d2 / range2, 0.5), 0.0).r;
+            weight *= lamp_shadow(lamp.mask.z, lamp.position_range.xyz, in.world_position.xyz, pbr.N, view_depth, receive_shadows);
         }
         if lamp.cookie_rect.x > 0.0 {
             var cookie_uv = vec2(0.0);

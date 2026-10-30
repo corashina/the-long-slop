@@ -10,6 +10,7 @@ pub mod dither;
 pub mod dof;
 pub mod exposure;
 pub mod lut;
+pub mod motion_blur;
 pub mod taa;
 pub mod uber;
 

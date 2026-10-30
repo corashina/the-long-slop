@@ -104,6 +104,8 @@ pub struct Creatures {
     next_id: u32,
     pose: RigPose,
     random: StormRandom,
+    /// `peacefulEnemies == 2`: rabbits do not get evil.
+    pub peaceful: bool,
 }
 
 impl Creatures {
@@ -184,6 +186,7 @@ impl Creatures {
             rabbits: Vec::with_capacity(max),
             next_id: 1,
             random: StormRandom(seed ^ 0x7261_6262_6974_0001),
+            peaceful: false,
         })
     }
 
@@ -543,7 +546,7 @@ impl Creatures {
             &mut self.random,
         );
         rabbit.health.shoot_health = shoot_health;
-        if size.size > EVIL_SIZE {
+        if size.size > EVIL_SIZE && !self.peaceful {
             rabbit
                 .evil
                 .get_evil(&r.evil, &mut rabbit.brain, true, now, &mut self.random);
