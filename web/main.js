@@ -211,7 +211,7 @@ async function load(){
  slider=installDrawDistance(()=>localStorage,document.querySelector('#draw-distance'),document.querySelector('#draw-distance-value'),{minimum:range.minimum.drawDistance,maximum:range.maximum.drawDistance,fallback:range.default});
  // The simulation parses its own manifest copy while this thread loads the interface.
  worldDrawDistance=slider.value();
- const simulationStarted=simulation.start(bytes.slice(),manifestHash,worldDrawDistance,window.gameBiome(),window.gameStartCar(),sandbox?.cars??[]);
+ const simulationStarted=simulation.start(bytes.slice(),manifestHash,worldDrawDistance,window.gameBiome(),window.gameStartCar());
  simulationStarted.catch(()=>{});
  fetched({path:'assets/reference/manifest.json',requiredBytes:bytes.byteLength,receivedBytes:bytes.byteLength});
  startup.build({sourceBuildId:manifest.build_id,manifestSha256:manifestHash,wasm:'release'});

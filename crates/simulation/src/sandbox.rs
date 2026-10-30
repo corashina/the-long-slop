@@ -1,8 +1,6 @@
 //! Test sandbox. The `?sandbox` page sends these commands; Claude runs the ROADMAP test pass with them.
 //! A bad command changes nothing and answers `ok: false`. It never stops the game.
-use crate::reference::{
-    ReferenceError, ReferenceManifest, WorldPrototypeReference, WorldReference,
-};
+use crate::reference::{ReferenceManifest, WorldPrototypeReference};
 use crate::starting_area::GarageRuntime;
 use crate::vehicle::{VehiclePose, to_rapier};
 use crate::world::{ObjectKey, WorldLayer};
@@ -12,8 +10,10 @@ use serde_json::{Value, json};
 
 /// Buildings that `building` checks from the start of the road.
 const BUILDING_SEARCH: usize = 4000;
-/// Metres between sandbox cars at start.
+/// Metres between the cars that come along on a move.
 const CAR_SPACING: f32 = 8.;
+/// World prototype names that a failed `spawn` lists.
+const NAME_LIST: usize = 30;
 
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "lowercase", deny_unknown_fields)]
@@ -24,7 +24,8 @@ enum Action {
     Garage,
     /// Moves the player to the first building on the road whose name contains `name`.
     Building { name: String },
-    /// Spawns an item prototype `forward` metres in front of the player.
+    /// Spawns an item prototype (catalog name) or a world prototype (root name, such as a car or a gun)
+    /// `forward` metres in front of the player. A world prototype loads with the stream.
     Spawn { name: String, forward: f32 },
     /// Spawns an item prototype and puts it in the hand.
     Hand { name: String },
@@ -113,12 +114,22 @@ fn apply(
             place_player(runtime, [position[0], position[1] + 2., position[2]])?;
             Ok((format!("Moved to {found}."), json!(position)))
         }
-        Action::Spawn { name, forward } => {
-            let items = spawn(runtime, reference, &name, forward)?;
-            Ok((format!("Spawned {name}."), json!(items)))
-        }
+        Action::Spawn { name, forward } => match item_prototype(reference, &name) {
+            Ok(prototype) => {
+                let items = spawn_item(runtime, reference, prototype, forward)?;
+                Ok((format!("Spawned {name}."), json!(items)))
+            }
+            Err(_) => {
+                let position = spawn_world(runtime, reference, &name, forward)?;
+                Ok((
+                    format!("Placed {name}. It spawns when the stream loads it."),
+                    json!(position),
+                ))
+            }
+        },
         Action::Hand { name } => {
-            let items = spawn(runtime, reference, &name, 1.)?;
+            let prototype = item_prototype(reference, &name)?;
+            let items = spawn_item(runtime, reference, prototype, 1.)?;
             let item = *items.first().ok_or("The prototype has no pickup.")?;
             let area = &mut runtime.area;
             let point = area
@@ -273,20 +284,24 @@ fn building(
     Err(format!("No building {name}. Names: {}", names.join(", ")))
 }
 
-/// Spawns item prototype `name` (a source catalog name) in front of the player. Returns the item ids.
-fn spawn(
-    runtime: &mut GarageRuntime,
-    reference: &ReferenceManifest,
-    name: &str,
-    forward: f32,
-) -> Result<Vec<u32>, String> {
-    let prototype = item_prototype(reference, name)?;
+/// The physics pose `forward` metres in front of the player and 0.5 m up.
+fn ahead(runtime: &GarageRuntime, forward: f32) -> VehiclePose {
     let body = runtime.area.player.body_pose(&runtime.physics);
     let ahead = Rotation::from_array(body.rotation) * -Vector::Z * forward;
-    let root = VehiclePose {
+    VehiclePose {
         position: std::array::from_fn(|i| body.position[i] + ahead[i] + [0., 0.5, 0.][i]),
         rotation: body.rotation,
-    };
+    }
+}
+
+/// Spawns item prototype `prototype` in front of the player. Returns the item ids.
+fn spawn_item(
+    runtime: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    prototype: usize,
+    forward: f32,
+) -> Result<Vec<u32>, String> {
+    let root = ahead(runtime, forward);
     let items = crate::starting_area::spawned::spawn_prototype(
         reference,
         &mut runtime.area,
@@ -296,6 +311,47 @@ fn spawn(
     )
     .map_err(|e| e.to_string())?;
     Ok(items.iter().map(|i| i.0).collect())
+}
+
+/// Places world prototype `name` (a root name) in front of the player. Returns the absolute position.
+fn spawn_world(
+    runtime: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    name: &str,
+    forward: f32,
+) -> Result<[f64; 3], String> {
+    let prototypes = &reference.world.prototypes;
+    let Some(prototype) = prototypes
+        .iter()
+        .find(|p| prototype_name(p).eq_ignore_ascii_case(name))
+    else {
+        let wanted = name.to_lowercase();
+        let mut names: Vec<_> = prototypes
+            .iter()
+            .map(prototype_name)
+            .filter(|n| n.to_lowercase().contains(&wanted))
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        names.truncate(NAME_LIST);
+        return Err(format!(
+            "No item or world prototype {name}. Similar: {}",
+            names.join(", ")
+        ));
+    };
+    let root = ahead(runtime, forward);
+    let position = runtime.stream.origin.absolute(root.position);
+    runtime
+        .stream
+        .add_startup_placement(
+            &prototype.source,
+            crate::world::AbsolutePose {
+                position,
+                rotation: root.rotation,
+            },
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(position)
 }
 
 fn item_prototype(reference: &ReferenceManifest, name: &str) -> Result<usize, String> {
@@ -366,43 +422,6 @@ fn prototype_name(prototype: &WorldPrototypeReference) -> &str {
         .iter()
         .find(|n| n.parent.is_none())
         .map_or("", |n| n.name.as_str())
-}
-
-/// Adds a startup copy of each car `names` (prototype root names) in a row in front of the garage car.
-/// Sandbox copies always spawn, whatever the start car.
-pub fn add_startup_cars(
-    world: &mut WorldReference,
-    names: &[String],
-) -> Result<(), ReferenceError> {
-    if names.is_empty() {
-        return Ok(());
-    }
-    let garage = world
-        .startup
-        .iter()
-        .find(|s| s.group == "StartCar02" && s.prototype.is_some())
-        .ok_or_else(|| ReferenceError("No StartCar02 placement".into()))?
-        .clone();
-    // Forward is -Z, as for the player.
-    let forward = Rotation::from_array(garage.pose.rotation) * -Vector::Z;
-    for (index, name) in names.iter().enumerate() {
-        let prototype = world
-            .prototypes
-            .iter()
-            .find(|p| p.vehicle.is_some() && prototype_name(p).eq_ignore_ascii_case(name))
-            .ok_or_else(|| ReferenceError(format!("No car prototype {name}")))?;
-        let mut copy = garage.clone();
-        copy.group = "Sandbox".into();
-        copy.start_car = false;
-        copy.prototype = Some(prototype.source.clone());
-        let distance = CAR_SPACING * (index + 2) as f32;
-        for axis in 0..3 {
-            copy.pose.translation[axis] += forward[axis] * distance;
-        }
-        copy.pose.translation[1] += 1.;
-        world.startup.push(copy);
-    }
-    Ok(())
 }
 
 #[cfg(test)]

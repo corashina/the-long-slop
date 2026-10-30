@@ -1969,6 +1969,52 @@ impl WorldStream {
         }
         Ok(placements)
     }
+    /// Adds a fixed startup placement of world prototype `prototype` at `pose`. The sandbox uses it.
+    /// It spawns like the startup list when the player is within the item spawn distance.
+    pub fn add_startup_placement(
+        &mut self,
+        prototype: &SourceId,
+        pose: super::AbsolutePose,
+    ) -> Result<(), ReferenceError> {
+        if self.startup.is_none() {
+            return Err(ReferenceError("The startup area is not ready".into()));
+        }
+        let scale = self
+            .reference
+            .prototypes
+            .iter()
+            .find(|p| &p.source == prototype)
+            .ok_or_else(|| ReferenceError("Missing startup prototype".into()))?
+            .prefab_pose
+            .scale;
+        let radius = self.contents.rules.radius(prototype).unwrap_or(0.);
+        let ordinal = (self.reference.startup.len() + self.startup_items.len()) as u32
+            + self
+                .startup_placements
+                .iter()
+                .filter(|p| &p.id.generator == prototype)
+                .count() as u32;
+        self.startup_placements.push(Placement {
+            id: super::GeneratedId {
+                layer: WorldLayer::Startup,
+                generator: prototype.clone(),
+                unit: [0, 0],
+                ordinal,
+                children: Vec::new(),
+            },
+            prototype: prototype.clone(),
+            pose,
+            scale,
+            bounds: WorldBounds {
+                min: pose.position.map(|v| v - radius),
+                max: pose.position.map(|v| v + radius),
+            },
+            object_seed: 0,
+        });
+        // The next request refreshes the wanted structures.
+        self.structure_focus = [[f64::INFINITY; 3]; 2];
+        Ok(())
+    }
     /// Fixed startup placements request their contents within the item spawn distance.
     /// A changed placement returns through the changed destination replay instead.
     fn refresh_startup_placements(&mut self) {

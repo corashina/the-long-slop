@@ -623,6 +623,17 @@ pub(crate) struct MaterialIdentity {
     pub asset: source::AssetId,
     pub gltf_material: u32,
 }
+/// Source submesh index of one glTF primitive.
+fn submesh(primitive: &GltfExtras) -> Option<u16> {
+    #[derive(serde::Deserialize)]
+    struct PrimitiveIdentity {
+        submesh: u16,
+    }
+    serde_json::from_str::<PrimitiveIdentity>(&primitive.value)
+        .ok()
+        .map(|value| value.submesh)
+        .filter(|submesh| *submesh <= 0x7fff)
+}
 pub(crate) fn bind_authored_materials(
     mut commands: Commands,
     mut source: ResMut<SourceMaterials>,
@@ -705,24 +716,16 @@ pub(crate) fn bind_authored_materials(
                 record.shader_family,
                 ShaderFamily::Standard | ShaderFamily::StainedGlass
             ));
-            #[derive(serde::Deserialize)]
-            struct PrimitiveIdentity {
-                submesh: u16,
-            }
-            let slot = match serde_json::from_str::<PrimitiveIdentity>(&primitive.value) {
-                Ok(value) if value.submesh <= 0x7fff => value.submesh << 1,
-                _ => {
-                    source.state = RenderingState::Failed(
-                        "Source transparent material slot is invalid".into(),
-                    );
-                    return;
-                }
+            let Some(submesh) = submesh(primitive) else {
+                source.state =
+                    RenderingState::Failed("Source transparent material slot is invalid".into());
+                return;
             };
             let sort = source
                 .sort_data(
                     (identity.asset, identity.gltf_material),
                     &renderer.0,
-                    u32::from(slot >> 1),
+                    u32::from(submesh),
                 )
                 .expect("validated transparent slot")
                 .expect("transparent material metadata");
@@ -1940,6 +1943,8 @@ pub fn bind_materials(
             Option<&ChildOf>,
             Option<&GltfMaterialExtras>,
             &GlobalTransform,
+            Option<&GltfExtras>,
+            Option<&super::renderer_visibility::SourceRenderer>,
         ),
         (With<Mesh3d>, Without<super::sky::SkyMesh>),
     >,
@@ -1947,10 +1952,15 @@ pub fn bind_materials(
     if !visuals.bound || !renderer_meshes.bound || !authored.textures_ready() {
         return;
     }
-    for (entity, handle, layers, shadow_mode, parent, extras, global) in &query {
+    for (entity, handle, layers, shadow_mode, parent, extras, global, primitive, renderer) in &query
+    {
         if shadow_mode.is_none()
             && parent.is_some_and(|parent| imported_nodes.contains(parent.parent()))
         {
+            continue;
+        }
+        // Authored primitives wait for their renderer record: it holds the pass sort order.
+        if extras.is_some() && renderer.is_none() {
             continue;
         }
         let mask = layers.map_or(1, |layers| {
@@ -1985,6 +1995,25 @@ pub fn bind_materials(
                 }
             })
             .clone();
+        // Blended authored primitives, such as spawned item glass, need their pass sort data.
+        if let (Some(extras), Some(primitive), Some(renderer)) = (extras, primitive, renderer) {
+            let identity: MaterialIdentity =
+                serde_json::from_str(&extras.value).expect("validated source material identity");
+            let sort = submesh(primitive).and_then(|submesh| {
+                authored
+                    .sort_data(
+                        (identity.asset, identity.gltf_material),
+                        &renderer.0,
+                        u32::from(submesh),
+                    )
+                    .expect("validated transparent slot")
+            });
+            if let Some(sort) = sort {
+                commands
+                    .entity(entity)
+                    .insert((sort, bevy::render::batching::NoAutomaticBatching));
+            }
+        }
         commands
             .entity(entity)
             .remove::<MeshMaterial3d<StandardMaterial>>()
