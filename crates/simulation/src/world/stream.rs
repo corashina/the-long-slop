@@ -106,16 +106,19 @@ pub struct Reclaim {
     pub pending: bool,
     /// Staging and dependency staging.
     pub staging: bool,
+    pub prototype_cpu: bool,
 }
 impl Reclaim {
     const JOBS: u8 = 1;
     const PENDING: u8 = 2;
     const STAGING: u8 = 4;
+    const PROTOTYPE_CPU: u8 = 8;
     fn from_bits(bits: u8) -> Self {
         Self {
             jobs: bits & Self::JOBS != 0,
             pending: bits & Self::PENDING != 0,
             staging: bits & Self::STAGING != 0,
+            prototype_cpu: bits & Self::PROTOTYPE_CPU != 0,
         }
     }
     /// `allocation` without the fields own work waited for.
@@ -129,6 +132,9 @@ impl Reclaim {
         if self.staging {
             allocation.staging_bytes = 0;
             allocation.dependency_staging_bytes = 0;
+        }
+        if self.prototype_cpu {
+            allocation.prototype_cpu = 0;
         }
         allocation
     }
@@ -401,6 +407,10 @@ pub struct WorldStream {
     presentation_want: PresentationAllocation,
     /// Renderer use of the last report above its credit. The grant credits it back.
     presentation_cover: PresentationAllocation,
+    /// Renderer use of the last report.
+    presentation_used: PresentationAllocation,
+    /// A building lookup waits for prototype CPU room. Its ramps are not appended yet.
+    ramps_wait: bool,
     failure: Option<String>,
     last_road_work: usize,
 }
@@ -1058,6 +1068,8 @@ impl WorldStream {
             publication_available: false,
             publication_lent: false,
             presentation_want: PresentationAllocation::default(),
+            presentation_used: PresentationAllocation::default(),
+            ramps_wait: false,
             presentation_cover: PresentationAllocation::default(),
             failure: None,
             last_road_work: 0,
@@ -1114,6 +1126,7 @@ impl WorldStream {
             usize::saturating_add,
         );
         self.presentation_want = report.want.zip(covered, usize::saturating_sub);
+        self.presentation_used = report.used;
     }
     /// Answers the last report after own work. The renderer gets the credit for its covered
     /// use, and the room that own work left, but no field that own work waited for.
@@ -2091,28 +2104,43 @@ impl WorldStream {
             .retain(|id| self.wanted_structures.iter().any(|p| &p.id == id));
         removed || count != self.wanted_structures.iter().filter(|p| numeric(p)).count()
     }
+    /// A building lookup without room waits while the renderer holds unused prototype CPU
+    /// credit. The renderer gives it back. Without unused credit the stream fails.
     fn append_ramps(&mut self) {
-        let room = if self
+        let used = if self
             .building_components
             .needs_lookup(&self.wanted_structures)
         {
-            PROTOTYPE_CPU.saturating_sub(self.metrics().prototype_cpu_bytes)
+            self.metrics().prototype_cpu_bytes
         } else {
-            0
+            PROTOTYPE_CPU
         };
+        let room = PROTOTYPE_CPU.saturating_sub(used);
         let (reference, rules, components) = (
             &self.reference,
             &self.contents.rules,
             &mut self.building_components,
         );
         let (seed, maximum) = (self.seed, self.limits.objects);
-        if let Err(error) = self.wanted_structures.append(|list| {
+        match self.wanted_structures.append(|list| {
             super::building_extras::append_ramps(
                 reference, rules, components, room, seed, list, maximum,
             )
         }) {
-            self.failure = Some(error.0);
+            Ok(done) => self.ramps_wait = !done,
+            Err(error) => self.failure = Some(error.0),
         }
+        if !self.ramps_wait {
+            return;
+        }
+        if self.presentation.prototype_cpu > self.presentation_used.prototype_cpu {
+            self.wait_for_room(false, Reclaim::PROTOTYPE_CPU);
+            return;
+        }
+        self.failure = Some(format!(
+            "Source building metadata exceeds prototype CPU budget: used {used} of {PROTOTYPE_CPU} bytes, renderer {} bytes, other world {} bytes",
+            self.presentation.prototype_cpu, self.overlap.prototype_cpu_bytes,
+        ));
     }
     fn refresh_poles(&mut self) {
         self.wanted_structures
@@ -3910,6 +3938,7 @@ impl WorldStream {
             && self.required.views_ready
             && self.startup.is_some()
             && self.failure.is_none()
+            && !self.ramps_wait
             && self.plan_revision == self.request.revision
             && self.next_road == self.road_candidates.len()
             && self.required.roads.iter().all(|id| {

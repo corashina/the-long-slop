@@ -44,6 +44,7 @@ Known failures on master c0da737f (2026-10-30 browser retest), fix before the ne
 - Outside the Lada, E on the door handle does not open it. The HUD shows "[LMB]+[Mouse]: Move | [F]: Dismount".
 - The inspection pit traps the player: about 2 m deep, no way to climb out.
 - First page load can stall at the start of object loading with dependency staging full (7.7/7.8 MiB). A reload clears it.
+- In game, pause > Load > Load last once stayed on "Loading..." for over 6 minutes, with no console messages.
 - Most ignored cargo tests fail: no start vehicle after `load_garage`, restore stays pending, stack overflows in debug.
 
 Prepare once:
@@ -169,7 +170,7 @@ Prepare once:
 
 1. Save under two names. Each tile shows a game thumbnail, date, seed, km and version.
 2. Overwrite, Load and Delete ask Yes/No in game. Load last loads the newest save.
-3. Load, Load last and New game after death do not fail with "Asset CPU budget exceeded".
+3. Load, Load last and New game after death do not fail with "Asset CPU budget exceeded". Reload the page, then Load last from the start menu: the game starts, no "Source building metadata exceeds prototype CPU budget".
 4. Play 2 minutes on foot. The autosave tile appears. Check the F3 cost of the autosave frame.
 5. Turn on "Load last save at start" and reload the page. The last save loads.
 6. Sleep, wake, save and load: the sleep hint stays off until the cooldown ends.

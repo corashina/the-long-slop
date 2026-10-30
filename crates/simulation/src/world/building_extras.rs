@@ -22,15 +22,16 @@ impl BuildingComponents {
             std::mem::size_of::<(SourceId, Option<RecordLocation>)>(),
         ) + self.key_bytes
     }
+    /// `None`: the new entry does not fit `room`. Nothing is retained.
     fn component<'a>(
         &mut self,
         reference: &'a WorldReference,
         rules: &'a SourceRules,
         source: &SourceId,
         room: &mut usize,
-    ) -> Result<Option<SourceRecord<'a>>, ReferenceError> {
+    ) -> Result<Option<Option<SourceRecord<'a>>>, ReferenceError> {
         if let Some(location) = self.entries.get(source) {
-            return Ok(location.map(|location| location.record(reference)));
+            return Ok(Some(location.map(|location| location.record(reference))));
         }
         // Keep the checked lookup and its errors before metadata admission.
         let record = rules.component(reference, source, "buildingscript")?;
@@ -46,19 +47,18 @@ impl BuildingComponents {
             });
         let admission = growth.saturating_add(source.file.capacity());
         if admission > *room {
-            return Err(ReferenceError(
-                "Source building metadata exceeds prototype CPU budget".into(),
-            ));
+            return Ok(None);
         }
         let before = self.retained_bytes();
         let key = source.clone();
         self.key_bytes += key.file.capacity();
         self.entries.insert(key, record.map(|r| r.location));
         *room -= self.retained_bytes() - before;
-        Ok(record)
+        Ok(Some(record))
     }
 }
 
+/// False: a building lookup does not fit `room`. The ramps up to that building are appended.
 pub fn append_ramps(
     reference: &WorldReference,
     rules: &SourceRules,
@@ -67,7 +67,7 @@ pub fn append_ramps(
     seed: i32,
     placements: &mut Vec<Placement>,
     maximum: usize,
-) -> Result<(), ReferenceError> {
+) -> Result<bool, ReferenceError> {
     append_ramps_with(reference, rules, seed, placements, maximum, |source| {
         components.component(reference, rules, source, &mut room)
     })
@@ -79,8 +79,8 @@ fn append_ramps_with<'a>(
     seed: i32,
     placements: &mut Vec<Placement>,
     maximum: usize,
-    mut component: impl FnMut(&SourceId) -> Result<Option<SourceRecord<'a>>, ReferenceError>,
-) -> Result<(), ReferenceError> {
+    mut component: impl FnMut(&SourceId) -> Result<Option<Option<SourceRecord<'a>>>, ReferenceError>,
+) -> Result<bool, ReferenceError> {
     let parents = placements.len();
     for index in 0..parents {
         let parent = &placements[index];
@@ -88,6 +88,9 @@ fn append_ramps_with<'a>(
             continue;
         }
         let Some(building) = component(&parent.prototype)? else {
+            return Ok(false);
+        };
+        let Some(building) = building else {
             continue;
         };
         if placements.iter().any(|p| {
@@ -175,7 +178,7 @@ fn append_ramps_with<'a>(
             object_seed: local_seed,
         });
     }
-    Ok(())
+    Ok(true)
 }
 
 fn source_i32(value: f64) -> i32 {
@@ -328,13 +331,19 @@ mod tests {
             .collect();
         let mut expected = initial.clone();
         append_ramps_with(&world, &rules, 42, &mut expected, 32, |s| {
-            rules.component(&world, s, "buildingscript")
+            rules.component(&world, s, "buildingscript").map(Some)
         })
         .unwrap();
         assert_eq!(expected.len(), initial.len() + 3);
         let mut actual = initial.clone();
         let mut memo = BuildingComponents::default();
-        append_ramps(&world, &rules, &mut memo, usize::MAX, 42, &mut actual, 32).unwrap();
+        // A lookup without room stops before its building and keeps nothing.
+        let mut waiting = BuildingComponents::default();
+        let mut partial = initial.clone();
+        assert!(!append_ramps(&world, &rules, &mut waiting, 0, 42, &mut partial, 32).unwrap());
+        assert_eq!(partial, initial);
+        assert_eq!(waiting.retained_bytes(), 0);
+        assert!(append_ramps(&world, &rules, &mut memo, usize::MAX, 42, &mut actual, 32).unwrap());
         assert_eq!(actual, expected);
         assert_eq!(
             serde_json::to_vec(&actual).unwrap(),
@@ -348,10 +357,10 @@ mod tests {
         let capacity = memo.entries.capacity();
         for _ in 0..3 {
             append_ramps_with(&world, &rules, 42, &mut expected, 32, |s| {
-                rules.component(&world, s, "buildingscript")
+                rules.component(&world, s, "buildingscript").map(Some)
             })
             .unwrap();
-            append_ramps(&world, &rules, &mut memo, 0, 42, &mut actual, 32).unwrap();
+            assert!(append_ramps(&world, &rules, &mut memo, 0, 42, &mut actual, 32).unwrap());
             assert_eq!(actual, expected);
             assert_eq!(memo.retained_bytes(), retained);
             assert_eq!(memo.entries.capacity(), capacity);
@@ -371,7 +380,7 @@ mod tests {
         let mut expected = initial.clone();
         let mut actual = initial.clone();
         let old = append_ramps_with(&world, &rules, 42, &mut expected, initial.len() + 1, |s| {
-            rules.component(&world, s, "buildingscript")
+            rules.component(&world, s, "buildingscript").map(Some)
         })
         .unwrap_err();
         let new = append_ramps(
@@ -392,7 +401,7 @@ mod tests {
             let mut expected = vec![parent(source(6), 0)];
             let mut actual = expected.clone();
             let old = append_ramps_with(&world, &rules, 42, &mut expected, 32, |s| {
-                rules.component(&world, s, "buildingscript")
+                rules.component(&world, s, "buildingscript").map(Some)
             })
             .unwrap_err();
             let new =
@@ -407,6 +416,7 @@ mod tests {
         assert!(
             memo.component(&world, &rules, &other_source, &mut room)
                 .unwrap()
+                .unwrap()
                 .is_some()
         );
         assert!(memo.entries[&source(1)].is_none());
@@ -415,7 +425,7 @@ mod tests {
             let mut expected = vec![parent(source(7), 0)];
             let mut actual = expected.clone();
             let old = append_ramps_with(&world, &rules, 42, &mut expected, 32, |s| {
-                rules.component(&world, s, "buildingscript")
+                rules.component(&world, s, "buildingscript").map(Some)
             })
             .unwrap_err();
             let new =
@@ -433,7 +443,8 @@ mod tests {
         assert!(
             rejected
                 .component(&world, &rules, &source(1), &mut room)
-                .is_err()
+                .unwrap()
+                .is_none()
         );
         assert_eq!(rejected.retained_bytes(), 0);
         assert_eq!(room, first - 1);
@@ -457,7 +468,8 @@ mod tests {
         assert!(
             rejected
                 .component(&world, &rules, &source(4), &mut room)
-                .is_err()
+                .unwrap()
+                .is_none()
         );
         assert_eq!(rejected.retained_bytes(), retained);
         assert_eq!(rejected.entries.capacity(), capacity);
