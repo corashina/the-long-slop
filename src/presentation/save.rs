@@ -610,6 +610,7 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
             AssetUsage::UniqueScene
                 | AssetUsage::RoadLampPrototype
                 | AssetUsage::SkyPrototype
+                | AssetUsage::FoodPrototype
                 | AssetUsage::ItemPrototype
                 | AssetUsage::PlayerPrototype
                 | AssetUsage::RagdollPrototype

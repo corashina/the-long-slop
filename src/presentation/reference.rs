@@ -79,6 +79,7 @@ pub fn load(commands: &mut Commands, _server: &AssetServer, reference: &Referenc
                 AssetUsage::UniqueScene
                     | AssetUsage::RoadLampPrototype
                     | AssetUsage::SkyPrototype
+                    | AssetUsage::FoodPrototype
                     | AssetUsage::ItemPrototype
                     | AssetUsage::PlayerPrototype
                     | AssetUsage::RagdollPrototype
