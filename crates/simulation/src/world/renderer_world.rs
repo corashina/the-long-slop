@@ -274,6 +274,9 @@ impl RendererWorld {
     pub fn required_lights(&self) -> &[GeneratedId] {
         &self.required_lights
     }
+    pub fn required_structure_count(&self) -> usize {
+        self.required_structures.len()
+    }
     pub fn required_ready(&self) -> bool {
         self.required_ready
     }
