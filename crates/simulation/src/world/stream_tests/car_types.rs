@@ -551,6 +551,51 @@ fn garage_start_car_drives_in_automatic() {
                 collider.user_data,
                 collider.translation(),
             );
+            for m in pair.manifolds() {
+                let normal = m.data.normal;
+                for point in &m.points {
+                    let local = if pair.collider1 == other {
+                        point.local_p1
+                    } else {
+                        point.local_p2
+                    };
+                    eprintln!(
+                        "  point {:?} normal {normal:?} dist {}",
+                        collider.position() * local,
+                        point.dist
+                    );
+                }
+            }
+            let id = (collider.user_data >> 64) as u32;
+            if let Some(record) = reference.colliders.iter().find(|c| c.id.0 == id) {
+                let node = reference.nodes.iter().find(|n| n.id == record.node);
+                let item = (collider.user_data & 0xffff_ffff) as u32;
+                let item = item
+                    .checked_sub(1)
+                    .and_then(|i| reference.items.iter().find(|r| r.id.0 == i));
+                eprintln!(
+                    "  source {:?} enabled {} sensor {} groups {:#x}/{:#x} item {:?} geometry {:?}",
+                    node.map(|n| &n.hierarchy_path),
+                    record.enabled,
+                    record.sensor,
+                    record.membership,
+                    record.filter,
+                    item.map(|i| &i.name),
+                    format!("{:?}", record.geometry)
+                        .chars()
+                        .take(300)
+                        .collect::<String>(),
+                );
+            }
+        }
+        let pose = run.physics.snapshot(&key).pose;
+        eprintln!(
+            "car pose {:?} {:?}",
+            run.stream.origin.absolute(pose.position),
+            pose.rotation
+        );
+        for (i, center) in run.physics.wheel_centers(&key).unwrap().enumerate() {
+            eprintln!("wheel {i} center (body space) {center:?}");
         }
     }
     assert!(moved, "drives 5 m: {}", state(&run));
