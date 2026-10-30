@@ -608,7 +608,11 @@ impl GarageRuntime {
                 .interaction
                 .route_frame_input(look_input, &available, &self.area.player);
         let view_recentering = context.seated && context.carried.is_none();
-        if !view_recentering {
+        // `step_wear` reads the Tab release that puts the carried wearable on.
+        let put_on = self.area.wear.actions(&self.area.interaction)
+            & crate::interaction::feedback::ActionMask::PUT_ON
+            != 0;
+        if !view_recentering && !put_on {
             fixed_input.held &= !keys::RECENTER;
             fixed_input.pressed &= !keys::RECENTER;
             fixed_input.released &= !keys::RECENTER;
