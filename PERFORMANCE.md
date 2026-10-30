@@ -34,7 +34,6 @@ Impact is an estimate from the code. No item has F3 numbers yet.
 | 1 | Render bundles for Bevy phase draws | L | Medium-high if CPU bound | GPU prop rows use bundles (`render_bundles.rs`). Terrain, roads and entity renderers (LOD buildings, parked cars) still encode each draw each frame. Bevy makes new mesh bind groups each frame, and skinned draws share the phases. A bundle needs stable mesh bind groups and a static-only draw list. |
 | 2 | Skip unchanged item visuals | S | Low | The renderer still does a pose lookup and interpolation for every item visual each frame (`src/presentation/reference.rs`, `spawned.rs`). Use the changed pose rows to skip the rest. |
 | 3 | Reuse static shadow cascades | M | Medium if shadow bound | Skip a cascade when its fit and its casters did not change. Builds on the prop render bundles. |
-| 4 | Warm prop row pipelines before use | M | Removes hitches | A compiling row pipeline makes the whole view wait (`prop_draws.rs`). |
 
 ### Optional quality settings
 
@@ -52,4 +51,5 @@ Rejected: async compute, bindless, Hi-Z occlusion, f16, subgroups, GPU grass, ow
 ## Final test pass
 
 Do on Tomasz's PC after the open items are done: F3 frame time and "GPU ms" before and after each item, in a town and in a grass area.
-- Prop render bundles: no WebGPU errors in the console. Props and their shadows draw as before, also with Antialiasing off.
+Also check that a part condition change, such as rust, shows the new material without a frame freeze. The old material shows until the new pipelines compile.
+Also check the prop render bundles: no WebGPU errors in the console, and props and their shadows draw as before, also with Antialiasing off.
