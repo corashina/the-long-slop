@@ -108,6 +108,16 @@ fn flag(definitions: &[ShaderDefVal], name: &str) -> bool {
         .iter()
         .any(|value| matches!(value,ShaderDefVal::Bool(key,true) if key==name))
 }
+/// The same inspection after the pipeline queue. A separate system: one system type
+/// cannot sit in both the Prepare and Render sets.
+pub(crate) fn inspect_created_surface_passes(
+    passes: ResMut<SurfacePasses>,
+    cache: Res<PipelineCache>,
+    status: Res<RendererStateHandle>,
+    owners: Res<super::pipeline_ownership::PipelineOwners>,
+) {
+    prepare_surface_passes(passes, cache, status, owners);
+}
 /// Inspect only newly prepared descriptors. Pipeline clones occur once per new source variant.
 pub(crate) fn prepare_surface_passes(
     mut passes: ResMut<SurfacePasses>,

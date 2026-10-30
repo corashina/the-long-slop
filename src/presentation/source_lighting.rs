@@ -337,8 +337,8 @@ impl Plugin for SourceLightingPlugin {
                 .add_systems(
                     Render,
                     (
-                        super::surface_pass::prepare_surface_passes,
-                        super::caster::prepare_passes,
+                        super::surface_pass::inspect_created_surface_passes,
+                        super::caster::inspect_created_passes,
                     )
                         .chain()
                         .in_set(RenderSystems::Render)
