@@ -662,7 +662,10 @@ mod world_sync_tests {
                 state: Some(state),
                 extent: 12.,
                 fixed: true,
-                ..record(Key::Source(BodyId(1)), RigidBodyHandle::from_raw_parts(1, 0))
+                ..record(
+                    Key::Source(BodyId(1)),
+                    RigidBodyHandle::from_raw_parts(1, 0),
+                )
             }],
             processed: HashSet::new(),
             order: Vec::new(),
@@ -677,10 +680,19 @@ mod world_sync_tests {
             min: [x - 8., -500., -78.],
             max: [x + 8., 500., -62.],
         };
-        assert!(world.waits_for(window(30.)), "the garage reaches the player");
-        assert!(!world.waits_for(window(600.)), "far bodies do not hold the step");
+        assert!(
+            world.waits_for(window(30.)),
+            "the garage reaches the player"
+        );
+        assert!(
+            !world.waits_for(window(600.)),
+            "far bodies do not hold the step"
+        );
         world.records[0].state = None;
-        assert!(!world.waits_for(window(30.)), "active bodies do not hold the step");
+        assert!(
+            !world.waits_for(window(30.)),
+            "active bodies do not hold the step"
+        );
     }
 
     #[test]
