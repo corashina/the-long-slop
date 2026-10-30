@@ -207,6 +207,8 @@ pub struct SurfaceTargets {
     pub world: std::sync::Arc<SourceColorTargets>,
     pub capture: std::sync::Arc<SourceColorTargets>,
     pub views: [std::sync::Arc<SourceViewTargets>; VIEW_COUNT],
+    /// Lamp shadow atlas of the world view. Every view binds it.
+    pub lamp_atlas: Target,
     pub logical_bytes: u64,
 }
 impl SurfaceTargets {
@@ -234,13 +236,25 @@ impl SurfaceTargets {
                 atlas_size,
             )?));
         }
+        let lamp = super::lamp_shadows::ATLAS;
+        let lamp_atlas = Target::new(
+            device,
+            "source_lamp_shadow_atlas",
+            lamp.x,
+            lamp.y,
+            1,
+            SHADOW_FORMAT,
+            true,
+        );
         let logical_bytes = world.logical_bytes
             + capture.logical_bytes
-            + views.iter().map(|view| view.logical_bytes).sum::<u64>();
+            + views.iter().map(|view| view.logical_bytes).sum::<u64>()
+            + lamp_atlas_bytes();
         Ok(Self {
             world,
             capture,
             views: views.try_into().ok().unwrap(),
+            lamp_atlas,
             logical_bytes,
         })
     }
@@ -265,9 +279,14 @@ impl SurfaceTargets {
                 .views
                 .iter()
                 .map(|view| view.logical_bytes)
-                .sum::<u64>();
+                .sum::<u64>()
+            + lamp_atlas_bytes();
         Ok(())
     }
+}
+fn lamp_atlas_bytes() -> u64 {
+    let lamp = super::lamp_shadows::ATLAS;
+    2 * u64::from(lamp.x) * u64::from(lamp.y)
 }
 
 /// A scratch cube has fixed per-face render views and per-mip sample views.

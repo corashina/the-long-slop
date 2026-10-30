@@ -1,5 +1,5 @@
 //! GPU prop rows in the render world: upload, cull per view, and indirect draws.
-//! Pass 0 is the camera. Passes 1-4 are the shadow cascades.
+//! Pass 0 is the camera. Passes 1-4 are the shadow cascades, 5-8 the lamp shadow slots.
 use super::{
     caster::CasterPasses,
     lighting_assets::LightingRenderAssets,
@@ -44,14 +44,14 @@ use std::sync::{
     atomic::{AtomicU8, AtomicU32, Ordering},
 };
 
-const PASSES: usize = 5;
+const PASSES: usize = 9;
 const ALIGN: u64 = 256;
 const ROW_BYTES: u64 = ROW_WORDS as u64 * 4;
 const ARGS_BYTES: u64 = 20;
 /// Planes, counts and view index of `CullView` in source_props_cull.wgsl.
 const CULL_WORDS: usize = 32;
-/// Visible rows per pass. Eight words per view.
-const TOTAL_WORDS: usize = 8;
+/// Visible rows per pass. Sixteen words per view.
+const TOTAL_WORDS: usize = 16;
 /// More dirty ranges than this upload all rows. Fading rows give one range per few rows.
 const UPLOAD_RANGES: usize = 256;
 
@@ -146,13 +146,13 @@ struct Specialization {
 struct ViewState {
     specializations: Vec<Option<Specialization>>,
     pipelines: Vec<BatchPipelines>,
-    /// Rows of each batch in each cascade. Empty cascades draw nothing.
-    cascades: Vec<[u32; 4]>,
+    /// Rows of each batch in each caster mask bit. Empty bits draw nothing.
+    cascades: Vec<[u32; 8]>,
     masks: Option<(u64, u64, u64, u64, u32)>,
     /// Draw attempts and issued draws in this frame.
     draws: [AtomicU32; 2],
-    /// Draws of each pass. Batches change rarely, so the same bundle runs each frame.
-    bundles: [Mutex<DrawBundle>; PASSES],
+    /// Draws of the camera, then of each caster slot. Batches change rarely, so the same bundle runs each frame.
+    bundles: [Mutex<DrawBundle>; 1 + super::lamp_shadows::TILES],
 }
 /// Batch draw data from the mesh allocator.
 #[derive(Clone, Copy, PartialEq)]
@@ -652,7 +652,7 @@ impl PropDraws {
             self.mask_bytes.clear();
             self.mask_bytes.resize(buffers.mask_region as usize, 0);
             view.cascades.clear();
-            view.cascades.resize(batches, [0; 4]);
+            view.cascades.resize(batches, [0; 8]);
             for (item, key) in scene.caster_data.entities.iter().enumerate() {
                 let CasterKey::Row(slot) = *key else {
                     continue;
@@ -663,8 +663,8 @@ impl PropDraws {
                 if batch == NO_BATCH {
                     continue;
                 }
-                for cascade in 0..4 {
-                    view.cascades[batch as usize][cascade] += u32::from(mask >> cascade & 1);
+                for bit in 0..8 {
+                    view.cascades[batch as usize][bit] += u32::from(mask >> bit & 1);
                 }
             }
             queue.write_buffer(
@@ -984,13 +984,15 @@ pub(crate) fn draw_camera<'w>(
     );
     bundle_counts(world, state, counts)
 }
-/// Caster draws of each batch with rows in this cascade, after the caster phase.
+/// Caster draws of each batch with rows in this caster mask bit, after the caster phase.
+/// `tile` is the caster slot: a cascade or a lamp face.
 pub(crate) fn draw_cascade<'w>(
     world: &'w World,
     pass: &mut TrackedRenderPass<'w>,
     entity: Entity,
     index: usize,
     cascade: usize,
+    tile: usize,
 ) -> (u32, u32) {
     let draws = world.resource::<PropDraws>();
     let Some(buffers) = &draws.buffers else {
@@ -1009,7 +1011,7 @@ pub(crate) fn draw_cascade<'w>(
         depth: SHADOW_FORMAT,
         samples: 1,
     };
-    let counts = state.bundles[1 + cascade].lock().unwrap().draw(
+    let counts = state.bundles[1 + tile].lock().unwrap().draw(
         world.resource::<RenderDevice>(),
         target,
         pass,
@@ -1049,7 +1051,7 @@ pub(crate) fn draw_cascade<'w>(
                 };
                 pass.set_render_pipeline(pipeline);
                 pass.set_bind_group(0, camera, &[offset.offset]);
-                pass.set_bind_group(1, caster.binding(cascade), &[]);
+                pass.set_bind_group(1, caster.binding(tile), &[]);
                 pass.set_bind_group(3, material, &[]);
                 if !bind_batch(
                     world,
