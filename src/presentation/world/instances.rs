@@ -407,13 +407,6 @@ impl SourceInstances {
         }
         Ok(())
     }
-    /// Node entities by glTF node of the instance of world object `id`.
-    pub(crate) fn nodes_of(&self, id: &crate::world::GeneratedId) -> Option<&[Option<Entity>]> {
-        self.instances
-            .iter()
-            .find(|i| i.placement.id == *id && !i.retirement.started())
-            .map(|i| i.nodes.as_slice())
-    }
     /// Whether an instance with root entity `root` exists.
     pub(crate) fn has_root(&self, root: Entity) -> bool {
         self.instances.iter().any(|i| i.root == root)

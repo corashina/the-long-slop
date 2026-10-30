@@ -27,10 +27,11 @@ impl ProbeSchedule {
     pub fn published(&self) -> bool {
         self.published
     }
+    /// An enabled probe captures again after each publication.
     /// Finish an active capture even when distance checks disable its probe.
     pub fn pending_job(&self, enabled: bool) -> Option<ProbeJob> {
         let job = self.job();
-        ((enabled && !self.published) || job != ProbeJob::Face(0)).then_some(job)
+        (enabled || job != ProbeJob::Face(0)).then_some(job)
     }
     pub fn cameras_active(&self, enabled: bool, warmup: bool) -> bool {
         warmup || self.pending_job(enabled).is_some()
@@ -112,18 +113,79 @@ pub fn capture_view_from_world(face: usize, target_position: [f32; 3]) -> [[f32;
     matrix
 }
 
-/// Retain a valid source slot when no other capture is pending.
-pub fn pending_probe_index<const N: usize>(
-    current: usize,
-    probes: &[ProbeSchedule; N],
-    enabled: [bool; N],
-) -> usize {
-    let wanted = |index: usize| enabled[index] && !probes[index].published();
-    if probes[current].pending_job(enabled[current]).is_none() {
-        return (1..N)
-            .map(|offset| (current + offset) % N)
-            .find(|&index| wanted(index))
-            .unwrap_or(current);
+/// The next enabled slot after `current` in cyclic order. `current` comes last.
+pub fn next_probe_index<const N: usize>(current: usize, enabled: [bool; N]) -> usize {
+    (1..=N)
+        .map(|offset| (current + offset) % N)
+        .find(|&index| enabled[index])
+        .unwrap_or(current)
+}
+
+/// Source ReflectionDisableDistance keeps probes within 50 m.
+pub const PROBE_DISABLE_DISTANCE_SQUARED: f32 = 2500.;
+
+/// Distance check assignment. `candidates` are within distance, nearest first.
+/// A slot keeps its probe while the probe stays among the nearest `N`. Free slots take the
+/// other candidates. The `locked` slot does not change. Returns the mask of changed slots.
+pub fn assign_probe_slots<K: Copy + PartialEq, const N: usize>(
+    slots: &mut [Option<K>; N],
+    candidates: &[K],
+    locked: usize,
+) -> u32 {
+    let wanted = &candidates[..candidates.len().min(N)];
+    let mut changed = 0;
+    for (index, slot) in slots.iter_mut().enumerate() {
+        if index != locked && slot.is_some_and(|key| !wanted.contains(&key)) {
+            *slot = None;
+            changed |= 1 << index;
+        }
     }
-    current
+    for key in wanted {
+        if slots.contains(&Some(*key)) {
+            continue;
+        }
+        let Some(index) = (0..N).find(|&index| index != locked && slots[index].is_none()) else {
+            break;
+        };
+        slots[index] = Some(*key);
+        changed |= 1 << index;
+    }
+    changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slots_keep_near_probes_and_skip_the_locked_slot() {
+        let mut slots = [Some(1), Some(2), None, Some(3)];
+        // 2 leaves, 4 and 5 arrive. Slot 3 is capturing, so 3 stays although it left.
+        let changed = assign_probe_slots(&mut slots, &[1, 4, 5], 3);
+        assert_eq!(slots, [Some(1), Some(4), Some(5), Some(3)]);
+        assert_eq!(changed, 0b0110);
+        // Later the lock moves and 3 is freed.
+        assert_eq!(assign_probe_slots(&mut slots, &[1, 4, 5], 0), 0b1000);
+        assert_eq!(slots, [Some(1), Some(4), Some(5), None]);
+        // Only the nearest N take slots.
+        let mut slots = [None; 2];
+        assign_probe_slots(&mut slots, &[7, 8, 9], 1);
+        assert_eq!(slots, [Some(7), None]);
+    }
+
+    #[test]
+    fn enabled_probes_refresh_in_turn() {
+        let mut probe = ProbeSchedule::default();
+        for _ in 0..2 {
+            for _ in 0..8 {
+                let job = probe.pending_job(true).unwrap();
+                probe.complete(job).unwrap();
+            }
+            assert!(probe.published());
+        }
+        assert_eq!(probe.pending_job(false), None);
+        assert_eq!(next_probe_index(1, [true, false, true, false]), 2);
+        assert_eq!(next_probe_index(2, [true, false, true, false]), 0);
+        assert_eq!(next_probe_index(1, [false; 4]), 1);
+    }
 }

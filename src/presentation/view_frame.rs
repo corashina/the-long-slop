@@ -10,7 +10,7 @@ use super::{
 };
 use crate::reference::{
     reflections::{
-        ProbeJob, ProbeSchedule, capture_view_from_world, pending_probe_index, prepare_probe_face,
+        ProbeJob, ProbeSchedule, capture_view_from_world, next_probe_index, prepare_probe_face,
     },
     shadow_planes::{CullPlanes, implicit_cull_planes},
 };
@@ -81,6 +81,18 @@ impl SourceViewClock {
     pub fn main_token(&self) -> u32 {
         self.main_token
     }
+    /// The slot of the active capture. Its probe must not change.
+    pub(crate) fn probe_index(&self) -> usize {
+        self.probe_index
+    }
+    pub(crate) fn probe_published(&self, index: usize) -> bool {
+        self.probe[index].published()
+    }
+    /// A new probe in a slot starts unpublished. Only idle slots may reset.
+    pub(crate) fn reset_probe(&mut self, index: usize) {
+        debug_assert_ne!(index, self.probe_index);
+        self.probe[index] = ProbeSchedule::default();
+    }
     fn probe_job(&self, enabled: [bool; PROBE_COUNT]) -> Option<ProbeJob> {
         self.probe[self.probe_index].pending_job(enabled[self.probe_index])
     }
@@ -123,8 +135,17 @@ impl SourceViewClock {
                 .checked_add(1)
                 .ok_or("Source probe job token exhausted")?;
         }
-        // Each probe captures once per scene. A published probe keeps its cubemap.
-        let next = pending_probe_index(self.probe_index, &self.probe, probe_enabled);
+        // Enabled probes capture in turn. A published probe keeps its cubemap.
+        let current = self.probe_index;
+        let next = if published
+            || self.probe[current]
+                .pending_job(probe_enabled[current])
+                .is_none()
+        {
+            next_probe_index(current, probe_enabled)
+        } else {
+            current
+        };
         if next != self.probe_index {
             self.probe_index = next;
             if !published {
@@ -444,7 +465,7 @@ pub(crate) fn snapshot(
                 assets.record.shadows.distance,
             )
         } else {
-            let p = &assets.record.probes[clock.probe_index];
+            let p = &assets.record.probes[0];
             (p.near, p.far, 90., p.mask, p.shadow_distance)
         };
         let view = if index < WORLD_VIEWS {
@@ -579,11 +600,13 @@ pub fn install(app: &mut App) {
         .init_resource::<SourceViewClock>()
         .init_resource::<SourceSceneEpoch>()
         .init_resource::<super::lighting_scene::ProbeActivation>()
+        .init_resource::<super::reflections::Reflections>()
         .init_resource::<SourceViewFrame>()
         .init_resource::<super::temporal::TemporalView>()
         .add_plugins(bevy::render::extract_resource::ExtractResourcePlugin::<
             SourceViewFrame,
         >::default())
+        .add_systems(Update, super::reflections::poll)
         .add_systems(
             PostUpdate,
             sync_probe_cameras
@@ -743,8 +766,9 @@ pub(crate) fn append_probe_required_views(
     light_mask: u32,
 ) -> Result<(), crate::reference::ReferenceError> {
     const _: () = assert!(crate::world::REQUIRED_VIEW_CAPACITY == WORLD_VIEWS + PROBE_COUNT * 6);
+    // Every car probe shares the capture settings of the one probe record.
+    let probe = &records[0];
     views.append_probe_faces(enabled, |index, face| {
-        let probe = &records[index];
         let snapshot = camera_snapshot(
             UVec2::splat(probe.resolution),
             Mat4::from_cols_array_2d(&capture_view_from_world(face, positions[index].to_array())),

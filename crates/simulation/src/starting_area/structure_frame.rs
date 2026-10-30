@@ -63,7 +63,6 @@ impl GarageRuntime {
         self.home_cable_session = None;
         self.screens_sent = None;
         self.plates_sent.clear();
-        self.followed_car = None;
         self.last_feedback = None;
     }
     /// Writes the views of changed structures. Clears the stream and body presentation queues.

@@ -4,7 +4,7 @@ use super::{
     lighting_scene::{PROBE_COUNT, SourceSceneLighting},
     materials::MaterialLoading,
     readiness::RendererStateHandle,
-    render_targets::{HDR_FORMAT, ProbeTargets, SurfaceTargets},
+    render_targets::{HDR_FORMAT, ProbeTargets, PublishedProbes, SurfaceTargets},
     source_lighting::SourceViewLighting,
     stained_glass::{GlassViewUniform, SourceGlassView},
     surface_graph::SurfaceViewTargets,
@@ -70,6 +70,7 @@ impl ExtractComponent for SourceSurfaceView {
 pub struct SurfaceResources {
     pub targets: SurfaceTargets,
     pub probes: [ProbeTargets; PROBE_COUNT],
+    published: PublishedProbes,
     probe_sampler: Sampler,
     shadow_compare: Sampler,
 }
@@ -82,9 +83,11 @@ impl SurfaceResources {
         samples: u32,
         atlas: u32,
     ) -> Result<Self, String> {
+        let published = PublishedProbes::new(device, queue);
         Ok(Self {
             targets: SurfaceTargets::new(device, width, height, samples, atlas)?,
-            probes: std::array::from_fn(|_| ProbeTargets::new(device, queue)),
+            probes: std::array::from_fn(|slot| ProbeTargets::new(device, &published, slot)),
+            published,
             probe_sampler: device.create_sampler(&SamplerDescriptor {
                 label: Some("source_probe_sampler"),
                 mag_filter: FilterMode::Linear,
@@ -273,13 +276,11 @@ pub(crate) fn prepare_views(
             binding.write(uniform, &device, &queue);
             continue;
         }
-        let cubes = std::array::from_fn(|index| {
-            if !probe_view(source.index) {
-                &resources.probes[index].published_view
-            } else {
-                &resources.probes[index].capture_sample_view
-            }
-        });
+        let cubes = if !probe_view(source.index) {
+            &resources.published.view
+        } else {
+            &resources.published.capture_view
+        };
         // Only MSAA views keep the resolved camera depth free of the transparent attachment.
         let camera_depth = target
             .multisample_depth

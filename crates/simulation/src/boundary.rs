@@ -898,8 +898,6 @@ pub enum Change {
     Retire(Handle),
     /// Home cable rope aims. Empty: no pole in range, the root stays hidden.
     HomeCable(Vec<RopeAim>),
-    /// The world car the player last sat in, else the start car: id and prototype.
-    FollowedCar(Option<(GeneratedId, u32)>),
     Feedback(Box<Feedback>),
     /// A world structure takes the slot.
     StructureAdd {
