@@ -33,9 +33,6 @@ impl ProbeSchedule {
         let job = self.job();
         (enabled || job != ProbeJob::Face(0)).then_some(job)
     }
-    pub fn cameras_active(&self, enabled: bool, warmup: bool) -> bool {
-        warmup || self.pending_job(enabled).is_some()
-    }
     /// Call after encoding this frame's job. Pipeline waits must leave the job unchanged.
     pub fn complete(&mut self, job: ProbeJob) -> Result<(), &'static str> {
         if job != self.job() {

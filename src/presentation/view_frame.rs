@@ -96,9 +96,9 @@ impl SourceViewClock {
     fn probe_job(&self, enabled: [bool; PROBE_COUNT]) -> Option<ProbeJob> {
         self.probe[self.probe_index].pending_job(enabled[self.probe_index])
     }
-    fn probe_cameras_active(&self, enabled: [bool; PROBE_COUNT]) -> bool {
-        self.probe[self.probe_index]
-            .cameras_active(enabled[self.probe_index], !self.preparation_ready)
+    /// A face camera runs only while its face prepares: each face in warmup, then the current face job.
+    fn probe_camera_active(&self, enabled: [bool; PROBE_COUNT], face: usize) -> bool {
+        prepare_probe_face(self.probe_job(enabled), face, !self.preparation_ready)
     }
     fn consume(
         &mut self,
@@ -298,9 +298,12 @@ fn sync_probe_cameras(
             .invalidate(crate::render_readiness::Invalidation::Content);
         return;
     }
-    let active = clock.probe_cameras_active(activation.enabled);
     for (view, mut camera) in &mut views {
-        if probe_view(view.index) && camera.is_active != active {
+        if !probe_view(view.index) {
+            continue;
+        }
+        let active = clock.probe_camera_active(activation.enabled, view.index - PROBE_START);
+        if camera.is_active != active {
             camera.is_active = active;
         }
     }
@@ -366,7 +369,6 @@ pub(crate) fn snapshot(
     let mut input = [None; VIEW_COUNT];
     let mut identities = [false; VIEW_COUNT];
     let probe_job = clock.probe_job(activation.enabled);
-    let probes_active = clock.probe_cameras_active(activation.enabled);
     for (view, camera, pose) in &views {
         if view.index >= VIEW_COUNT || identities[view.index] {
             status.fail("Source snapshot view identity is invalid".into());
@@ -377,8 +379,8 @@ pub(crate) fn snapshot(
             return;
         }
         identities[view.index] = true;
-        // Mirror views take their pose and extent from the mirror frame.
-        if mirror_view(view.index) || (probe_view(view.index) && !probes_active) {
+        // Mirror views take their pose and extent from the mirror frame. Idle probe faces have no input.
+        if mirror_view(view.index) || (probe_view(view.index) && !camera.is_active) {
             continue;
         }
         if !camera.is_active {

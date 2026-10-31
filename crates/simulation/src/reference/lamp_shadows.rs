@@ -109,14 +109,14 @@ impl LampMasks {
     pub fn rows(&self) -> impl Iterator<Item = u32> + '_ {
         self.rows.iter().map(|(row, _)| *row)
     }
-    /// Replace bits 4..7 of each mask. Returns true when a mask changes.
+    /// Replace bits 4..7 of each mask. Returns the lamp bits that changed for any caster.
     pub fn write(
         &mut self,
         casters: &[CasterInput],
         grid: &CasterGrid,
         slots: &[Option<LampSphere>; LAMP_SLOTS],
         masks: &mut [u8],
-    ) -> bool {
+    ) -> u8 {
         self.next.clear();
         for (slot, lamp) in slots.iter().enumerate() {
             let Some(lamp) = lamp else { continue };
@@ -141,9 +141,63 @@ impl LampMasks {
         for &(row, bits) in &self.next {
             masks[row as usize] |= bits;
         }
-        let changed = self.rows != self.next;
+        // Both lists are in row order. A row in one list only has zero lamp bits in the other.
+        let (old, new) = (&self.rows, &self.next);
+        let (mut a, mut b, mut changed) = (0, 0, 0);
+        while a < old.len() || b < new.len() {
+            match (old.get(a), new.get(b)) {
+                (Some(&(row, bits)), Some(&(next, next_bits))) if row == next => {
+                    changed |= bits ^ next_bits;
+                    a += 1;
+                    b += 1;
+                }
+                (Some(&(row, bits)), next) if next.is_none_or(|&(next, _)| row < next) => {
+                    changed |= bits;
+                    a += 1;
+                }
+                (_, Some(&(_, bits))) => {
+                    changed |= bits;
+                    b += 1;
+                }
+                (_, None) => unreachable!(),
+            }
+        }
         std::mem::swap(&mut self.rows, &mut self.next);
         changed
+    }
+}
+
+/// Lamp face tiles: 6 for each lamp slot.
+pub const LAMP_FACES: usize = LAMP_SLOTS * 6;
+
+/// What a lamp face tile holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LampFace {
+    /// Face projection, as bits.
+    pub clip_from_world: [u32; 16],
+    pub point: bool,
+    /// Caster content counter of the slot. It changes when the face content would change.
+    pub contents: u64,
+}
+
+/// The face of each lamp tile at its last draw.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LampHistory([Option<LampFace>; LAMP_FACES]);
+impl LampHistory {
+    /// A face draws when the atlas is forced or its tile holds a different face. The tiles keep the drawn faces.
+    /// An unused tile forgets its face: a spot face can cover it.
+    pub fn plan(
+        &mut self,
+        forced: bool,
+        current: &[Option<LampFace>; LAMP_FACES],
+    ) -> [bool; LAMP_FACES] {
+        std::array::from_fn(|tile| {
+            let draw = current[tile].is_some_and(|face| forced || self.0[tile] != Some(face));
+            if draw || current[tile].is_none() {
+                self.0[tile] = current[tile];
+            }
+            draw
+        })
     }
 }
 
@@ -202,10 +256,40 @@ mod tests {
         let mut lamps = LampMasks::default();
         let mut masks = [0b0001, 0, 0];
         let slots = [None, Some(lamp(0, 0.)), None, None];
-        assert!(lamps.write(&casters, &grid, &slots, &mut masks));
+        assert_eq!(
+            lamps.write(&casters, &grid, &slots, &mut masks),
+            0b0010_0000
+        );
         assert_eq!(masks, [0b0010_0001, 0, 0]);
-        assert!(!lamps.write(&casters, &grid, &slots, &mut masks));
-        assert!(lamps.write(&casters, &grid, &[None; LAMP_SLOTS], &mut masks));
+        assert_eq!(lamps.write(&casters, &grid, &slots, &mut masks), 0);
+        let none = [None; LAMP_SLOTS];
+        assert_eq!(lamps.write(&casters, &grid, &none, &mut masks), 0b0010_0000);
         assert_eq!(masks, [0b0001, 0, 0]);
+    }
+
+    #[test]
+    fn unchanged_faces_skip_the_draw() {
+        let face = |contents| {
+            Some(LampFace {
+                clip_from_world: [0; 16],
+                point: true,
+                contents,
+            })
+        };
+        let mut history = LampHistory::default();
+        let mut current = [None; LAMP_FACES];
+        current[0] = face(0);
+        current[1] = face(0);
+        assert_eq!(history.plan(false, &current)[..3], [true, true, false]);
+        assert_eq!(history.plan(false, &current), [false; LAMP_FACES]);
+        // A content change draws the face. A forced plan draws all used faces.
+        current[1] = face(1);
+        assert_eq!(history.plan(false, &current)[..3], [false, true, false]);
+        assert_eq!(history.plan(true, &current)[..3], [true, true, false]);
+        // An unused tile forgets its face.
+        current[1] = None;
+        history.plan(false, &current);
+        current[1] = face(1);
+        assert_eq!(history.plan(false, &current)[..3], [false, true, false]);
     }
 }

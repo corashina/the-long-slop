@@ -6,6 +6,8 @@ pub struct ShadowBatchKey<P, D, M> {
     pub draw: D,
     pub material: Option<M>,
     pub split_mask: u8,
+    /// Grass and skinned casters draw in a separate atlas pass.
+    pub animated: bool,
     pub indexed: bool,
 }
 

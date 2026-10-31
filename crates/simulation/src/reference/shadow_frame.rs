@@ -109,7 +109,7 @@ pub struct ShadowViewCache {
     split_changes: u8,
 }
 impl ShadowViewCache {
-    /// Splits with a caster that entered or left them in the last `prepare`.
+    /// Splits with a static caster that entered or left them in the last `prepare`.
     pub fn split_changes(&self) -> u8 {
         self.split_changes
     }
@@ -144,6 +144,7 @@ impl ShadowViewCache {
         light_mask: u32,
         view_mask: u32,
         fit: &mut ShadowFitInput,
+        animated: &[u32],
     ) -> Result<Option<ShadowFrame>, &'static str> {
         if casters.len() != masks.len() {
             return Err("Source shadow candidate and mask counts differ");
@@ -187,22 +188,30 @@ impl ShadowViewCache {
             fit,
         )?;
         // Both lists are in row order. A row in one list only had zero sun bits in the other.
+        // Animated casters draw in each refresh, so their changes do not count.
         let (old, new) = (&self.previous, &self.rows);
-        let new_bits = |row: u32| masks[row as usize] & SUN_BITS;
+        let change = |row: u32, bits: u8| {
+            if animated.binary_search(&row).is_ok() {
+                0
+            } else {
+                bits ^ (masks[row as usize] & SUN_BITS)
+            }
+        };
         let (mut a, mut b, mut changes) = (0, 0, 0);
         while a < old.len() || b < new.len() {
             match (old.get(a), new.get(b)) {
                 (Some(&(row, bits)), Some(&next)) if row == next => {
-                    changes |= bits ^ new_bits(next);
+                    changes |= change(row, bits);
                     a += 1;
                     b += 1;
                 }
                 (Some(&(row, bits)), next) if next.is_none_or(|&next| row < next) => {
-                    changes |= bits;
+                    // The row is not a candidate now, so its sun bits are zero.
+                    changes |= change(row, bits);
                     a += 1;
                 }
                 (_, Some(&next)) => {
-                    changes |= new_bits(next);
+                    changes |= change(next, 0);
                     b += 1;
                 }
                 (_, None) => unreachable!(),
@@ -536,6 +545,8 @@ mod tests {
         let mut masks = vec![0u8; casters.len()];
         let mut expected = vec![0u8; casters.len()];
         let mut previous = expected.clone();
+        // Animated rows do not count in the split changes.
+        let animated = [3, 50, 700, 2999];
         let (mut partial, mut fits) = (0, 0);
         for frame in 0..300u64 {
             // Some casters move, some far, as cars do.
@@ -563,6 +574,7 @@ mod tests {
             let (light_mask, view_mask) = (0b111, if random.chance(0.2) { 0b001 } else { 0b111 });
             let result = cache.prepare(
                 frame, &casters, &grid, &mut masks, planes, light_mask, view_mask, &mut input,
+                &animated,
             );
             let linear = linear_frame(
                 &casters,
@@ -602,10 +614,9 @@ mod tests {
             );
             let sun_bits = |m: &u8| m & SUN_BITS;
             assert!(masks.iter().map(sun_bits).eq(expected.iter().copied()));
-            let changes = previous
-                .iter()
-                .zip(&expected)
-                .fold(0, |c, (old, new)| c | (old ^ new));
+            let changes = (previous.iter().zip(&expected).enumerate())
+                .filter(|(row, _)| animated.binary_search(&(*row as u32)).is_err())
+                .fold(0, |c, (_, (old, new))| c | (old ^ new));
             assert_eq!(cache.split_changes(), changes);
             previous.copy_from_slice(&expected);
             let rows = cache.rows();
@@ -625,7 +636,11 @@ mod tests {
                     culling_mask: 0b011,
                 })
             });
-            lamps.write(&casters, &grid, &slots, &mut masks);
+            let old: Vec<u8> = masks.iter().map(|mask| mask & !SUN_BITS).collect();
+            let changed = lamps.write(&casters, &grid, &slots, &mut masks);
+            let lamp_changes =
+                (old.iter().zip(&masks)).fold(0, |c, (o, m)| c | (o ^ (m & !SUN_BITS)));
+            assert_eq!(changed, lamp_changes);
             linear_lamps(&casters, &slots, &mut expected);
             assert!(masks == expected, "lamp masks differ in frame {frame}");
             assert!(

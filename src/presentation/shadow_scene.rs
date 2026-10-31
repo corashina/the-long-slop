@@ -14,7 +14,7 @@ use super::{
     },
 };
 use crate::reference::{
-    lamp_shadows::LampMasks,
+    lamp_shadows::{LAMP_BIT, LAMP_SLOTS, LampMasks},
     shadow_bounds::{BoundsKey, WorldBoundsCache},
     shadow_candidates::CandidateState,
     shadow_frame::{CasterInput, ShadowViewCache},
@@ -62,14 +62,18 @@ pub struct ShadowScene {
     mask_revisions: [u64; VIEW_COUNT],
     /// Changes when a lamp bit of the world view masks changes.
     lamp_revision: u64,
+    /// Caster content counter of each lamp slot. It changes when the face content would change.
+    pub lamp_contents: [u64; LAMP_SLOTS],
     /// Held sun rotation of the shadow fit. It follows the sun in steps of `SUN_STEP`.
     pub sun: Quat,
-    /// Caster content counter of each view and cascade. It changes when the tile content would change.
+    /// Static caster content counter of each view and cascade. It changes when the static tile content would change.
     pub contents: [[u64; 4]; VIEW_COUNT],
+    /// Cascade bits of each view with an animated caster.
+    pub animated_tiles: [u8; VIEW_COUNT],
     /// Caster rows read again this frame. Retained storage.
     touched: Vec<u32>,
     /// Caster rows that change each frame, in row order. Retained storage.
-    animated: Vec<u32>,
+    pub animated: Vec<u32>,
     /// Entity rows with a nonzero mask in any view. Retained storage.
     visible: Vec<u32>,
 }
@@ -222,7 +226,8 @@ pub(super) fn prepare_scene(
         }
         scene.lamp_masks.clear();
     } else {
-        for &row in &scene.touched {
+        // Animated rows are not in `touched`, but their bounds change too.
+        for &row in scene.touched.iter().chain(&scene.animated) {
             scene
                 .grid
                 .update(row, scene.caster_data.casters[row as usize].bounds);
@@ -251,6 +256,7 @@ pub(super) fn prepare_scene(
             scene.views[index].clear();
             scene.mask_revisions[index] = scene.views[index].revision();
             scene.contents[index] = scene.contents[index].map(|c| c + 1);
+            scene.animated_tiles[index] = 0;
             continue;
         };
         let atlas = frame
@@ -290,6 +296,7 @@ pub(super) fn prepare_scene(
             light.mask,
             v.mask,
             &mut input,
+            &scene.animated,
         ) {
             Ok(Some(value)) => {
                 scene.fits[index] = Some(value.fit);
@@ -313,22 +320,36 @@ pub(super) fn prepare_scene(
                 | scene
                     .touched
                     .iter()
-                    .chain(&scene.animated)
                     .fold(0, |dirty, &row| dirty | masks[row as usize])
         };
+        scene.animated_tiles[index] = scene
+            .animated
+            .iter()
+            .fold(0, |tiles, &row| tiles | masks[row as usize])
+            & 0b1111;
         for (cascade, content) in scene.contents[index].iter_mut().enumerate() {
             *content += u64::from(dirty >> cascade & 1);
         }
     }
     // Lamp slots draw only in the world view atlas. Both revisions only grow, so their sum changes with either.
+    let mut lamp_dirty = 0xf0;
     if frame.views[0].is_some() {
-        if scene.lamp_masks.write(
+        let changed = scene.lamp_masks.write(
             &scene.caster_data.casters,
             &scene.grid,
             &lamps.spheres,
             &mut scene.masks[0],
-        ) {
+        );
+        if changed != 0 {
             scene.lamp_revision += 1;
+        }
+        if !all_changed {
+            let masks = &scene.masks[0];
+            lamp_dirty = scene
+                .touched
+                .iter()
+                .chain(&scene.animated)
+                .fold(changed, |dirty, &row| dirty | (masks[row as usize] & 0xf0));
         }
         let marked = &mut scene.marked[0];
         marked.extend(scene.lamp_masks.rows());
@@ -336,6 +357,9 @@ pub(super) fn prepare_scene(
         marked.dedup();
     } else {
         scene.lamp_masks.clear();
+    }
+    for (slot, content) in scene.lamp_contents.iter_mut().enumerate() {
+        *content += u64::from(lamp_dirty >> (LAMP_BIT as usize + slot) & 1);
     }
     scene.mask_revisions[0] = scene.views[0].revision() + scene.lamp_revision;
     drop(changes);
@@ -432,7 +456,10 @@ fn update_caster(
     } else if animated != scene.animated.binary_search(&row).is_ok() {
         return Ok(false);
     }
-    scene.touched.push(row);
+    // Animated casters draw in each refresh, so their changes keep the static tile.
+    if !animated {
+        scene.touched.push(row);
+    }
     Ok(true)
 }
 /// Rows enter the caster list after the entities, in slot order.
@@ -524,5 +551,9 @@ pub fn extract_scene(
     output.origin = input.origin;
     output.sun = input.sun;
     output.contents = input.contents;
+    output.animated_tiles = input.animated_tiles;
+    output.animated.clear();
+    output.animated.extend_from_slice(&input.animated);
+    output.lamp_contents = input.lamp_contents;
     output.frame = input.frame;
 }
