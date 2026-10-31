@@ -11,12 +11,12 @@ use crate::vehicle::to_rapier;
 use rapier3d::math::{Pose, Vector};
 
 /// Crowbar prefab name parts.
-pub(super) const CROWBAR: &[&str] = &["crowbar", "feszito"];
+pub(crate) const CROWBAR: &[&str] = &["crowbar", "feszito"];
 /// Frames from one swing press to the next.
-const SWING_FRAMES: usize = 50;
+pub(crate) const SWING_FRAMES: usize = 50;
 
 /// The weapon whose world prototype root name has one of `names`.
-pub(super) fn weapon<'a>(
+pub(crate) fn weapon<'a>(
     reference: &'a ReferenceManifest,
     names: &[&str],
 ) -> &'a MeleeWeaponReference {
@@ -40,7 +40,7 @@ pub(super) fn weapon<'a>(
 }
 
 /// Spawns the weapon prototype at the player and returns its pickup item.
-pub(super) fn spawn(
+pub(crate) fn spawn(
     run: &mut GarageRuntime,
     reference: &ReferenceManifest,
     w: &MeleeWeaponReference,
@@ -67,7 +67,7 @@ pub(super) fn spawn(
 }
 
 /// Spawns the weapon and puts it in the right hand.
-fn equip(
+pub(crate) fn equip(
     run: &mut GarageRuntime,
     reference: &ReferenceManifest,
     w: &MeleeWeaponReference,
@@ -80,7 +80,7 @@ fn equip(
 }
 
 /// The weapon `Trigger` in physics space.
-fn trigger(
+pub(crate) fn trigger(
     run: &GarageRuntime,
     reference: &ReferenceManifest,
     w: &MeleeWeaponReference,
@@ -103,7 +103,7 @@ fn trigger(
 }
 
 /// One frame of repeated short swings: press, release, then wait.
-fn swing_frame(run: &mut GarageRuntime, reference: &ReferenceManifest, index: usize) {
+pub(crate) fn swing_frame(run: &mut GarageRuntime, reference: &ReferenceManifest, index: usize) {
     let input = match index % SWING_FRAMES {
         0 => FrameInput {
             held: keys::PRIMARY,
@@ -120,7 +120,7 @@ fn swing_frame(run: &mut GarageRuntime, reference: &ReferenceManifest, index: us
 }
 
 /// Moves a body to `at` with no velocity.
-pub(super) fn place(run: &mut GarageRuntime, item: ItemId, at: Vector) {
+pub(crate) fn place(run: &mut GarageRuntime, item: ItemId, at: Vector) {
     let body = run.area.items.get(item).unwrap().body.unwrap();
     run.physics.edit_body(body, |b| {
         let mut pose = *b.position();

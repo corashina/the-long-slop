@@ -24,11 +24,11 @@ mod item_seats;
 #[path = "stream_tests/kit.rs"]
 pub mod kit;
 #[path = "stream_tests/long_trip.rs"]
-mod long_trip;
+pub(crate) mod long_trip;
 #[path = "stream_tests/loot_tools.rs"]
 mod loot_tools;
 #[path = "stream_tests/melee.rs"]
-mod melee;
+pub(crate) mod melee;
 #[path = "stream_tests/parked_car.rs"]
 mod parked_car;
 #[path = "stream_tests/sled.rs"]
@@ -1842,8 +1842,7 @@ fn publish_decoration_fixture(run: &mut GarageRuntime, placement: Placement) {
     let stream = &mut run.stream;
     stream
         .contents
-        .active
-        .push(super::super::contents::ContentInstance::for_structure(
+        .push_active(super::super::contents::ContentInstance::for_structure(
             placement.clone(),
         ));
     stream.wanted_structures.push(placement.clone());
@@ -3797,7 +3796,7 @@ fn g08_ready(reference: &ReferenceManifest) -> GarageRuntime {
     assert!(run.world_supported());
     run
 }
-fn g08_pickup(run: &mut GarageRuntime, item: crate::reference::ItemId) {
+pub(crate) fn g08_pickup(run: &mut GarageRuntime, item: crate::reference::ItemId) {
     let point = run.area.items.get(item).unwrap().pose.position;
     if run.area.interaction.storage.stored(item) {
         run.area
@@ -3824,7 +3823,7 @@ fn g08_pickup(run: &mut GarageRuntime, item: crate::reference::ItemId) {
     }
     run.area.sync_inventory();
 }
-fn g08_frame(
+pub(crate) fn g08_frame(
     run: &mut GarageRuntime,
     reference: &ReferenceManifest,
     input: crate::simulation::FrameInput,
