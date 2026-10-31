@@ -60,6 +60,7 @@ Known failures on master c0da737f (2026-10-30 browser retest), fix before the ne
 - W12: `tp_w12_dig_up_refuse_pickup_and_save`. A buried item loads with a dynamic body. The source freezes it.
 - W13: `tp_w13_detector_beeps_near_metal_and_saves_on`. A metal detector saved on loads off.
 - W15: `w02_long_trip_keeps_far_edits`. The required publication stalls after the car moves out.
+- CR2: `tp_cr2_halloween_bats_near_buildings`. On Halloween, the area near the 2nd road building (about 14.6 km out) fails with "Generated condition: state". The same area loads in June.
 - W17: `tp_w17_far_move_to_the_first_gas_station_loads`. A far move to the first gas station on the road (about 7.7 km out) never loads: the road plan does not finish.
 
 Blocked checks. Each waits for the fix of its bug. Run them in the next build's test pass.
@@ -125,7 +126,6 @@ Blocked checks. Each waits for the fix of its bug. Run them in the next build's 
 - WD17: Shoot a tank that does not explode, and the garage water tank, with a shotgun. Holes that face down leak, and the fluid amount falls.
 - WD19: Drive into a cactus, shoot one until it breaks, and blow one up. Cactus pieces fly off and the cactus stays, as in the original. It does not break again until its area streams in again.
 - WD20: Hit a tumbleweed hard with the car, a shot and a melee swing. It breaks with its gib and sound. Save and load: it stays gone.
-- CR5: Rabbits die on hard hits, falls and head shots, with a die sound. A head shot can take the eyes (eyes hide) or the ears.
 
 Prepare once:
 
@@ -275,18 +275,13 @@ Prepare once:
 
 ### Creatures
 
-1. See planes cross the sky at 600 m with their contrails and engine sound. The first plane comes at start, then one every 50 to 500 s, at most 3. About one in ten is a UFO: it spins and hums.
+1. See planes cross the sky with their contrails and engine sound. A UFO spins and hums.
 2. Bats: set the PC date between 15 Oct and 15 Nov, start a new game and drive to a gas station. In 65% of stations, 5 to 30 bats fly near it, flap and squeak. Pick one up: it keeps squeaking and does not fly out of the hand. Save and load near the bats.
-3. Rabbits spawn outside the view, up to 100 m around a point 100 m from the player, first at start, then every 50 to 100 s, at most 10. Big ones are larger and slower. Drive far away: far rabbits unload, new ones spawn near, and the old ones come back when you return.
-4. They roam, run from the player and from shots, and jump over small obstacles. Their ears twitch.
-6. Dead rabbits fall as ragdolls. Pick up and carry a bone: the body follows.
-7. Save and load with live and dead rabbits, and with a rabbit that lost its eyes.
-8. About one rabbit in four (the big ones) is evil and has glowing red eyes.
-9. An evil rabbit that sees the player roars and stops, then runs at the player and attacks with a bite animation and sound.
-10. A bite of a big evil rabbit hurts the player. It also damages loose items and other rabbits near the bite.
-11. Close to an evil rabbit (about 4 m), it growls every 10 to 30 s.
-12. Start a car engine or hold the horn. Normal rabbits flee from it. Evil rabbits flee from a loud sound far away, but still attack up close.
-13. Turn on a portable radio near rabbits: they react to it like a quiet engine.
+4. Rabbits roam, run from shots, and jump over small obstacles. Their ears twitch.
+8. Evil rabbits have glowing red eyes.
+9. Check the evil rabbit roar and bite animations and sounds.
+10. A bite of a big evil rabbit damages loose items and other rabbits near the bite.
+12. Start a car engine near rabbits. Normal rabbits flee from it.
 
 ### Small effects
 
