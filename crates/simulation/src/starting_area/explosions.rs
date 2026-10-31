@@ -163,6 +163,10 @@ impl GarageRuntime {
         self.area.interaction.explosions.query(&self.physics, blast);
         for i in 0..self.area.interaction.explosions.hits().len() {
             let (collider, power) = self.area.interaction.explosions.hits()[i];
+            // A chained blast in this loop removes its imported tank body and colliders.
+            if self.physics.rapier().colliders.get(collider).is_none() {
+                continue;
+            }
             let breakables = &mut self.stream.breakables;
             if let Some(target) = breakables.target_of(&self.physics, collider) {
                 breakables.try_break_explosion(&reference.breakables, target, power);

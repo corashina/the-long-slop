@@ -442,6 +442,10 @@ impl WorldStream {
         let mut changes = self.changes.generated_records();
         for (key, item) in items.generated_bindings() {
             let object = super::ObjectKey::Generated(key.clone());
+            if content_bindings::removed_child(item.id, items) {
+                changes.forget(&object);
+                continue;
+            }
             let owner = self
                 .contents
                 .active
@@ -2363,11 +2367,13 @@ impl WorldStream {
             .retain_requests(&self.wanted_structures, &self.replay_roots);
         let metrics = self.metrics();
         let pending = 32usize.saturating_sub(metrics.pending_work);
-        let limit = 32usize.min(
-            self.limits
-                .objects
-                .saturating_sub(metrics.generated_objects),
-        );
+        // The step paces new contents. One source evaluation (a building with its Halloween
+        // bats) can pass the pace: only the object budget caps it.
+        let budget = self
+            .limits
+            .objects
+            .saturating_sub(metrics.generated_objects);
+        let limit = 32usize.min(budget);
         if limit == 0 {
             if !self
                 .contents
@@ -2407,6 +2413,7 @@ impl WorldStream {
             &self.building_cables,
             [self.request.player, self.request.vehicle],
             limit,
+            budget,
             pending,
             reservation,
         ) {

@@ -228,7 +228,10 @@ impl ExplosionState {
     /// `AddExplosionForce(2 * force)` on each dynamic body of the last query but the player.
     pub fn push(&self, physics: &mut PhysicsWorld, blast: &Blast, player: Option<RigidBodyHandle>) {
         for &body in &self.bodies {
-            let rb = &physics.rapier().bodies[body];
+            // A chained blast removes its imported tank body.
+            let Some(rb) = physics.rapier().bodies.get(body) else {
+                continue;
+            };
             if Some(body) == player || !rb.is_dynamic() {
                 continue;
             }

@@ -279,7 +279,11 @@ impl SaveSnapshot {
             let source_item = reference.items.iter().find(|i| i.id == id).unwrap();
             let detachable = reference.parts.iter().any(|part| part.item == id)
                 || reference.wheel_parts.iter().any(|part| part.item == id);
-            if let Some(owner) = source_item.attached_to.filter(|_| !detachable) {
+            // A destroyed item (an exploded can and its cap) leaves its owner.
+            if let Some(owner) = source_item
+                .attached_to
+                .filter(|_| !detachable && !item.removed)
+            {
                 links(
                     matches!(&item.location, ItemLocationSave::Attached { owner: saved_owner }
                         if ids.item(saved_owner).ok() == Some(owner)),

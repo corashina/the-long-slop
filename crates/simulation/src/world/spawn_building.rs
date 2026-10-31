@@ -81,6 +81,19 @@ impl SpawnEvaluation<'_> {
                         .component(self.reference, target, "tosaveitemscript")?
                 {
                     self.start_save(&child, save, 0)?;
+                    // The bat is a world item: publish it as content.
+                    self.push(SpawnedContent {
+                        inputs: super::spawn_state::SpawnInitialization::default(),
+                        placement: child.clone(),
+                        appearance: Vec::new(),
+                        cable: Vec::new(),
+                        lights: Vec::new(),
+                        fluid: None,
+                        tanks: Vec::new(),
+                        buried: flag(save.fields, "buried")?,
+                        distance_offset: self.distance_offset(&child, save)?,
+                        ammo: None,
+                    })?;
                 }
                 self.queue_start(child, None);
             }

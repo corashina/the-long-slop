@@ -9,6 +9,14 @@ use crate::vehicle::{PhysicsWorld, STEP_SURFACE_MASK, from_rapier, to_rapier};
 use crate::world::spawn_rules::*;
 use crate::world::{ObjectKey, changes};
 use rapier3d::prelude::ActiveEvents;
+/// A destroyed child item (a bottle cap): its removed parent instance record covers it.
+pub(super) fn removed_child(id: crate::reference::ItemId, items: &ItemStore) -> bool {
+    items.get(id).is_some_and(|s| s.removed)
+        && items
+            .parent(id)
+            .and_then(|p| items.get(p))
+            .is_some_and(|p| p.removed)
+}
 impl WorldStream {
     pub fn initialize_imported_changes(
         &mut self,
@@ -103,6 +111,10 @@ impl WorldStream {
         physics: &PhysicsWorld,
     ) {
         while let Some(id) = items.take_dirty() {
+            if removed_child(id, items) {
+                self.changes.forget(&items.object_key(id));
+                continue;
+            }
             if self
                 .contents
                 .active

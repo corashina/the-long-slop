@@ -578,12 +578,10 @@ impl GarageRuntime {
                 }
             })
             .collect();
-        for item in self
-            .area
-            .items
-            .iter()
-            .filter(|i| !matches!(i.location, crate::interaction::items::ItemLocation::World))
-        {
+        for item in self.area.items.iter().filter(|i| {
+            // A destroyed child (a bottle cap) goes with its removed owner.
+            !i.removed && !matches!(i.location, crate::interaction::items::ItemLocation::World)
+        }) {
             let key = self.area.items.object_key(item.id);
             if matches!(key, crate::world::ObjectKey::Generated(_)) {
                 required.push(key);

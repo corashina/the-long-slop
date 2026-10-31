@@ -364,6 +364,7 @@ impl SourceContents {
         cables: &[(GeneratedId, Vec<super::NodeAppearance>)],
         focus: [[f64; 3]; 2],
         limit: usize,
+        budget: usize,
         pending: usize,
         staging: usize,
     ) -> Result<(), ReferenceError> {
@@ -384,7 +385,8 @@ impl SourceContents {
             if remaining == 0 || available == 0 {
                 return Ok(());
             }
-            if !self.advance_deferred(reference, remaining, available)? {
+            let cap = budget.saturating_sub(self.active.len().saturating_sub(initial_count));
+            if !self.advance_deferred(reference, remaining, cap, available)? {
                 return Ok(());
             }
         }
@@ -492,13 +494,14 @@ impl SourceContents {
                     "Changed object has no retained root initialization boundary".into(),
                 ));
             }
+            let cap = budget.saturating_sub(self.active.len().saturating_sub(initial_count));
             let evaluate = |random: &mut super::UnityRandom,
                             context: super::SpawnContext,
                             pools: &mut Vec<super::spawn_state::PaintingPool>,
                             initialization: &super::spawn_state::SpawnInitialization,
                             staging: usize| {
                 let mut e =
-                    SpawnEvaluation::new(reference, &self.rules, random, context, pools, limit);
+                    SpawnEvaluation::new(reference, &self.rules, random, context, pools, cap);
                 e.staging = staging;
                 e.admit_initialization(parent)?;
                 e.initialization = initialization.clone();
@@ -682,6 +685,7 @@ impl SourceContents {
             self.deferred
                 .try_reserve_exact(1)
                 .map_err(|_| ReferenceError("Source continuation allocation failed".into()))?;
+            let cap = budget.saturating_sub(self.active.len().saturating_sub(before_count));
             let (output, chance, deferred, initialization) = self.state.invoke(
                 &parent.id,
                 source,
@@ -691,7 +695,7 @@ impl SourceContents {
                 &cursor.inputs,
                 |random, context, pools, initialization, staging| {
                     let mut evaluation =
-                        SpawnEvaluation::new(reference, &self.rules, random, context, pools, limit);
+                        SpawnEvaluation::new(reference, &self.rules, random, context, pools, cap);
                     evaluation.staging = staging;
                     evaluation.admit_initialization(parent)?;
                     evaluation.initialization = initialization.clone();
@@ -776,6 +780,7 @@ impl SourceContents {
         &mut self,
         reference: &WorldReference,
         limit: usize,
+        cap: usize,
         staging: usize,
     ) -> Result<bool, ReferenceError> {
         let Some(index) = self.deferred.iter().position(|b| b.eligible <= self.update) else {
@@ -819,7 +824,7 @@ impl SourceContents {
             &batch.inputs,
             |random, context, pools, initialization, staging| {
                 let mut evaluation =
-                    SpawnEvaluation::new(reference, &self.rules, random, context, pools, limit);
+                    SpawnEvaluation::new(reference, &self.rules, random, context, pools, cap);
                 evaluation.staging = staging;
                 evaluation.admit_initialization(parent)?;
                 evaluation.initialization = initialization.clone();
@@ -1580,6 +1585,7 @@ mod tests {
                 1,
                 1,
                 1,
+                1,
             )
             .unwrap();
         assert_eq!(scans.production_scans(), [5, 5, 5, 5]);
@@ -1612,6 +1618,7 @@ mod tests {
                 &[],
                 &[],
                 [[0.; 3]; 2],
+                128,
                 128,
                 128,
                 32 * 1024 * 1024,
@@ -1680,6 +1687,7 @@ mod tests {
                 [[0.; 3]; 2],
                 1,
                 1,
+                1,
                 staging - 1,
             )
             .unwrap_err();
@@ -1698,6 +1706,7 @@ mod tests {
                 &[],
                 &[],
                 [[0.; 3]; 2],
+                1,
                 1,
                 1,
                 staging,

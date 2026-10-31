@@ -62,17 +62,24 @@ fn stop(run: &mut GarageRuntime, reference: &ReferenceManifest, path: &[[f64; 3]
     park(run, reference, path[index]);
 }
 
-/// A loose generated world item near the focus that is not yet edited.
-fn loose_generated(run: &GarageRuntime, focus: [f64; 3]) -> Option<(ObjectKey, ItemId)> {
+/// Generated world contents near a road stop: building items lie about 90 m off the road.
+/// The start car and its parts are startup items.
+fn roadside(run: &GarageRuntime, focus: [f64; 3]) -> impl Iterator<Item = (ObjectKey, ItemId)> {
     run.area
         .items
         .generated_bindings()
-        .filter(|(_, item)| item.location == ItemLocation::World && item.body.is_some())
-        .map(|(key, item)| (ObjectKey::Generated(key.clone()), item.id))
-        .filter(|(key, id)| {
-            run.stream.changes.get(key).is_none() && horizontal(absolute(run, *id), focus) < 60.
+        .filter(|(key, item)| {
+            key.layer != crate::world::WorldLayer::Startup
+                && item.location == ItemLocation::World
+                && item.body.is_some()
         })
-        .min_by_key(|(_, id)| horizontal(absolute(run, *id), focus) as i64)
+        .map(|(key, item)| (ObjectKey::Generated(key.clone()), item.id))
+        .filter(move |(_, id)| horizontal(absolute(run, *id), focus) < 150.)
+}
+
+/// The nearest loose generated world item near the focus.
+fn loose_generated(run: &GarageRuntime, focus: [f64; 3]) -> Option<(ObjectKey, ItemId)> {
+    roadside(run, focus).min_by_key(|(_, id)| horizontal(absolute(run, *id), focus) as i64)
 }
 
 fn history(run: &GarageRuntime) -> (usize, usize, usize) {
@@ -94,7 +101,7 @@ fn w02_long_trip_keeps_far_edits() {
     let started = std::time::Instant::now();
     // Edited items: (stop index, key, rest position).
     let mut edited: Vec<(usize, ObjectKey, [f64; 3])> = Vec::new();
-    // Untouched generated items near one stop after 15 km.
+    // Other generated items near one stop after 15 km.
     let mut building: Option<(usize, Vec<(ObjectKey, [f64; 3])>)> = None;
     for index in 0..path.len() {
         stop(&mut run, &reference, &path, index);
@@ -119,16 +126,10 @@ fn w02_long_trip_keeps_far_edits() {
             }
         }
         if building.is_none() && km >= 15. {
-            let near: Vec<_> = run
-                .area
-                .items
-                .generated_bindings()
-                .filter(|(_, item)| item.body.is_some())
-                .map(|(key, item)| (ObjectKey::Generated(key.clone()), item.id))
-                .filter(|(key, id)| {
-                    run.stream.changes.get(key).is_none()
-                        && horizontal(absolute(&run, *id), path[index]) < 60.
-                })
+            // New building items still fall when the stop loads.
+            seconds(&mut run, &reference, 3.);
+            let near: Vec<_> = roadside(&run, path[index])
+                .filter(|(key, _)| edited.iter().all(|(_, k, _)| k != key))
                 .map(|(key, id)| (key, absolute(&run, id)))
                 .collect();
             if !near.is_empty() {
@@ -173,7 +174,11 @@ fn w02_long_trip_keeps_far_edits() {
             .items
             .resolve_key(key)
             .unwrap_or_else(|| panic!("revisited building lost {key:?}"));
-        assert!(horizontal(absolute(&run, id), *position) < 0.3);
+        let now = absolute(&run, id);
+        assert!(
+            horizontal(now, *position) < 0.3,
+            "revisited {key:?} {position:?} -> {now:?}"
+        );
     }
     for (index, key, rest) in edited.iter().rev() {
         stop(&mut run, &reference, &path, *index);
@@ -210,8 +215,8 @@ fn w02_garage_can_returns_after_far_trip() {
         .find(|i| i.name.starts_with("benzineskanna"))
         .expect("20 L can")
         .id;
-    // Drop the can beside the road 1 km out.
-    let drop = 4;
+    // Drop the can beside the road at the start. A far can is inactive: a move does not reach it.
+    let drop = 0;
     stop(&mut run, &reference, &path, drop);
     let body = run.area.items.get(can).unwrap().body.unwrap();
     let car = run
@@ -229,7 +234,7 @@ fn w02_garage_can_returns_after_far_trip() {
     run.physics.refresh_queries();
     seconds(&mut run, &reference, 4.);
     let rest = absolute(&run, can);
-    // Drive 2 km further.
+    // Drive about 3 km out.
     for index in drop + 1..path.len() {
         stop(&mut run, &reference, &path, index);
     }

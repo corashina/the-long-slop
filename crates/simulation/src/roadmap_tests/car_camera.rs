@@ -1,7 +1,6 @@
 //! ROADMAP test pass: Car camera and crash damage (CC rows).
 use crate::interaction::guns::Strike;
 use crate::interaction::items::ItemLocation;
-use crate::reference::ItemId;
 use crate::simulation::FIXED_DT;
 use crate::world::stream::tests::kit::*;
 use rapier3d::math::Vector;
@@ -22,26 +21,8 @@ fn tp_cc14_a_tank_blast_next_to_a_car_knocks_parts_off() {
     };
     let key = run.vehicle.clone().unwrap();
     let car = run.physics.snapshot(&key).pose.position;
-    // The explosive garage can.
-    let fluids = run.area.interaction.explosions.explosive_fluids();
-    let can: ItemId = reference
-        .tanks
-        .iter()
-        .filter(|t| t.role == crate::reference::TankRole::Portable)
-        .map(|t| t.item)
-        .find(|&id| {
-            let state = run.area.items.get(id).unwrap();
-            run.area.interaction.tank_explosion(id).is_some_and(|e| {
-                crate::interaction::explosions::tank_factor(
-                    e,
-                    state.fluid.as_ref().unwrap(),
-                    fluids,
-                    1e6,
-                )
-                .is_some()
-            })
-        })
-        .expect("an explosive garage can");
+    // The full garage can.
+    let can = super::weapons::garage_can(&run, &reference);
     let body = run.area.items.get(can).unwrap().body.unwrap();
     run.physics.edit_body(body, |b| {
         b.set_translation(Vector::from_array(car) + Vector::new(0., 1.5, 0.), true);
