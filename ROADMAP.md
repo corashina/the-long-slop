@@ -59,7 +59,12 @@ Known failures on master c0da737f (2026-10-30 browser retest), fix before the ne
 - W6: `tp_w6_building_keeps_the_pole_with_the_nearest_target`. A building links to the pole whose target 0 is nearest, not the pole with the nearest target (`roadGenScript.CheckCableConnections`).
 - W12: `tp_w12_dig_up_refuse_pickup_and_save`. A buried item loads with a dynamic body. The source freezes it.
 - W13: `tp_w13_detector_beeps_near_metal_and_saves_on`. A metal detector saved on loads off.
-- W15: `w02_long_trip_keeps_far_edits`. The required publication stalls after the car moves out.
+- W15, SA2: `w02_long_trip_keeps_far_edits`, `w02_garage_can_returns_after_far_trip`. The required publication stalls after the car moves out.
+- MC2 on the road: `tp_sa1_fill_start_drive_return_save_reload`. The Lada on the road, engine running in gear 2 at 2427 rpm, moves 0 m. MC2 is not only the garage floor.
+- CP17: `tp_cp17_loot_tool_state_saves_and_streams`. After save and load, a loot spray can has 100 paint again and its default color.
+- CP12: `tp_cp12_roadside_part_keeps_paint_and_repair`. Paint on a placed bus part stays live and after a 3 km move. Then save fails with "Invalid source integer". A save before the paint works.
+- WD19: `tp_wd19_cactus_breaks_once_and_stays`. A car hit, a shot and a blast break cacti once, with one gib each, and they stay. After an 8 km move the broken cactus is still bound, so its area does not stream in again.
+- WD2: `tp_wd2_shovel_breaks_a_building_lamp`. The shovel breaks the lamps and they stay dark. Save and load at the Mansion: the restore stays pending.
 - CR2: `tp_cr2_halloween_bats_near_buildings`. On Halloween, the area near the 2nd road building (about 14.6 km out) fails with "Generated condition: state". The same area loads in June.
 - W17: `tp_w17_far_move_to_the_first_gas_station_loads`. A far move to the first gas station on the road (about 7.7 km out) never loads: the road plan does not finish.
 - CP5, CP6: `r05_cargo_locks_in_trunk`. The driver cannot exit the Lada in the garage (BL), so the cargo checks do not run.
@@ -76,13 +81,11 @@ Blocked checks. Each waits for the fix of its bug. Run them in the next build's 
 
 - SA1: Play the garage loop in the browser: repair, fill, start, drive out, return, save, reload.
 - SA2: Check the 20 L can stays on the ground after drive-out and return.
-- SA10: Garage rest: the garage barrel and the wire brush stay still. Drive the Lada and check that parked cars and dropped items still settle and sleep.
+- SA10: Drive the Lada and check that parked cars and dropped items still settle and sleep.
 - CP4: Siphon hose: first check the garage hose spawns clear of the walls. Attach it to the Lada tank and a can. Siphon by height, drain with LMB, coil with R, store it, tear it off by driving.
-- CP10: Repair a tire. The HUD condition and the wheel grip follow it.
 - CP12: Paint and brush a roadside car part. Drive away until it unloads, come back: the part keeps its look. Save and load: it still keeps it.
 - CP17: Save and load. Loot tool paint left, color and wear stay. Drive away and back: they stay.
 - W15: Drop an item, drive about 10 km out and back, save and reload. The item stays where it was dropped.
-- PB5: Drive the Lada. Use the horn, lights, ignition (tap and hold), handbrake and gear stick: a hand moves to each. Press gas, brake and clutch: the feet move to the pedals.
 - AR3: Drive the Lada at speed. The dashboard, wheel and hands stay sharp. The road and terrain behind them have no ghost copies.
 - AR12: Park three cars near the garage. Each car body reflects its own surroundings, and the reflections update as the cars and the sun move.
 
@@ -127,7 +130,6 @@ Prepare once:
 
 ### World and terrain
 
-5. Sandstorms: spawn a storm near the player with sandbox `storm(50)`. Check sky, fog, light, sound and dust, and that dust stops inside buildings and cars. Check that wind does not move items inside a car. Check the F3 storm line.
 6. Power cables: check poles link to the next pole on curves and tilted poles, road buildings and the home link to a pole, and the rope meshes are not flipped.
 12. Dig a buried item up with the shovel. It must lift, become loose, and then allow pickup. A buried item must refuse pickup. Save and load with an item buried and one dug up.
 13. Metal detector: turn it on and off with use. Check the beep pitch and volume and the needle near metal, buried metal, and behind a wall. Save and load with it on.
@@ -136,25 +138,17 @@ Prepare once:
 ### Player body and outfit
 
 6. Use doors and handles. Push a car on foot and from a seat.
-7. Carry a two-hand item.
-8. Hold Left Alt: the hand points at the aimed surface. Rub dirt off a car and wash a wash trigger. Hold Left Alt at the sky: the hand waves.
+8. Hold Left Alt to rub dirt off a car and to wash a wash trigger.
 14. Worn items are hidden in first person but cast shadows. The worn pumpkin inner mesh stays visible, as in the source.
 21. The dark lens (profile 0) dims the view by 2 stops.
-23. Lenses with the flare flag hide the sun flare. Other lenses keep it.
-25. Take the glasses off: the tint clears. Die with them on: the tint clears and the death effect fades in.
-26. Save and load with the glasses worn: the tint comes back. Read the console for a warning about more than one active lens.
 
 ### Weapons and damage
 
 1. Drop and throw beer bottles, the vase and a box. Soft drops keep them whole. Hard hits break them with pieces and a break sound. The pieces scatter and fade.
 2. Hit a building lamp with the shovel. It goes dark and stays dark when switched. Save and load: it stays broken.
 3. Swing the katana, crowbar, fly swatter and leg with each attack key. Each plays its own animation and sounds and breaks a bottle. The hands follow the weapon grips.
-5. Hit a sausage with the shovel or a hurtFood weapon: it splits into pieces. Save and load: the pieces keep their bites.
-13. Shoot metal, wood, sand, glass and flesh: bullet holes show with the right texture, face out, move with items and fade per lifetime. Check the first hole for a hitch.
 14. Shoot a world fuel can or tank with gas, oil or diesel over 40%. It explodes with particles and sound, breaks nearby bottles, pushes items and sets off a second tank. Save and load: the exploded items stay gone.
 
 ### Creatures
 
 2. Bats: set the PC date between 15 Oct and 15 Nov, start a new game and drive to a gas station. In 65% of stations, 5 to 30 bats fly near it, flap and squeak. Pick one up: it keeps squeaking and does not fly out of the hand. Save and load near the bats.
-10. A bite of a big evil rabbit damages loose items and other rabbits near the bite.
-12. Start a car engine near rabbits. Normal rabbits flee from it.

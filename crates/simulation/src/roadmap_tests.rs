@@ -1,6 +1,8 @@
 //! Headless tests of the ROADMAP test pass rows, one module per section. See `roadmap_tests/README.md`.
 #[path = "roadmap_tests/advanced_rendering.rs"]
 mod advanced_rendering;
+#[path = "roadmap_tests/blocked.rs"]
+mod blocked;
 #[path = "roadmap_tests/car_camera.rs"]
 mod car_camera;
 #[path = "roadmap_tests/car_parts.rs"]
@@ -15,6 +17,8 @@ mod languages;
 mod more_cars;
 #[path = "roadmap_tests/multiplayer.rs"]
 mod multiplayer;
+#[path = "roadmap_tests/outfit.rs"]
+mod outfit;
 #[path = "roadmap_tests/player_body.rs"]
 mod player_body;
 #[path = "roadmap_tests/player_movement.rs"]

@@ -727,3 +727,166 @@ fn tp_cr2_halloween_bats_near_buildings() {
     let tour = bat_tour(&mut run, &reference, 4);
     assert!(tour.iter().all(|(_, b)| b.is_empty()), "no bats in June");
 }
+
+/// CR10. Source `playerdeathtriggerscript.OnTriggerStay` on the bite trigger of a big evil
+/// rabbit: `TryBreak(damageBreakable * dt)` for other rabbits and for loose breakable items.
+#[test]
+#[ignore = "requires the installed source export"]
+fn tp_cr10_big_bite_hurts_rabbits_and_items() {
+    use crate::damage::BreakKind;
+    let (reference, mut run) = outdoors();
+    // A tumbleweed is a loose breakable item.
+    let weed = act(
+        &mut run,
+        &reference,
+        &json!({"action": "spawn", "name": "thumbleweed", "forward": 3.}).to_string(),
+    );
+    let item = crate::reference::ItemId(weed[0].as_u64().unwrap() as u32);
+    seconds(&mut run, &reference, 1.);
+    let target = run
+        .stream
+        .breakables
+        .targets()
+        .iter()
+        .find(|t| t.kind == BreakKind::Item(item))
+        .expect("the tumbleweed binds its breakablescript");
+    let item_health = target.health.health;
+    let decreases = reference.breakables[target.record].decrease_after_attack;
+    let e = &reference.creatures.rabbit.evil;
+    assert!(e.trigger.damage_breakable > 0.);
+    seconds(&mut run, &reference, e.target_forget_time + 1.);
+    let evil = spawn_rabbit(&mut run, &reference, true, 6.);
+    let victim = spawn_rabbit(&mut run, &reference, false, 12.);
+    let victim_health = run
+        .creatures
+        .rabbits()
+        .find(|r| r.id == victim)
+        .unwrap()
+        .health
+        .health;
+    let mut bites = 0;
+    for _ in 0..steps(30.) {
+        let Some(attacker) = run.creatures.rabbits().find(|r| r.id == evil) else {
+            break;
+        };
+        if attacker.evil.trigger {
+            bites += 1;
+            // Hold the victim and the item in the bite trigger.
+            let handle = attacker.trigger.as_ref().unwrap().handle;
+            assert!(
+                matches!(
+                    trigger_role(&run, handle),
+                    Some(crate::reference::TriggerRole::Hazard { damage_breakable, .. })
+                        if damage_breakable == e.trigger.damage_breakable
+                ),
+                "the bite trigger has the hazard role"
+            );
+            let at = run.physics.rapier().colliders[handle]
+                .position()
+                .translation;
+            let body = run
+                .creatures
+                .rabbits()
+                .find(|r| r.id == victim && r.alive)
+                .map(|r| r.body)
+                .filter(|b| run.physics.rapier().bodies.get(*b).is_some());
+            if let Some(body) = body {
+                run.physics.edit_body(body, |b| {
+                    let mut pose = *b.position();
+                    pose.translation = at;
+                    b.set_position(pose, true);
+                    b.wake_up(true);
+                });
+            }
+            crate::world::stream::tests::melee::place(&mut run, item, at);
+        }
+        frame(&mut run, &reference);
+        if run.needs_output().dead {
+            break;
+        }
+    }
+    assert!(bites > 0, "the big evil rabbit bites");
+    let hurt = run
+        .creatures
+        .rabbits()
+        .find(|r| r.id == victim)
+        .is_none_or(|r| !r.alive || r.health.health < victim_health);
+    assert!(hurt, "the bite hurts the other rabbit");
+    // Source TryBreak(float): health goes down only with decreaseAfterAttack. Without it, only a
+    // single hit of the full health breaks the item.
+    let t = run
+        .stream
+        .breakables
+        .targets()
+        .iter()
+        .find(|t| t.kind == BreakKind::Item(item))
+        .expect("the tumbleweed stays bound");
+    eprintln!(
+        "tumbleweed decreases {decreases}: {item_health} -> {}",
+        t.health.health
+    );
+    if decreases {
+        assert!(
+            t.destroyed || t.health.health < item_health,
+            "the bite damages the item"
+        );
+    } else {
+        assert!(
+            !t.destroyed && t.health.health == item_health,
+            "TryBreak keeps its health"
+        );
+    }
+}
+
+/// CR12. Source `stimulscript.CheckAudioSources` on the engine sound: a running engine makes a
+/// `Threat` stimulus near the car. The flight from a threat is `a_threat_sends_the_rabbit_away`.
+#[test]
+#[ignore = "requires the installed source export"]
+fn tp_cr12_running_engine_makes_a_threat_stimulus() {
+    use crate::world::stream::tests::car_types::{fill_fluids, hold, running};
+    let (reference, mut run) = outdoors();
+    act(
+        &mut run,
+        &reference,
+        &json!({"action": "seat", "seat": "driver"}).to_string(),
+    );
+    seconds(&mut run, &reference, 1.);
+    let key = run.vehicle.clone().unwrap();
+    let car = Vector::from_array(run.physics.snapshot(&key).pose.position);
+    let near_car = |run: &mut GarageRuntime| {
+        run.creatures
+            .bound_sounds()
+            .iter()
+            .filter(|s| (s.position - car).length() < 5.)
+            .map(|s| s.value)
+            .fold(0f32, f32::max)
+    };
+    seconds(&mut run, &reference, 1.);
+    assert_eq!(near_car(&mut run), 0., "a stopped engine is quiet");
+    fill_fluids(&mut run, &key);
+    let started = hold(
+        &mut run,
+        &reference,
+        keys::IGNITION,
+        0,
+        keys::IGNITION,
+        20.,
+        |run| running(run, &key),
+    );
+    assert!(started, "the engine starts");
+    frame_with(
+        &mut run,
+        &reference,
+        FrameInput {
+            released: keys::IGNITION,
+            ..Default::default()
+        },
+    );
+    let mut value = 0f32;
+    for _ in 0..steps(3.) {
+        frame(&mut run, &reference);
+        value = value.max(near_car(&mut run));
+    }
+    assert!(running(&run, &key));
+    assert!(value > 0., "the running engine makes a sound stimulus");
+}

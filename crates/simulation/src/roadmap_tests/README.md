@@ -36,3 +36,5 @@ Each test stays under 60 s in release. The kit uses the default game seed and th
 | `advanced_rendering` | AR | Advanced rendering |
 | `multiplayer` | MP | Multiplayer |
 | `known_failures` | K | Known failures |
+| `blocked` | SA, CP, PB, WD | Rows from the blocked checks |
+| `outfit` | PB | Hands and glasses |
