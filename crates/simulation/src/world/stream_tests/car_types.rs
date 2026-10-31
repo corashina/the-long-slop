@@ -529,8 +529,10 @@ fn garage_start_car_drives_in_automatic() {
         for pair in world.narrow_phase.contact_pairs() {
             let parent = |c: rapier3d::prelude::ColliderHandle| world.colliders[c].parent();
             let other = if parent(pair.collider1) == Some(chassis) {
+                eprintln!("chassis side {:?}", pair.collider1);
                 pair.collider2
             } else if parent(pair.collider2) == Some(chassis) {
+                eprintln!("chassis side {:?}", pair.collider2);
                 pair.collider1
             } else {
                 continue;
@@ -587,6 +589,40 @@ fn garage_start_car_drives_in_automatic() {
                         .collect::<String>(),
                 );
             }
+        }
+        for &handle in body.colliders() {
+            let c = &world.colliders[handle];
+            let aabb = c.compute_aabb();
+            eprintln!(
+                "chassis collider {handle:?} sensor {} enabled {} groups {:#x}/{:#x} solver {:#x}/{:#x} user {:#x} aabb {:?}..{:?} shape {:?}",
+                c.is_sensor(),
+                c.is_enabled(),
+                c.collision_groups().memberships.bits(),
+                c.collision_groups().filter.bits(),
+                c.solver_groups().memberships.bits(),
+                c.solver_groups().filter.bits(),
+                c.user_data,
+                aabb.mins,
+                aabb.maxs,
+                c.shape().shape_type(),
+            );
+        }
+        let prototype = &reference.world.prototypes[run.vehicles[&key].prototype];
+        for (i, c) in prototype.colliders.iter().enumerate() {
+            let node = &prototype.nodes[c.node as usize];
+            eprintln!(
+                "prototype collider {i}: {} layer {} active {} enabled {} trigger {} body {:?} geometry {}",
+                node.name,
+                node.layer,
+                node.active,
+                c.enabled,
+                c.trigger,
+                c.body,
+                format!("{:?}", c.geometry)
+                    .chars()
+                    .take(160)
+                    .collect::<String>(),
+            );
         }
         let pose = run.physics.snapshot(&key).pose;
         eprintln!(
