@@ -1,5 +1,5 @@
 //! V05: the Lada tows the small trailer on its hitch. The hitch survives save and load.
-use super::drive_out::frame;
+use super::kit::*;
 use super::*;
 use crate::reference::ItemId;
 use crate::simulation::{DriveInput, FIXED_DT};
@@ -156,9 +156,7 @@ fn tow(run: &mut GarageRuntime, key: &ObjectKey, seconds: f32, input: DriveInput
 #[ignore = "requires the installed source export"]
 fn lada_tows_the_trailer_and_the_hitch_saves() {
     let (reference, car, trailer) = towing_reference();
-    let stamp = roadside_stamp(&reference);
-    let mut run = GarageRuntime::new_default(&reference).unwrap();
-    prepare_ready(&mut run, &reference);
+    let mut run = ready(&reference);
     run.started = true;
     run.paused = false;
     wait_bound(&mut run, &reference, car, trailer);
@@ -228,30 +226,14 @@ fn lada_tows_the_trailer_and_the_hitch_saves() {
     tow(&mut run, &car_key, 4., brake, 0.);
 
     // Save and load: the grip returns to the car hitch.
-    let snapshot = run
-        .capture_save(&reference, &stamp, "2026-10-26T12:00:00Z")
-        .unwrap();
-    let snapshot: crate::save::SaveSnapshot =
-        serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
-    let mut loaded = GarageRuntime::from_save(
-        &reference,
-        &stamp,
-        &snapshot,
-        crate::world::GameMode::default(),
-        reference.world.draw_distance.default,
-    )
-    .unwrap();
-    for _ in 0..2000 {
-        prepare_ready(&mut loaded, &reference);
-        let grip = loaded.area.items.resolve_key(&grip_key);
-        if loaded.advance_saved_restore(&reference).unwrap()
-            && !loaded.restore_pending()
-            && grip.is_some_and(|g| loaded.area.interaction.hitch.is_hitched(g))
-        {
-            break;
-        }
-    }
-    assert!(!loaded.restore_pending());
+    let snapshot = save(&run, &reference);
+    let mut loaded = open(&reference, &snapshot);
+    restore(&mut loaded, &reference, |l| {
+        l.area
+            .items
+            .resolve_key(&grip_key)
+            .is_some_and(|g| l.area.interaction.hitch.is_hitched(g))
+    });
     let car_item = loaded.area.items.resolve_key(&car_key).expect("loaded car");
     let trailer_item = loaded
         .area

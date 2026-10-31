@@ -21,6 +21,8 @@ mod garage_exit;
 mod guns;
 #[path = "stream_tests/item_seats.rs"]
 mod item_seats;
+#[path = "stream_tests/kit.rs"]
+pub mod kit;
 #[path = "stream_tests/long_trip.rs"]
 mod long_trip;
 #[path = "stream_tests/loot_tools.rs"]
@@ -40,17 +42,7 @@ mod world_conditions;
 
 use super::*;
 use crate::starting_area::GarageRuntime;
-
-fn reference() -> ReferenceManifest {
-    ReferenceManifest::from_runtime_json(
-        &std::fs::read(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../web/assets/reference/manifest.json"
-        ))
-        .unwrap(),
-    )
-    .unwrap()
-}
+use kit::*;
 
 #[test]
 #[ignore = "requires the installed source export"]
@@ -271,140 +263,6 @@ fn structure_publication_uses_nearest_focus_stable_ties_and_revision_guard() {
     }
     assert!(stream.ready_structures.is_empty());
 }
-/// The native adapter charges and hands over one structure claim, as the renderer ledger does.
-fn accept_structure(stream: &mut WorldStream, id: &super::super::GeneratedId) {
-    stream.presentation.pending += 1;
-    stream
-        .accept_structure_renderer(stream.request, id)
-        .unwrap();
-}
-fn views() -> [super::super::RequiredView; 1] {
-    let planes = [
-        [1., 0., 0., 150.],
-        [-1., 0., 0., 150.],
-        [0., 1., 0., 150.],
-        [0., -1., 0., 150.],
-        [0., 0., 1., 150.],
-        [0., 0., -1., 150.],
-    ];
-    [super::super::RequiredView {
-        camera: planes,
-        shadow: crate::reference::shadow_candidates::DirectionalHull::new(planes, [1., 0., 0.])
-            .unwrap(),
-        mask: u32::MAX,
-        light_mask: u32::MAX,
-        origin: [0.; 3],
-    }]
-}
-fn prepare_step(
-    run: &mut GarageRuntime,
-    reference: &ReferenceManifest,
-    surface_claim: &mut Option<(WorldRequest, SurfaceKey)>,
-) {
-    prepare_step_for_views(run, reference, surface_claim, &views());
-}
-fn prepare_step_for_views(
-    run: &mut GarageRuntime,
-    reference: &ReferenceManifest,
-    surface_claim: &mut Option<(WorldRequest, SurfaceKey)>,
-    required_views: &[super::super::RequiredView],
-) {
-    let stream = &mut run.stream;
-    stream.prepare(100.);
-    if stream
-        .ready
-        .as_ref()
-        .is_some_and(|w| !same_request(w.request, stream.request))
-    {
-        if let Some((request, key)) = surface_claim.take() {
-            stream.discard_surface_renderer(request, key).unwrap();
-        }
-    }
-    stream.select_required(required_views);
-    let sources: Vec<_> = reference
-        .world
-        .terrain
-        .materials
-        .iter()
-        .map(|m| m.source.clone())
-        .chain(reference.world.road.prototypes.iter().cloned())
-        .collect();
-    for source in sources {
-        stream.hold_prototype(source.clone()).unwrap();
-        stream.bind_prototype(&source).unwrap();
-    }
-    let placement = stream
-        .wanted_structures
-        .iter()
-        .find(|p| {
-            (stream.structure_required(&p.id)
-                || stream.structure_replay_required(&p.id)
-                || stream.lights.iter().any(|light| {
-                    stream.publication_light(light, &stream.required.lights)
-                        && light.owned_by(&p.id)
-                }))
-                && stream.contents_initialized(&p.id)
-                && !stream.structures.iter().any(|s| s.placement.id == p.id)
-                && !stream.ready_structures.contains(&p.id)
-        })
-        .cloned()
-        // The native adapter reserves one instance claim and no grass child job.
-        .filter(|_| stream.can_request_independent(1));
-    if let Some(p) = placement {
-        stream.hold_prototype(p.prototype.clone()).unwrap();
-        stream.bind_prototype(&p.prototype).unwrap();
-        stream.bind_structure_recipe(&p.prototype).unwrap();
-        accept_structure(stream, &p.id);
-    }
-    if let Some((request, surface)) = stream.prepared_surface() {
-        let key = surface.key;
-        if !stream.ready.as_ref().unwrap().renderer_reserved {
-            stream.reserve_surface_renderer(request, key).unwrap();
-            stream.accept_surface_renderer(request, key).unwrap();
-            *surface_claim = Some((request, key));
-        }
-    }
-    let lights = stream.required.lights.clone();
-    stream.publish(&mut run.physics, &lights).unwrap();
-    if stream.ready.is_none() {
-        *surface_claim = None;
-    }
-    stream
-        .sync_supplies(
-            reference,
-            &mut run.area.items,
-            &mut run.area.interaction,
-            &mut run.physics,
-            &mut run.wheels,
-            &mut run.vehicles,
-            &mut run.powertrain,
-        )
-        .unwrap();
-    assert!(stream.failure.is_none(), "{:?}", stream.failure);
-    run.align_startup(reference, [1, 1]).unwrap();
-}
-
-pub fn prepare_ready(run: &mut GarageRuntime, reference: &ReferenceManifest) {
-    let mut surface_claim = None;
-    for step in 0..2000 {
-        prepare_step(run, reference, &mut surface_claim);
-        if run.stream.required_ready() {
-            if let Some((request, key)) = surface_claim.take() {
-                assert!(!run.stream.required.terrain.contains(&key));
-                assert!(
-                    key.layer != WorldLayer::Road
-                        || !run.stream.required.roads.contains(&(key.unit[0] as u32))
-                );
-                run.stream.discard_surface_renderer(request, key).unwrap();
-            }
-            return;
-        }
-        if step == 1999 {
-            println!("stalled: {}", run.stream.startup_job_audit());
-        }
-    }
-    panic!("required publication did not reach readiness");
-}
 /// The renderer copy answers like the stream after one encoded delta.
 fn assert_renderer_world(stream: &WorldStream) {
     let reference = stream.world_reference().clone();
@@ -510,8 +368,7 @@ fn publish_with_receipts(run: &mut GarageRuntime) {
 #[ignore = "requires the installed source export"]
 fn required_publication_reaches_ready_and_withholds_dependencies() {
     let reference = reference();
-    let mut run = GarageRuntime::new_default(&reference).unwrap();
-    prepare_ready(&mut run, &reference);
+    let mut run = ready(&reference);
     assert!(run.stream.required_ready());
     assert!(run.world_supported());
     assert_renderer_world(&run.stream);
@@ -565,8 +422,7 @@ fn required_publication_reaches_ready_and_withholds_dependencies() {
 #[ignore = "requires the installed source export"]
 fn terrain_sample_matches_published_ground() {
     let reference = reference();
-    let mut run = GarageRuntime::new_default(&reference).unwrap();
-    prepare_ready(&mut run, &reference);
+    let mut run = ready(&reference);
     let player = run.area.player.body_pose(&run.physics).position;
     let mut checked = 0;
     // Both Z signs: a sample with the source Z sign flipped misses one side.
@@ -826,8 +682,7 @@ fn mechanism_binding_gate(run: &mut GarageRuntime, reference: &ReferenceManifest
 #[ignore = "requires the installed source export"]
 fn roadside_owner_controls_keep_state_after_owner_retirement() {
     let reference = reference();
-    let mut run = GarageRuntime::new_default(&reference).unwrap();
-    prepare_ready(&mut run, &reference);
+    let mut run = ready(&reference);
     mechanism_binding_gate(&mut run, &reference);
     let owner = run
         .stream
@@ -990,8 +845,7 @@ fn roadside_owner_controls_keep_state_after_owner_retirement() {
 #[ignore = "requires the installed source export"]
 fn roadside_lamp_state_survives_its_source_owner() {
     let reference = reference();
-    let mut run = GarageRuntime::new_default(&reference).unwrap();
-    prepare_ready(&mut run, &reference);
+    let mut run = ready(&reference);
     let garage_player = run
         .stream
         .origin
@@ -1118,8 +972,7 @@ fn complete_probe_union_preserves_revision_and_fresh_cycles() {
         world::{REQUIRED_VIEW_CAPACITY, RequiredView, RequiredViews},
     };
     let reference = reference();
-    let mut run = GarageRuntime::new_default(&reference).unwrap();
-    prepare_ready(&mut run, &reference);
+    let mut run = ready(&reference);
     let tiny = |center: [f64; 3], mask| {
         let [x, y, z] = center.map(|v| v as f32);
         let planes = [
@@ -1740,8 +1593,7 @@ fn replay_restore_replaces_selection_and_saved_readiness_checks_revision() {
     assert_replay_selection(&candidate);
     assert_eq!(old_replay_keys(&candidate), vec![replacement.clone()]);
     // The active stream owns its selection while the candidate is replaced and dropped.
-    let mut run = GarageRuntime::new_default(&reference).unwrap();
-    prepare_ready(&mut run, &reference);
+    let mut run = ready(&reference);
     mechanism_binding_gate(&mut run, &reference);
     let owner = run
         .stream
@@ -1878,8 +1730,7 @@ fn content_index_matches_linear_lookups() {
 fn road_pole_cable_reaches_the_next_pole() {
     use glam::{Mat4, Quat, Vec3};
     let reference = reference();
-    let mut run = GarageRuntime::new_default(&reference).unwrap();
-    prepare_ready(&mut run, &reference);
+    let mut run = ready(&reference);
     let stream = &mut run.stream;
     let road = stream
         .selected_roads
@@ -1964,8 +1815,7 @@ fn road_pole_cable_reaches_the_next_pole() {
 #[ignore = "requires the installed source export"]
 fn road_building_cable_is_in_building_appearance() {
     let reference = reference();
-    let mut run = GarageRuntime::new_default(&reference).unwrap();
-    prepare_ready(&mut run, &reference);
+    let run = ready(&reference);
     let stream = &run.stream;
     assert!(!stream.building_cables.is_empty());
     for (id, cable) in stream.building_cables.iter().filter(|(_, c)| !c.is_empty()) {
@@ -2003,6 +1853,18 @@ fn publish_decoration_fixture(run: &mut GarageRuntime, placement: Placement) {
     accept_structure(stream, &placement.id);
     stream.plan_revision = stream.request.revision;
     stream.publish_structure(&mut run.physics, &[]).unwrap();
+}
+
+/// A loaded runtime does not generate a fixture. Publish it again, as the first runtime did.
+fn republish_fixture(
+    run: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    placement: &Placement,
+) {
+    prepare_ready(run, reference);
+    publish_decoration_fixture(run, placement.clone());
+    sync_decoration_fixture(run, reference);
+    sync_decoration_fixture(run, reference);
 }
 
 fn sync_decoration_fixture(run: &mut GarageRuntime, reference: &ReferenceManifest) {
@@ -3114,35 +2976,6 @@ fn parked_car_keeps_nearby_item_dynamic() {
     assert!(run.physics.rapier().bodies[body].is_dynamic());
 }
 
-fn roadside_stamp(reference: &ReferenceManifest) -> crate::save::SourceStamp {
-    let digest = std::process::Command::new("sha256sum")
-        .arg(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../web/assets/reference/manifest.json"
-        ))
-        .output()
-        .unwrap();
-    assert!(digest.status.success());
-    crate::save::SourceStamp {
-        app_id: reference.app_id,
-        build_id: reference.build_id,
-        manifest_sha256: String::from_utf8(digest.stdout)
-            .unwrap()
-            .split_whitespace()
-            .next()
-            .unwrap()
-            .into(),
-        source_hashes: reference
-            .source_hashes
-            .iter()
-            .map(|h| crate::save::SourceHash {
-                file: h.file.clone(),
-                sha256: h.sha256.clone(),
-            })
-            .collect(),
-    }
-}
-
 #[test]
 #[ignore = "requires the installed source export"]
 fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
@@ -3151,8 +2984,7 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
 
     let reference = reference();
     let stamp = roadside_stamp(&reference);
-    let mut run = GarageRuntime::new_default(&reference).unwrap();
-    prepare_ready(&mut run, &reference);
+    let mut run = ready(&reference);
     let garage_player = run.area.player.body_pose(&run.physics).position;
     let garage_car = run.physics.snapshot(run.vehicle.as_ref().unwrap()).pose;
     let mut sequence = super::super::BuildingSequence::new(&reference.world, run.stream.seed());
@@ -3959,8 +3791,7 @@ fn roadside_views(stream: &WorldStream) -> [super::super::RequiredView; 1] {
 }
 
 fn g08_ready(reference: &ReferenceManifest) -> GarageRuntime {
-    let mut run = GarageRuntime::new_default(reference).unwrap();
-    prepare_ready(&mut run, reference);
+    let mut run = ready(reference);
     run.sync_world_activity(reference).unwrap();
     run.started = true;
     assert!(run.world_supported());

@@ -1,6 +1,6 @@
 //! X02: a source bottle stays whole after a soft drop, breaks after a hard drop, spawns its gib
 //! once and stays removed after save and load. A broken lamp stays broken after save and load.
-use super::drive_out::{frame, settle};
+use super::kit::*;
 use super::*;
 use crate::damage::BreakKind;
 use crate::interaction::items::ItemLocation;
@@ -36,8 +36,8 @@ fn gib_serials(run: &GarageRuntime, gib: usize, serials: &mut Vec<u32>) {
 #[test]
 #[ignore = "requires the installed source export"]
 fn bottle_breaks_on_a_hard_drop_once_and_stays_removed_after_reload() {
-    let (reference, mut run) = super::garage_controls::load_garage();
-    settle(&mut run, &reference, 1.);
+    let (reference, mut run) = load_garage();
+    seconds(&mut run, &reference, 1.);
     let records = &reference.breakables;
     // A beer bottle (health 6), else the vase (health 5), near the start.
     let (record, item) = run
@@ -75,7 +75,7 @@ fn bottle_breaks_on_a_hard_drop_once_and_stays_removed_after_reload() {
 
     // A 1 m fall is about 4.4 m/s, below health 5 and 6.
     drop_from(&mut run, item, 1.);
-    settle(&mut run, &reference, 2.);
+    seconds(&mut run, &reference, 2.);
     let state = run.area.items.get(item).unwrap();
     assert!(!state.removed, "a 1 m drop keeps health {}", rules.health);
     let mut serials = Vec::new();
@@ -99,30 +99,9 @@ fn bottle_breaks_on_a_hard_drop_once_and_stays_removed_after_reload() {
     );
 
     // Save and load.
-    let stamp = roadside_stamp(&reference);
-    let saved = run
-        .capture_save(&reference, &stamp, "2026-10-26T12:00:00Z")
-        .unwrap();
-    let saved: crate::save::SaveSnapshot =
-        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
-    let mut loaded = GarageRuntime::from_save(
-        &reference,
-        &stamp,
-        &saved,
-        crate::world::GameMode::default(),
-        reference.world.draw_distance.default,
-    )
-    .unwrap();
-    for _ in 0..2000 {
-        prepare_ready(&mut loaded, &reference);
-        if loaded.advance_saved_restore(&reference).unwrap() && !loaded.restore_pending() {
-            break;
-        }
-    }
-    assert!(!loaded.restore_pending());
-    loaded.started = true;
-    loaded.paused = false;
-    settle(&mut loaded, &reference, 1.);
+    let saved = save(&run, &reference);
+    let mut loaded = load(&reference, &saved);
+    seconds(&mut loaded, &reference, 1.);
     assert!(
         loaded
             .area
@@ -177,8 +156,8 @@ fn broken_lamp_bits_survive_the_change_record() {
 #[test]
 #[ignore = "requires the installed source export"]
 fn shovel_broken_lamp_stays_broken_after_reload() {
-    let (reference, mut run) = super::garage_controls::load_garage();
-    settle(&mut run, &reference, 1.);
+    let (reference, mut run) = load_garage();
+    seconds(&mut run, &reference, 1.);
     let records = &reference.breakables;
     // A bound building lamp trigger that Break destroys.
     let target = run
@@ -227,36 +206,15 @@ fn shovel_broken_lamp_stays_broken_after_reload() {
             .try_break_melee(records, target, 10., FIXED_DT);
         frame(&mut run, &reference);
     }
-    settle(&mut run, &reference, 0.5);
+    seconds(&mut run, &reference, 0.5);
     let dark =
         |run: &GarageRuntime| run.stream.contents.broken_lamps(&parent, &source) & lamps == lamps;
     assert!(dark(&run), "the hit lamps are broken");
 
     // Save and load.
-    let stamp = roadside_stamp(&reference);
-    let saved = run
-        .capture_save(&reference, &stamp, "2026-10-26T12:00:00Z")
-        .unwrap();
-    let saved: crate::save::SaveSnapshot =
-        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
-    let mut loaded = GarageRuntime::from_save(
-        &reference,
-        &stamp,
-        &saved,
-        crate::world::GameMode::default(),
-        reference.world.draw_distance.default,
-    )
-    .unwrap();
-    for _ in 0..2000 {
-        prepare_ready(&mut loaded, &reference);
-        if loaded.advance_saved_restore(&reference).unwrap() && !loaded.restore_pending() {
-            break;
-        }
-    }
-    assert!(!loaded.restore_pending());
-    loaded.started = true;
-    loaded.paused = false;
-    settle(&mut loaded, &reference, 1.);
+    let saved = save(&run, &reference);
+    let mut loaded = load(&reference, &saved);
+    seconds(&mut loaded, &reference, 1.);
     assert!(dark(&loaded), "the lamps stay broken");
     let target = loaded
         .stream
@@ -303,8 +261,8 @@ fn spawn_near_player(
 #[test]
 #[ignore = "requires the installed source export"]
 fn tumbleweed_breaks_on_a_hard_drop_and_leaves_the_spawned_list() {
-    let (reference, mut run) = super::garage_controls::load_garage();
-    settle(&mut run, &reference, 1.);
+    let (reference, mut run) = load_garage();
+    seconds(&mut run, &reference, 1.);
     let r = &reference.weather.tumbleweeds;
     let prototype = reference
         .item_prototypes
@@ -312,7 +270,7 @@ fn tumbleweed_breaks_on_a_hard_drop_and_leaves_the_spawned_list() {
         .position(|p| p.item_id == Some(r.item_id))
         .expect("tumbleweed prototype");
     let weed = spawn_near_player(&mut run, &reference, prototype);
-    settle(&mut run, &reference, 2.);
+    seconds(&mut run, &reference, 2.);
     let record = run
         .stream
         .breakables
@@ -356,8 +314,8 @@ fn tumbleweed_breaks_on_a_hard_drop_and_leaves_the_spawned_list() {
 #[test]
 #[ignore = "requires the installed source export"]
 fn spawned_copy_takes_the_hit_sound_of_its_pickup() {
-    let (reference, mut run) = super::garage_controls::load_garage();
-    settle(&mut run, &reference, 1.);
+    let (reference, mut run) = load_garage();
+    seconds(&mut run, &reference, 1.);
     let (prototype, clip) = reference
         .item_prototypes
         .iter()

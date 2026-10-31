@@ -1,12 +1,11 @@
 //! A parked start Lada rests: it stays in place, plays no hits and sleeps.
-use super::drive_out::frame;
-use super::*;
+use super::kit::*;
 use crate::simulation::FIXED_DT;
 
 #[test]
 #[ignore = "requires the installed source export"]
 fn parked_lada_rests() {
-    let (reference, mut run) = garage_controls::load_garage();
+    let (reference, mut run) = load_garage();
     for _ in 0..4000 {
         if !run.vehicles.is_empty() {
             break;
@@ -52,7 +51,7 @@ fn parked_lada_rests() {
 #[test]
 #[ignore = "requires the installed source export"]
 fn garage_items_rest() {
-    let (reference, mut run) = garage_controls::load_garage();
+    let (reference, mut run) = load_garage();
     for _ in 0..(15. / FIXED_DT) as usize {
         frame(&mut run, &reference);
     }

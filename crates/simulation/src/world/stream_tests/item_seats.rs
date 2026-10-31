@@ -79,12 +79,7 @@ fn item_seat_follows_item_body() {
             .is_err(),
         "occupied item refuses pickup"
     );
-    let stamp = roadside_stamp(&reference);
-    let saved = run
-        .capture_save(&reference, &stamp, "2026-10-26T12:00:00Z")
-        .unwrap();
-    let saved: crate::save::SaveSnapshot =
-        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    let saved = save(&run, &reference);
     let seat_save = saved.player.seat.as_ref().expect("saved item seat");
     assert_eq!(
         seat_save.owner,
@@ -96,26 +91,14 @@ fn item_seat_follows_item_body() {
         saved.world.changes.get(&owner).is_some(),
         "seat item change"
     );
-    let mut loaded = GarageRuntime::from_save(
-        &reference,
-        &stamp,
-        &saved,
-        crate::world::GameMode::default(),
-        reference.world.draw_distance.default,
-    )
-    .unwrap();
+    let mut loaded = open(&reference, &saved);
     assert!(loaded.restore_pending());
     assert!(
         !loaded.area.player.seated(),
         "seat waits for the item binding"
     );
-    for _ in 0..2000 {
-        prepare_ready(&mut loaded, &reference);
-        if loaded.advance_saved_restore(&reference).unwrap() && !loaded.restore_pending() {
-            break;
-        }
-    }
-    assert!(!loaded.restore_pending());
+    republish_fixture(&mut loaded, &reference, &placement);
+    restore(&mut loaded, &reference, |_| true);
     assert_eq!(
         loaded.area.player.seat_owner(),
         Some(&SeatOwner::Item(owner.clone()))

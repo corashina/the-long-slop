@@ -1,43 +1,13 @@
 //! P04: leave the starting area and return. Loose items, collision, and re-entry must hold.
+use super::kit::*;
 use super::*;
-use crate::{reference::ItemId, simulation::FrameInput, vehicle::VehiclePose};
+use crate::{reference::ItemId, vehicle::VehiclePose};
 use rapier3d::{
     math::{Rotation, Vector},
     prelude::{QueryFilter, Ray},
 };
 
 const OUTWARD: f64 = 400.;
-
-thread_local! {
-    /// Surface renderer claim kept across frames, as the WASM presentation keeps it.
-    static CLAIM: std::cell::RefCell<Option<(WorldRequest, SurfaceKey)>> = const { std::cell::RefCell::new(None) };
-}
-
-pub(super) fn frame(run: &mut GarageRuntime, reference: &ReferenceManifest) {
-    frame_with(run, reference, FrameInput::default());
-}
-
-pub(super) fn frame_with(
-    run: &mut GarageRuntime,
-    reference: &ReferenceManifest,
-    input: FrameInput,
-) {
-    let mut claim = CLAIM.take();
-    let focus = run
-        .stream
-        .origin
-        .absolute(run.area.player.focus_position(&run.physics));
-    let mut view = views();
-    view[0].origin = focus;
-    prepare_step_for_views(run, reference, &mut claim, &view);
-    CLAIM.set(claim);
-    run.step(reference, input);
-    assert!(
-        run.stream.frame().failure.is_none(),
-        "{:?}",
-        run.stream.frame().failure
-    );
-}
 
 /// Generation follows the focus over several frames. The game also waits here.
 fn wait_supported(run: &mut GarageRuntime, reference: &ReferenceManifest) {
@@ -48,12 +18,6 @@ fn wait_supported(run: &mut GarageRuntime, reference: &ReferenceManifest) {
         frame(run, reference);
     }
     panic!("world support did not return");
-}
-
-pub(super) fn settle(run: &mut GarageRuntime, reference: &ReferenceManifest, seconds: f32) {
-    for _ in 0..(seconds / crate::simulation::FIXED_DT) as usize {
-        frame(run, reference);
-    }
 }
 
 fn request(run: &mut GarageRuntime) {
@@ -288,9 +252,9 @@ fn assert_returned(
 #[test]
 #[ignore = "requires the installed source export"]
 fn p04_drive_out_and_return() {
-    let (reference, mut run) = garage_controls::load_garage();
+    let (reference, mut run) = load_garage();
     // Under-map rescue runs every 2 s. Let rescued items land first.
-    settle(&mut run, &reference, 8.);
+    seconds(&mut run, &reference, 8.);
     let car_start = run.physics.snapshot(run.vehicle.as_ref().unwrap()).pose;
     let car_start_absolute = run.stream.origin.absolute(car_start.position);
     let player_start = run.area.player.body_pose(&run.physics);
@@ -341,7 +305,7 @@ fn p04_drive_out_and_return() {
     request(&mut run);
     prepare_ready(&mut run, &reference);
     park(&mut run, &reference, player_start_absolute);
-    settle(&mut run, &reference, 2.);
+    seconds(&mut run, &reference, 2.);
     assert!(run.area.player.grounded(), "player stands in the garage");
     assert_returned(&run, &before, &all, &enabled, "after the walk");
 
@@ -358,7 +322,7 @@ fn p04_drive_out_and_return() {
         points.len(),
         started.elapsed()
     );
-    settle(&mut run, &reference, 5.);
+    seconds(&mut run, &reference, 5.);
     assert_frozen(&run, &all, "in the car");
 
     // Return and park at the start pose.
@@ -375,7 +339,7 @@ fn p04_drive_out_and_return() {
     run.physics
         .reset_preserving_wheels(run.vehicle.as_ref().unwrap(), start);
     park(&mut run, &reference, car_start_absolute);
-    settle(&mut run, &reference, 2.);
+    seconds(&mut run, &reference, 2.);
     assert_car_resting(&run, "garage");
     assert_returned(&run, &before, &all, &enabled, "after the drive");
 }

@@ -1,6 +1,6 @@
 //! X05: world part conditions repair and paint live, like garage surfaces, and stay after save
 //! and load.
-use super::drive_out::{frame, settle};
+use super::kit::*;
 use super::*;
 use crate::world::ObjectKey;
 
@@ -97,30 +97,9 @@ fn lada_part_paint_and_repair_change_its_appearance_and_save() {
     );
 
     // Save and load.
-    let stamp = roadside_stamp(&reference);
-    let saved = run
-        .capture_save(&reference, &stamp, "2026-10-29T12:00:00Z")
-        .unwrap();
-    let saved: crate::save::SaveSnapshot =
-        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
-    let mut loaded = GarageRuntime::from_save(
-        &reference,
-        &stamp,
-        &saved,
-        crate::world::GameMode::default(),
-        reference.world.draw_distance.default,
-    )
-    .unwrap();
-    for _ in 0..2000 {
-        prepare_ready(&mut loaded, &reference);
-        if loaded.advance_saved_restore(&reference).unwrap() && !loaded.restore_pending() {
-            break;
-        }
-    }
-    assert!(!loaded.restore_pending());
-    loaded.started = true;
-    loaded.paused = false;
-    settle(&mut loaded, &reference, 1.);
+    let saved = save(&run, &reference);
+    let mut loaded = load(&reference, &saved);
+    seconds(&mut loaded, &reference, 1.);
     let content = loaded
         .stream
         .contents

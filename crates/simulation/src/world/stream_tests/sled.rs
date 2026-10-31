@@ -179,27 +179,10 @@ fn sled_slides_steers_and_keeps_its_seat() {
     assert!(run.area.player.enter_item_seat(&seat, &mut run.physics));
     step_sled(&mut run, &mut driving, 0);
     assert!(sled_in_use(&run));
-    let stamp = roadside_stamp(&reference);
-    let saved = run
-        .capture_save(&reference, &stamp, "2026-10-26T12:00:00Z")
-        .unwrap();
-    let saved: crate::save::SaveSnapshot =
-        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
-    let mut loaded = GarageRuntime::from_save(
-        &reference,
-        &stamp,
-        &saved,
-        crate::world::GameMode::default(),
-        reference.world.draw_distance.default,
-    )
-    .unwrap();
-    for _ in 0..2000 {
-        prepare_ready(&mut loaded, &reference);
-        if loaded.advance_saved_restore(&reference).unwrap() && !loaded.restore_pending() {
-            break;
-        }
-    }
-    assert!(!loaded.restore_pending());
+    let saved = save(&run, &reference);
+    let mut loaded = open(&reference, &saved);
+    republish_fixture(&mut loaded, &reference, &placement);
+    restore(&mut loaded, &reference, |_| true);
     assert_eq!(
         loaded.area.player.seat_owner(),
         Some(&SeatOwner::Item(owner.clone()))

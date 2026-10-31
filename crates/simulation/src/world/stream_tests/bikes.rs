@@ -1,6 +1,6 @@
 //! B12: the Bike01 copy kick starts at 10 m/s, then rides with balance on flat ground.
 //! The Bike03 copy pedals from rest, then kick starts its engine.
-use super::drive_out::{frame, frame_with, settle};
+use super::kit::*;
 use super::*;
 use crate::player::SeatOwner;
 use crate::reference::{DrivingAssists, WorldVehicleReference};
@@ -53,8 +53,7 @@ fn seated_bike(
     ordinal: u32,
     pick: impl Fn(&WorldSeatReference) -> bool,
 ) -> (GarageRuntime, ObjectKey) {
-    let mut run = GarageRuntime::new_default(reference).unwrap();
-    prepare_ready(&mut run, reference);
+    let mut run = ready(reference);
     run.started = true;
     run.paused = false;
     run.driving_assists = DrivingAssists {
@@ -99,7 +98,7 @@ fn seated_bike(
         })
         .expect("bike seat");
     assert!(run.area.player.enter_item_seat(&seat, &mut run.physics));
-    settle(&mut run, reference, 2.);
+    seconds(&mut run, reference, 2.);
     assert!(run.physics.wheel_contacts(&key).all(|c| c), "wheels down");
     assert!(!running(&run, &key));
     (run, key)

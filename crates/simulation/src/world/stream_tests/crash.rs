@@ -1,5 +1,5 @@
 //! X09: a fast stop knocks parts off the start Lada, a slow stop does not.
-use super::drive_out::{frame, settle};
+use super::kit::*;
 use crate::interaction::items::ItemLocation;
 use crate::reference::ItemId;
 use crate::starting_area::GarageRuntime;
@@ -14,7 +14,7 @@ fn mounted(run: &GarageRuntime, car: ItemId) -> Vec<ItemId> {
 #[test]
 #[ignore = "requires the installed source export"]
 fn x09_crash_knocks_parts_off() {
-    let (reference, mut run) = super::garage_controls::load_garage();
+    let (reference, mut run) = load_garage();
     let key = run.vehicle.clone().expect("start Lada");
     for _ in 0..2000 {
         if run.vehicles.contains_key(&key) {
@@ -22,7 +22,7 @@ fn x09_crash_knocks_parts_off() {
         }
         frame(&mut run, &reference);
     }
-    settle(&mut run, &reference, 1.);
+    seconds(&mut run, &reference, 1.);
     let car = run.area.items.resolve_key(&key).expect("Lada item");
     let before = mounted(&run, car);
     let mut vehicle = run.vehicles.remove(&key).unwrap();
