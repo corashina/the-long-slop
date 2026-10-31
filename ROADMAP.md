@@ -64,6 +64,7 @@ Known failures on master c0da737f (2026-10-30 browser retest), fix before the ne
 - CP17: `tp_cp17_loot_tool_state_saves_and_streams`. After save and load, a loot spray can has 100 paint again and its default color.
 - CP12: `tp_cp12_roadside_part_keeps_paint_and_repair`. Paint on a placed bus part stays live and after a 3 km move. Then save fails with "Invalid source integer". A save before the paint works.
 - WD19: `tp_wd19_cactus_breaks_once_and_stays`. A car hit, a shot and a blast break cacti once, with one gib each, and they stay. After an 8 km move the broken cactus is still bound, so its area does not stream in again.
+- CP15: `tp_cp13_cp16_loot_tools_work_from_the_hand`. The loot spray paints, shows its color, sprays particles and runs out, but plays no sound. Its prototype tool has no `voice`, so the spray signal never plays and its tool loop never starts.
 - WD2: `tp_wd2_shovel_breaks_a_building_lamp`. The shovel breaks the lamps and they stay dark. Save and load at the Mansion: the restore stays pending.
 - CR2: `tp_cr2_halloween_bats_near_buildings`. On Halloween, the area near the 2nd road building (about 14.6 km out) fails with "Generated condition: state". The same area loads in June.
 - W17: `tp_w17_far_move_to_the_first_gas_station_loads`. A far move to the first gas station on the road (about 7.7 km out) never loads: the road plan does not finish.
@@ -123,10 +124,7 @@ Prepare once:
 8. Brush rust off a Lada part and a roadside car part. Rub dirt off with the sponge. The material changes at once.
 9. Paint a Lada door and a loose part with spray paint. The color changes while you spray.
 11. A state change binds a new material. Check the part does not blink for a frame.
-13. Find a loot wire brush, sponge and spray paint. Pick up each one and hold LMB to use it.
-14. Clean rust and dirt with the loot wire brush and sponge. The brush model moves on the surface, with particles and sound.
 15. Paint a car part with loot spray paint. The can shows its color, sprays particles with sound, and runs out.
-16. Use a loot brush until it wears out. Its scrub part hides and it stops working.
 
 ### World and terrain
 

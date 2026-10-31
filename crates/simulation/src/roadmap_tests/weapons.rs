@@ -46,7 +46,7 @@ pub(super) fn spawn(run: &mut GarageRuntime, reference: &ReferenceManifest, name
 }
 
 /// Runs a sandbox `hand` or `equip` of `name`. Waits while the stream loads it.
-fn take(
+pub(super) fn take(
     run: &mut GarageRuntime,
     reference: &ReferenceManifest,
     action: &str,
@@ -361,7 +361,7 @@ fn tp_wd3_each_melee_weapon_swings_with_each_key_and_breaks_a_bottle() {
 }
 
 /// Drops the item in the hand.
-fn drop_hand(run: &mut GarageRuntime) {
+pub(super) fn drop_hand(run: &mut GarageRuntime) {
     let area = &mut run.area;
     area.interaction
         .equipment
