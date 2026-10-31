@@ -105,7 +105,7 @@ Blocked checks. Each waits for the fix of its bug. Run them in the next build's 
 
 #### Appearance camera: the preview shows only the legs
 
-- PB16: Open Appearance from the start menu and the pause menu. The preview figure shows next to the panel with the export camera and lights. Check the figure pose, the lights and the colors. Changes show at once. Back and Escape save. Reload the page: the outfit stays.
+- PB16: Open Appearance from the start menu and the pause menu. The preview figure shows next to the panel with the export camera and lights. Check the figure pose, the lights and the colors. Changes show at once.
 - PB17: Set Male and Female with custom colors and disabled parts. Check them in game, in the shadow and on the ragdoll. Check the submesh colors of each segment.
 
 #### Guns from equip(): sandbox guns do not load
@@ -271,7 +271,7 @@ Prepare once:
 7. Check the HUD crosshair per gun, and its empty color.
 13. Shoot metal, wood, sand, glass and flesh: bullet holes show with the right texture, face out, move with items and fade per lifetime. Check the first hole for a hitch.
 14. Shoot a world fuel can or tank with gas, oil or diesel over 40%. It explodes with particles and sound, breaks nearby bottles, pushes items and sets off a second tank. Save and load: the exploded items stay gone.
-18. Stand near a blast: sound goes dull, an ear ring plays from the blast side, and both fade. Save and load keeps the ringing. Stand close: the player dies with the ragdoll.
+18. Stand near a blast: sound goes dull and an ear ring plays from the blast side. Stand close: the player dies with the ragdoll.
 
 ### Creatures
 
