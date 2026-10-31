@@ -309,6 +309,7 @@ Prepare once:
 8. Look for shadow acne and gaps at contact points. Tune `BIAS_TEXELS` in `src/presentation/lamp_shadows.rs` if needed.
 9. Stand near 5 or more shadowed lamps: only the 4 nearest cast shadows. No shadow pops when two lamps swap order.
 11. Check the page log for "layout requires ... textures": the lamp atlas adds one texture to each surface pipeline.
+12. At night, stand still near a lit street lamp, then open a door and drive a car past it. The lamp shadows follow each move with no stale shadow. Compare F3 frame time and "GPU ms" with the previous test pass.
 15. Check F3 near four cars with Reflections on and off. Live probes render one 64 px cube face each frame.
 16. Re-export first: the export now has the live mirror records.
 17. Sit in the Lada with Mirrors on. The side and front mirrors show the world behind the car, not flipped.

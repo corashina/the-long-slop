@@ -90,25 +90,62 @@ pub fn lamp_caster(caster: &CasterInput, lamp: &LampSphere) -> bool {
         && gap2 <= lamp.range * lamp.range
 }
 
-/// Replace bits 4..7 of each mask. Returns true when a mask changes.
+/// Write the lamp bits 4..7 of each caster into `lamp_masks` and `masks`.
+/// `lamp_masks` keeps the last lamp bits, because view preparation clears them in `masks`.
+/// Returns the lamp bits that changed for any caster.
 pub fn write_lamp_bits(
     casters: &[CasterInput],
     slots: &[Option<LampSphere>; LAMP_SLOTS],
+    lamp_masks: &mut [u8],
     masks: &mut [u8],
-) -> bool {
-    let mut changed = false;
-    for (caster, mask) in casters.iter().zip(masks.iter_mut()) {
+) -> u8 {
+    let mut changed = 0;
+    for ((caster, last), mask) in casters.iter().zip(lamp_masks).zip(masks) {
         let mut bits = 0u8;
         for (slot, lamp) in slots.iter().enumerate() {
             if lamp.as_ref().is_some_and(|lamp| lamp_caster(caster, lamp)) {
                 bits |= 1 << (LAMP_BIT as usize + slot);
             }
         }
-        let next = (*mask & 0x0f) | bits;
-        changed |= next != *mask;
-        *mask = next;
+        changed |= bits ^ *last;
+        *last = bits;
+        *mask = (*mask & 0x0f) | bits;
     }
     changed
+}
+
+/// Lamp face tiles: 6 for each lamp slot.
+pub const LAMP_FACES: usize = LAMP_SLOTS * 6;
+
+/// What a lamp face tile holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LampFace {
+    /// Face projection, as bits.
+    pub clip_from_world: [u32; 16],
+    pub point: bool,
+    /// Caster content counter of the slot. It changes when the face content would change.
+    pub contents: u64,
+}
+
+/// The face of each lamp tile at its last draw.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LampHistory([Option<LampFace>; LAMP_FACES]);
+impl LampHistory {
+    /// A face draws when the atlas is forced or its tile holds a different face. The tiles keep the drawn faces.
+    /// An unused tile forgets its face: a spot face can cover it.
+    pub fn plan(
+        &mut self,
+        forced: bool,
+        current: &[Option<LampFace>; LAMP_FACES],
+    ) -> [bool; LAMP_FACES] {
+        std::array::from_fn(|tile| {
+            let draw = current[tile].is_some_and(|face| forced || self.0[tile] != Some(face));
+            if draw || current[tile].is_none() {
+                self.0[tile] = current[tile];
+            }
+            draw
+        })
+    }
 }
 
 #[cfg(test)]
@@ -161,10 +198,44 @@ mod tests {
             material_has_caster: true,
         };
         let casters = [caster(1.4, 0), caster(1.6, 0), caster(0., 1)];
+        let mut lamp_masks = [0, 0, 0b1111_0000];
         let mut masks = [0b0001, 0, 0b1111_0000];
         let slots = [None, Some(lamp(0, 0.)), None, None];
-        assert!(write_lamp_bits(&casters, &slots, &mut masks));
+        let changed = write_lamp_bits(&casters, &slots, &mut lamp_masks, &mut masks);
+        assert_eq!(changed, 0b1111_0000);
         assert_eq!(masks, [0b0010_0001, 0, 0]);
-        assert!(!write_lamp_bits(&casters, &slots, &mut masks));
+        // View preparation clears the lamp bits. That is no change.
+        masks = [0b0001, 0, 0];
+        assert_eq!(
+            write_lamp_bits(&casters, &slots, &mut lamp_masks, &mut masks),
+            0
+        );
+        assert_eq!(masks, [0b0010_0001, 0, 0]);
+    }
+
+    #[test]
+    fn unchanged_faces_skip_the_draw() {
+        let face = |contents| {
+            Some(LampFace {
+                clip_from_world: [0; 16],
+                point: true,
+                contents,
+            })
+        };
+        let mut history = LampHistory::default();
+        let mut current = [None; LAMP_FACES];
+        current[0] = face(0);
+        current[1] = face(0);
+        assert_eq!(history.plan(false, &current)[..3], [true, true, false]);
+        assert_eq!(history.plan(false, &current), [false; LAMP_FACES]);
+        // A content change draws the face. A forced plan draws all used faces.
+        current[1] = face(1);
+        assert_eq!(history.plan(false, &current)[..3], [false, true, false]);
+        assert_eq!(history.plan(true, &current)[..3], [true, true, false]);
+        // An unused tile forgets its face.
+        current[1] = None;
+        history.plan(false, &current);
+        current[1] = face(1);
+        assert_eq!(history.plan(false, &current)[..3], [false, true, false]);
     }
 }

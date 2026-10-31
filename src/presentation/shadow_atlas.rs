@@ -12,8 +12,11 @@ use super::{
     surface_views::{SourceSurfaceView, WORLD_VIEWS},
     view_frame::SourceViewFrame,
 };
-use crate::reference::shadow_cadence::{
-    CascadeEpoch, CascadeHistory, CascadeInputs, CascadePlan, plan_cascades as plan_tiles,
+use crate::reference::{
+    lamp_shadows::{LAMP_FACES, LampFace, LampHistory},
+    shadow_cadence::{
+        CascadeEpoch, CascadeHistory, CascadeInputs, CascadePlan, plan_cascades as plan_tiles,
+    },
 };
 use bevy::render::{
     Render, RenderApp, RenderSystems,
@@ -31,6 +34,9 @@ pub struct ShadowCadence {
     targets: Arc<SourceViewTargets>,
     history: CascadeHistory,
     pub plan: CascadePlan,
+    lamp_history: LampHistory,
+    /// Lamp face tiles that draw this frame. Only the world view draws lamp faces.
+    pub lamp_draw: [bool; LAMP_FACES],
     pub frame: u32,
     /// Changes when a tile gets a different fit.
     pub revision: u64,
@@ -43,7 +49,20 @@ impl ShadowCadence {
         index: usize,
         epoch: CascadeEpoch,
         encoded: u32,
+        lamps: &LampShadows,
     ) {
+        if index < WORLD_VIEWS {
+            let current = std::array::from_fn(|tile| {
+                let (slot, face) = (tile / 6, tile % 6);
+                let uniform = &lamps.uniforms[slot];
+                (face < lamps.faces(slot)).then(|| LampFace {
+                    clip_from_world: uniform.faces[face].to_cols_array().map(f32::to_bits),
+                    point: uniform.point(),
+                    contents: scene.lamp_contents[slot],
+                })
+            });
+            self.lamp_draw = self.lamp_history.plan(encoded != self.frame, &current);
+        }
         self.plan = CascadePlan::ALL;
         let Some(fit) = &scene.fits[index] else {
             // The next fit renders all cascades.
@@ -74,6 +93,7 @@ pub(crate) fn plan_cascades(
     scene: Res<ShadowScene>,
     frame: Res<SourceViewFrame>,
     assets: Option<Res<LightingRenderAssets>>,
+    lamps: Res<LampShadows>,
     mut views: Query<(
         Entity,
         &SourceSurfaceView,
@@ -110,7 +130,7 @@ pub(crate) fn plan_cascades(
         }
         let encoded = state.map_or(0, ShadowDrawState::encoded_frame);
         if let Some(mut cadence) = cadence.filter(|c| Arc::ptr_eq(&c.targets, &targets.0)) {
-            cadence.update(frame.frame, &scene, view.index, epoch, encoded);
+            cadence.update(frame.frame, &scene, view.index, epoch, encoded, &lamps);
             continue;
         }
         // A new atlas has no history, so all cascades render.
@@ -118,10 +138,12 @@ pub(crate) fn plan_cascades(
             targets: targets.0.clone(),
             history: CascadeHistory::default(),
             plan: CascadePlan::ALL,
+            lamp_history: LampHistory::default(),
+            lamp_draw: [false; LAMP_FACES],
             frame: 0,
             revision: 0,
         };
-        cadence.update(frame.frame, &scene, view.index, epoch, encoded);
+        cadence.update(frame.frame, &scene, view.index, epoch, encoded, &lamps);
         commands.entity(entity).insert(cadence);
     }
 }
@@ -280,18 +302,16 @@ pub(crate) fn render_atlas(
         }
     }
     drop(pass);
-    let lamp_faces = |tile: usize| {
-        tile >= 4 && source.index < WORLD_VIEWS && (tile - 4) % 6 < lamps.faces((tile - 4) / 6)
-    };
+    let lamp_faces = |tile: usize| tile >= 4 && cadence.lamp_draw[tile - 4];
     if (4..TILES).any(lamp_faces) {
         let mut pass = context.begin_tracked_render_pass(RenderPassDescriptor {
             label: Some("source_lamp_shadow_atlas"),
             color_attachments: &[],
             depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
                 view: &resources.targets.lamp_atlas.attachment,
-                // Reversed depth: 0 is lit.
+                // Faces that do not draw keep their depth. Drawn faces clear first.
                 depth_ops: Some(Operations {
-                    load: LoadOp::Clear(0.),
+                    load: LoadOp::Load,
                     store: StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -305,6 +325,8 @@ pub(crate) fn render_atlas(
                 LampShadowUniform::viewport(slot, (tile - 4) % 6, lamps.uniforms[slot].point());
             pass.set_viewport(x as f32, y as f32, width as f32, height as f32, 0., 1.);
             pass.set_scissor_rect(x, y, width, height);
+            pass.set_render_pipeline(clear);
+            pass.draw(0..3, 0..1);
             if let Err(error) = phase.render(&mut pass, world, entity) {
                 status.fail(format!("Source lamp shadow draw: {error:?}"));
                 return;
@@ -327,7 +349,7 @@ pub(crate) fn render_atlas(
     }
     let (epoch, attempted, issued) = state.counts();
     let instances = state.instance_counts();
-    // Skipped cascades and empty lamp faces draw no instances.
+    // Skipped cascades and skipped lamp faces draw no instances.
     let required: [u32; TILES] = std::array::from_fn(|tile| {
         let rendered = if tile < 4 {
             cadence.plan.draw[tile]

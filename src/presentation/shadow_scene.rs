@@ -14,6 +14,7 @@ use super::{
     },
 };
 use crate::reference::{
+    lamp_shadows::{LAMP_BIT, LAMP_SLOTS, write_lamp_bits},
     shadow_bounds::{BoundsKey, WorldBoundsCache},
     shadow_candidates::CandidateState,
     shadow_frame::{CasterInput, ShadowViewCache},
@@ -56,6 +57,10 @@ pub struct ShadowScene {
     mask_revisions: [u64; VIEW_COUNT],
     /// Changes when a lamp bit of the world view masks changes.
     lamp_revision: u64,
+    /// Lamp bits of each caster in the world view, kept across view preparation.
+    lamp_masks: Vec<u8>,
+    /// Caster content counter of each lamp slot. It changes when the face content would change.
+    pub lamp_contents: [u64; LAMP_SLOTS],
     /// Held sun rotation of the shadow fit. It follows the sun in steps of `SUN_STEP`.
     pub sun: Quat,
     /// Caster content counter of each view and cascade. It changes when the tile content would change.
@@ -294,14 +299,29 @@ pub(super) fn prepare_scene(
         }
     }
     // Lamp slots draw only in the world view atlas. Both revisions only grow, so their sum changes with either.
-    if frame.views[0].is_some()
-        && crate::reference::lamp_shadows::write_lamp_bits(
+    let mut lamp_dirty = 0xf0;
+    if frame.views[0].is_some() {
+        scene.lamp_masks.resize(scene.caster_data.casters.len(), 0);
+        let changed = write_lamp_bits(
             &scene.caster_data.casters,
             &lamps.spheres,
+            &mut scene.lamp_masks,
             &mut scene.masks[0],
-        )
-    {
-        scene.lamp_revision += 1;
+        );
+        if changed != 0 {
+            scene.lamp_revision += 1;
+        }
+        if !all_changed {
+            let masks = &scene.lamp_masks;
+            lamp_dirty = scene
+                .touched
+                .iter()
+                .chain(&scene.animated)
+                .fold(changed, |dirty, &row| dirty | masks[row as usize]);
+        }
+    }
+    for (slot, content) in scene.lamp_contents.iter_mut().enumerate() {
+        *content += u64::from(lamp_dirty >> (LAMP_BIT as usize + slot) & 1);
     }
     scene.mask_revisions[0] = scene.views[0].revision() + scene.lamp_revision;
     drop(changes);
@@ -485,5 +505,6 @@ pub fn extract_scene(
     output.origin = input.origin;
     output.sun = input.sun;
     output.contents = input.contents;
+    output.lamp_contents = input.lamp_contents;
     output.frame = input.frame;
 }
