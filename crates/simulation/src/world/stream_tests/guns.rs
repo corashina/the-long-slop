@@ -1,6 +1,6 @@
 //! X02 part 3: gun shots. A revolver shot breaks a bottle. Shotgun pellets push an item.
 //! Reload and unload keep the rounds. A magazine swap saves and loads.
-use super::drive_out::{frame, settle};
+use super::kit::*;
 use super::melee::{CROWBAR, place, spawn, weapon};
 use super::*;
 use crate::damage::BreakKind;
@@ -38,7 +38,7 @@ fn equip(run: &mut GarageRuntime, reference: &ReferenceManifest, gun: &GunRefere
     .unwrap()[pickup];
     super::g08_pickup(run, item);
     assert!(run.area.equip_carried(&mut run.physics).unwrap());
-    settle(run, reference, 1.);
+    seconds(run, reference, 1.);
     super::g08_frame(run, reference, FrameInput::default(), FIXED_DT);
     let rt = run
         .area
@@ -72,8 +72,8 @@ fn trigger_frame(run: &mut GarageRuntime, reference: &ReferenceManifest, index: 
 #[test]
 #[ignore = "requires the installed source export"]
 fn revolver_shot_breaks_a_bottle() {
-    let (reference, mut run) = super::garage_controls::load_garage();
-    settle(&mut run, &reference, 1.);
+    let (reference, mut run) = load_garage();
+    seconds(&mut run, &reference, 1.);
     let records = &reference.breakables;
     let (target, bottle) = run
         .stream
@@ -126,8 +126,8 @@ fn revolver_shot_breaks_a_bottle() {
 #[test]
 #[ignore = "requires the installed source export"]
 fn shotgun_pellets_push_an_item() {
-    let (reference, mut run) = super::garage_controls::load_garage();
-    settle(&mut run, &reference, 1.);
+    let (reference, mut run) = load_garage();
+    seconds(&mut run, &reference, 1.);
     let shotgun = reference
         .guns
         .weapons
@@ -270,8 +270,8 @@ fn magazine_swap_saves_and_reloads() {
 #[test]
 #[ignore = "requires the installed source export"]
 fn x02_leftovers_smg_unload_drops_the_magazine() {
-    let (reference, mut run) = super::garage_controls::load_garage();
-    settle(&mut run, &reference, 1.);
+    let (reference, mut run) = load_garage();
+    seconds(&mut run, &reference, 1.);
     let smg = reference
         .guns
         .weapons
@@ -337,7 +337,8 @@ fn x02_leftovers_smg_unload_drops_the_magazine() {
     run.reload_gun(&reference, gun, loose, true);
     let dropped = *mags(&run).iter().find(|id| **id != loose).unwrap();
     let pose = run.area.items.get(dropped).unwrap().pose;
-    let loaded = super::explosions::save_and_load(&run, &reference);
+    let mut loaded = save_load(&run, &reference);
+    seconds(&mut loaded, &reference, 1.);
     let counts: Vec<f32> = mags(&loaded)
         .iter()
         .filter_map(|id| loaded.area.spawned.ammo(*id))

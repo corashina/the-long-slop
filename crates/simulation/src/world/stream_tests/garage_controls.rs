@@ -4,19 +4,10 @@ use crate::{
     starting_area::GarageRuntime,
 };
 
+use super::kit::*;
+
 #[path = "garage_controls/reactions.rs"]
 mod reactions;
-
-pub(super) fn load_garage() -> (ReferenceManifest, GarageRuntime) {
-    let reference = super::reference();
-    assert_eq!(reference.build_id, 11140890);
-    let mut run = GarageRuntime::new_default(&reference).unwrap();
-    super::prepare_ready(&mut run, &reference);
-    assert!(run.world_supported());
-    run.started = true;
-    run.paused = false;
-    (reference, run)
-}
 
 fn press(run: &mut GarageRuntime, reference: &ReferenceManifest, held: u32) {
     run.step(
@@ -27,16 +18,6 @@ fn press(run: &mut GarageRuntime, reference: &ReferenceManifest, held: u32) {
             ..FrameInput::default()
         },
     );
-}
-
-fn settle(run: &mut GarageRuntime, reference: &ReferenceManifest) {
-    for _ in 0..240 {
-        if run.area.player.grounded() {
-            return;
-        }
-        run.step(reference, FrameInput::default());
-    }
-    panic!("player stays airborne");
 }
 
 #[test]

@@ -807,7 +807,7 @@ mod world_sync_tests {
         )
         .unwrap();
         let mut run = GarageRuntime::new_default(&reference).unwrap();
-        crate::world::stream::tests::prepare_ready(&mut run, &reference);
+        crate::world::stream::tests::kit::prepare_ready(&mut run, &reference);
         assert!(run.startup_aligned);
         run.sync_world_activity(&reference).unwrap();
         let oil = reference
@@ -867,7 +867,7 @@ mod world_sync_tests {
         )
         .unwrap();
         let mut run = GarageRuntime::new_default(&reference).unwrap();
-        crate::world::stream::tests::prepare_ready(&mut run, &reference);
+        crate::world::stream::tests::kit::prepare_ready(&mut run, &reference);
         let item = reference.weather.tumbleweeds.item_id;
         let prototype = reference
             .item_prototypes

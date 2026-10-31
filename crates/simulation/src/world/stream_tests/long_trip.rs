@@ -1,5 +1,6 @@
 //! W02: long trips. Far edits, revisited buildings, and history size.
-use super::drive_out::{enter, park, place_car, settle};
+use super::drive_out::{enter, park, place_car};
+use super::kit::*;
 use super::*;
 use crate::interaction::items::ItemLocation;
 use crate::reference::ItemId;
@@ -86,8 +87,7 @@ fn history(run: &GarageRuntime) -> (usize, usize, usize) {
 #[ignore = "requires the installed source export"]
 fn w02_long_trip_keeps_far_edits() {
     const LENGTH: f64 = 20_000.;
-    let (reference, mut run) = garage_controls::load_garage();
-    let stamp = roadside_stamp(&reference);
+    let (reference, mut run) = load_garage();
     assert!(enter(&mut run, &reference));
     let path = road_path(&run, &reference, LENGTH, 250.);
     let start = history(&run);
@@ -113,7 +113,7 @@ fn w02_long_trip_keeps_far_edits() {
                     t.y += 1.;
                     body.set_translation(t, true);
                 });
-                settle(&mut run, &reference, 3.);
+                seconds(&mut run, &reference, 3.);
                 run.area.items.mark_dirty(id);
                 edited.push((index, key, absolute(&run, id)));
             }
@@ -187,32 +187,12 @@ fn w02_long_trip_keeps_far_edits() {
     }
 
     // Save at the first edit and reload into a fresh runtime.
-    let saved = run
-        .capture_save(&reference, &stamp, "2026-10-25T12:00:00Z")
-        .unwrap();
-    let saved: crate::save::SaveSnapshot =
-        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    let saved = save(&run, &reference);
     for (_, key, _) in &edited {
         assert!(saved.world.changes.get(key).is_some(), "save keeps {key:?}");
     }
-    let mut loaded = GarageRuntime::from_save(
-        &reference,
-        &stamp,
-        &saved,
-        crate::world::GameMode::default(),
-        reference.world.draw_distance.default,
-    )
-    .unwrap();
-    for _ in 0..2000 {
-        prepare_ready(&mut loaded, &reference);
-        if loaded.advance_saved_restore(&reference).unwrap() && !loaded.restore_pending() {
-            break;
-        }
-    }
-    assert!(!loaded.restore_pending());
-    loaded.started = true;
-    loaded.paused = false;
-    settle(&mut loaded, &reference, 1.);
+    let mut loaded = load(&reference, &saved);
+    seconds(&mut loaded, &reference, 1.);
     check(&loaded, "after reload");
     stop(&mut loaded, &reference, &path, edited[1].0);
     check(&loaded, "after reload at the second edit");
@@ -221,7 +201,7 @@ fn w02_long_trip_keeps_far_edits() {
 #[test]
 #[ignore = "requires the installed source export"]
 fn w02_garage_can_returns_after_far_trip() {
-    let (reference, mut run) = garage_controls::load_garage();
+    let (reference, mut run) = load_garage();
     assert!(enter(&mut run, &reference));
     let path = road_path(&run, &reference, 3_200., 250.);
     let can = reference
@@ -247,7 +227,7 @@ fn w02_garage_can_returns_after_far_trip() {
         body.set_linvel(rapier3d::math::Vector::ZERO, true);
     });
     run.physics.refresh_queries();
-    settle(&mut run, &reference, 4.);
+    seconds(&mut run, &reference, 4.);
     let rest = absolute(&run, can);
     // Drive 2 km further.
     for index in drop + 1..path.len() {
@@ -262,7 +242,7 @@ fn w02_garage_can_returns_after_far_trip() {
     assert!(run.physics.inactive_bodies.contains(&item.body.unwrap()));
     // Return.
     stop(&mut run, &reference, &path, drop);
-    settle(&mut run, &reference, 2.);
+    seconds(&mut run, &reference, 2.);
     let item = run.area.items.get(can).unwrap();
     assert!(item.inactive_pose.is_none(), "can is active again");
     let now = absolute(&run, can);

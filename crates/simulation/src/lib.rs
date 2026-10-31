@@ -34,6 +34,8 @@ pub mod player;
 pub mod reference;
 pub mod render_readiness;
 pub mod render_scale;
+#[cfg(test)]
+mod roadmap_tests;
 pub mod sandbox;
 pub mod save;
 pub mod save_requests;

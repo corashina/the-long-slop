@@ -1,5 +1,6 @@
 //! B01: the loader spawns any number of car copies. Two Lada copies drive, save and load.
-use super::drive_out::{frame, ground, settle};
+use super::drive_out::ground;
+use super::kit::*;
 use super::*;
 use crate::simulation::{DriveInput, FIXED_DT};
 use crate::vehicle::DriveTorques;
@@ -109,9 +110,7 @@ fn fuel(run: &GarageRuntime, key: &ObjectKey) -> f32 {
 #[ignore = "requires the installed source export"]
 fn two_ladas_drive_save_and_load() {
     let (reference, a, b) = two_lada_reference();
-    let stamp = roadside_stamp(&reference);
-    let mut run = GarageRuntime::new_default(&reference).unwrap();
-    prepare_ready(&mut run, &reference);
+    let mut run = ready(&reference);
     run.started = true;
     run.paused = false;
     wait_cars(&mut run, &reference, [a, b]);
@@ -144,7 +143,7 @@ fn two_ladas_drive_save_and_load() {
         ..Default::default()
     };
     drive(&mut run, &[&a, &b], 4., brake, 0.);
-    settle(&mut run, &reference, 1.);
+    seconds(&mut run, &reference, 1.);
 
     // Different gear and fuel per copy.
     for (key, gear, spilled) in [(&a, 2, 5.), (&b, 3, 10.)] {
@@ -179,11 +178,7 @@ fn two_ladas_drive_save_and_load() {
     run.vehicles.get_mut(&a).unwrap().steer = 0.4;
     run.sleep.restore(0.25, run.simulation_seconds);
 
-    let snapshot = run
-        .capture_save(&reference, &stamp, "2026-10-26T12:00:00Z")
-        .unwrap();
-    let snapshot: crate::save::SaveSnapshot =
-        serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    let snapshot = save(&run, &reference);
     for key in [&a, &b] {
         assert!(
             snapshot.world.changes.vehicle(key).is_some(),
@@ -194,27 +189,12 @@ fn two_ladas_drive_save_and_load() {
     assert!((snapshot.player.since_wake - 0.25).abs() < 1e-9);
 
     // Load into a fresh runtime with the same deck.
-    let mut loaded = GarageRuntime::from_save(
-        &reference,
-        &stamp,
-        &snapshot,
-        crate::world::GameMode::default(),
-        reference.world.draw_distance.default,
-    )
-    .unwrap();
+    let mut loaded = open(&reference, &snapshot);
     let deck = loaded.stream.origin.local(deck);
     loaded.physics.insert_box(deck, DECK);
-    for _ in 0..2000 {
-        prepare_ready(&mut loaded, &reference);
-        if loaded.advance_saved_restore(&reference).unwrap()
-            && !loaded.restore_pending()
-            && loaded.vehicles.contains_key(&a)
-            && loaded.vehicles.contains_key(&b)
-        {
-            break;
-        }
-    }
-    assert!(!loaded.restore_pending());
+    restore(&mut loaded, &reference, |l| {
+        l.vehicles.contains_key(&a) && l.vehicles.contains_key(&b)
+    });
     for (key, ((position, rotation), gear, fuel_liters)) in [&a, &b].into_iter().zip(&saved) {
         assert!(loaded.vehicles.contains_key(key), "{key:?} returns");
         let (now, now_rotation) = absolute(&loaded, key);
@@ -233,9 +213,7 @@ fn two_ladas_drive_save_and_load() {
         assert!((fuel(&loaded, key) - fuel_liters).abs() < 1e-4, "{key:?}");
     }
     assert_eq!(loaded.vehicles[&a].steer, 0.4);
-    let recaptured = loaded
-        .capture_save(&reference, &stamp, "2026-10-26T12:00:00Z")
-        .unwrap();
+    let recaptured = save(&loaded, &reference);
     for key in [&a, &b] {
         assert_eq!(
             recaptured.world.changes.vehicle(key).unwrap().steer,
@@ -251,8 +229,7 @@ fn two_ladas_drive_save_and_load() {
 #[ignore = "requires the installed source export"]
 fn installed_lada_launches_and_brakes() {
     let (reference, a, b) = two_lada_reference();
-    let mut run = GarageRuntime::new_default(&reference).unwrap();
-    prepare_ready(&mut run, &reference);
+    let mut run = ready(&reference);
     run.started = true;
     run.paused = false;
     wait_cars(&mut run, &reference, [a, b]);

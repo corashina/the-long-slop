@@ -1,5 +1,6 @@
 //! R05: a loose item locks in the trunk of the start Lada copy and rides with the car.
-use super::drive_out::{enter, park, place_car, road_points, settle};
+use super::drive_out::{enter, park, place_car, road_points};
+use super::kit::*;
 use crate::{
     interaction::items::ItemLocation,
     reference::TankRole,
@@ -21,8 +22,8 @@ fn relative(
 #[test]
 #[ignore = "requires the installed source export"]
 fn r05_cargo_locks_in_trunk() {
-    let (reference, mut run) = super::garage_controls::load_garage();
-    settle(&mut run, &reference, 2.);
+    let (reference, mut run) = load_garage();
+    seconds(&mut run, &reference, 2.);
     let key = run
         .vehicles
         .keys()
@@ -81,7 +82,7 @@ fn r05_cargo_locks_in_trunk() {
     });
     run.physics.refresh_queries();
     // Two 1.5 s scans must see the can.
-    settle(&mut run, &reference, 4.);
+    seconds(&mut run, &reference, 4.);
     let locked = ItemLocation::Locked { owner, volume };
     assert_eq!(run.area.items.get(can).unwrap().location, locked);
     let loaded = run.physics.rapier().bodies[carrier].mass();
@@ -107,7 +108,7 @@ fn r05_cargo_locks_in_trunk() {
             break;
         }
     }
-    settle(&mut run, &reference, 2.);
+    seconds(&mut run, &reference, 2.);
     assert_eq!(run.area.items.get(can).unwrap().location, locked);
     let after = relative(&run, carrier, run.area.items.get(can).unwrap().pose);
     let moved = (after.translation - before.translation).length();

@@ -54,7 +54,7 @@ Known failures on master c0da737f (2026-10-30 browser retest), fix before the ne
 - Outside the Lada, E on the door handle does not open it. The HUD shows "[LMB]+[Mouse]: Move | [F]: Dismount".
 - First page load can stall at the start of object loading with dependency staging full (7.7/7.8 MiB). A reload clears it.
 - In game, pause > Load > Load last once stayed on "Loading..." for over 6 minutes, with no console messages.
-- Most ignored cargo tests fail: no start vehicle after `load_garage`, restore stays pending, stack overflows in debug.
+- 32 of 91 ignored simulation tests fail in release: MC2, BL, stale test data, item seat restore ("Seat item is not bound"). Debug overflows the stack.
 
 Blocked checks. Each waits for the fix of its bug. Run them in the next build's test pass.
 

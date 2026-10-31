@@ -1,5 +1,6 @@
 //! V02 start cars: each one starts, drives, saves and loads. The Lada pick keeps the world draws.
-use super::drive_out::{enter, frame, frame_with, ground, settle};
+use super::drive_out::{enter, ground};
+use super::kit::*;
 use super::*;
 use crate::fluids::FluidEntry;
 use crate::reference::{DrivingAssists, ItemId};
@@ -157,7 +158,6 @@ fn insert_deck(run: &mut GarageRuntime, key: &ObjectKey) -> [f64; 3] {
 
 /// One start car: fill, start, drive about 10 m in first gear, save, load.
 fn start_car_drives_saves_and_loads(reference: &ReferenceManifest, field: &str) {
-    let stamp = roadside_stamp(reference);
     let mut run = start_world(reference, field);
     run.started = true;
     run.paused = false;
@@ -197,7 +197,7 @@ fn start_car_drives_saves_and_loads(reference: &ReferenceManifest, field: &str) 
     }
     let deck = insert_deck(&mut run, &key);
     assert!(enter(&mut run, reference), "{field}: driver seat");
-    settle(&mut run, reference, 1.);
+    seconds(&mut run, reference, 1.);
     fill_fluids(&mut run, &key);
 
     // Hold the key until the engine runs.
@@ -219,7 +219,7 @@ fn start_car_drives_saves_and_loads(reference: &ReferenceManifest, field: &str) 
             ..FrameInput::default()
         },
     );
-    settle(&mut run, reference, 1.);
+    seconds(&mut run, reference, 1.);
     assert!(running(&run, &key), "{field}: engine idles");
 
     // First gear, then throttle for about 10 m.
@@ -246,35 +246,15 @@ fn start_car_drives_saves_and_loads(reference: &ReferenceManifest, field: &str) 
         run.vehicles[&key].ignition.ignition,
         run.mounted_engine(&key).unwrap().state.capture_save(),
     );
-    let snapshot = run
-        .capture_save(reference, &stamp, "2026-10-26T12:00:00Z")
-        .unwrap();
-    let snapshot: crate::save::SaveSnapshot =
-        serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    let snapshot = save(&run, reference);
     assert_eq!(snapshot.world.start_car.field(), field);
 
     // The save sets the start car. The mode start car is ignored.
-    let mut loaded = GarageRuntime::from_save(
-        reference,
-        &stamp,
-        &snapshot,
-        GameMode::default(),
-        reference.world.draw_distance.default,
-    )
-    .unwrap();
+    let mut loaded = open(reference, &snapshot);
     assert_eq!(loaded.stream.start_car().field(), field);
     let deck = loaded.stream.origin.local(deck);
     loaded.physics.insert_box(deck, DECK);
-    for _ in 0..2000 {
-        prepare_ready(&mut loaded, reference);
-        if loaded.advance_saved_restore(reference).unwrap()
-            && !loaded.restore_pending()
-            && loaded.vehicles.contains_key(&key)
-        {
-            break;
-        }
-    }
-    assert!(!loaded.restore_pending(), "{field}");
+    restore(&mut loaded, reference, |l| l.vehicles.contains_key(&key));
     loaded.refresh_powertrains();
     let ((position, rotation), gear, ignition, engine) = saved;
     let (now, now_rotation) = absolute(&loaded, &key);
@@ -392,7 +372,7 @@ fn car07_drives_in_forced_automatic() {
         })
         .expect("Car07 driver seat");
     assert!(run.area.player.enter_item_seat(&seat, &mut run.physics));
-    settle(&mut run, &reference, 1.);
+    seconds(&mut run, &reference, 1.);
     fill_fluids(&mut run, &key);
     // The dashboard clock binds on the car root item.
     let ObjectKey::Generated(id) = &key else {
@@ -418,7 +398,7 @@ fn car07_drives_in_forced_automatic() {
         ..FrameInput::default()
     };
     frame_with(&mut run, &reference, released);
-    settle(&mut run, &reference, 1.);
+    seconds(&mut run, &reference, 1.);
 
     // Gears R, N, 2.5, 1.68, 1.0: throttle alone selects first and shifts up.
     let ratios =
@@ -456,7 +436,7 @@ fn garage_start_car_drives_in_automatic() {
     }
     let key = start_key(&run).expect("start car");
     assert!(enter(&mut run, &reference), "driver seat");
-    settle(&mut run, &reference, 1.);
+    seconds(&mut run, &reference, 1.);
     fill_fluids(&mut run, &key);
     let started = hold(
         &mut run,
@@ -473,7 +453,7 @@ fn garage_start_car_drives_in_automatic() {
         ..FrameInput::default()
     };
     frame_with(&mut run, &reference, released);
-    settle(&mut run, &reference, 1.);
+    seconds(&mut run, &reference, 1.);
     let state = |run: &GarageRuntime| {
         let wheels: Vec<_> = (0..run.physics.wheel_contacts(&key).count())
             .map(|i| run.physics.wheel_motion(&key, i))

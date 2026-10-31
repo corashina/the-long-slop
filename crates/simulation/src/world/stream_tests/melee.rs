@@ -1,7 +1,7 @@
 //! X02 part 2: every melee weapon swings. A katana breaks a bottle. Only a weapon with
 //! `shovel_speed` digs: the shovel lifts a buried item, the crowbar does not. A `hurt_food`
 //! weapon cuts food, and the pieces reload with their bites.
-use super::drive_out::{frame, settle};
+use super::kit::*;
 use super::*;
 use crate::damage::BreakKind;
 use crate::interaction::items::ItemLocation;
@@ -75,7 +75,7 @@ fn equip(
     let item = spawn(run, reference, w);
     super::g08_pickup(run, item);
     assert!(run.area.equip_carried(&mut run.physics).unwrap());
-    settle(run, reference, 1.);
+    seconds(run, reference, 1.);
     item
 }
 
@@ -138,8 +138,8 @@ pub(super) fn place(run: &mut GarageRuntime, item: ItemId, at: Vector) {
 #[test]
 #[ignore = "requires the installed source export"]
 fn katana_swing_breaks_a_bottle() {
-    let (reference, mut run) = super::garage_controls::load_garage();
-    settle(&mut run, &reference, 1.);
+    let (reference, mut run) = load_garage();
+    seconds(&mut run, &reference, 1.);
     let records = &reference.breakables;
     let (target, bottle) = run
         .stream
@@ -186,8 +186,8 @@ fn katana_swing_breaks_a_bottle() {
 
 /// Swings the shovel or the crowbar at a buried crowbar copy. True when the copy rises.
 fn digs(shovel: bool) -> bool {
-    let (reference, mut run) = super::garage_controls::load_garage();
-    settle(&mut run, &reference, 1.);
+    let (reference, mut run) = load_garage();
+    seconds(&mut run, &reference, 1.);
     let w = if shovel {
         reference.melee.shovel(&reference).unwrap()
     } else {
@@ -229,8 +229,8 @@ fn pieces(run: &GarageRuntime, reference: &ReferenceManifest) -> Vec<u8> {
 #[test]
 #[ignore = "requires the installed source export"]
 fn shovel_cuts_food_and_the_pieces_reload() {
-    let (reference, mut run) = super::garage_controls::load_garage();
-    settle(&mut run, &reference, 1.);
+    let (reference, mut run) = load_garage();
+    seconds(&mut run, &reference, 1.);
     let shovel = reference.melee.shovel(&reference).unwrap();
     assert!(shovel.contact.hurt_food);
     let food = reference.survival.starter_food;
@@ -257,28 +257,9 @@ fn shovel_cuts_food_and_the_pieces_reload() {
         "the pieces keep every bite"
     );
 
-    let stamp = super::roadside_stamp(&reference);
-    let saved = run
-        .capture_save(&reference, &stamp, "2026-10-26T12:00:00Z")
-        .unwrap();
-    let saved: crate::save::SaveSnapshot =
-        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    let saved = save(&run, &reference);
     assert_eq!(saved.foods.len(), cut.len() - 1);
-    let mut loaded = GarageRuntime::from_save(
-        &reference,
-        &stamp,
-        &saved,
-        crate::world::GameMode::default(),
-        reference.world.draw_distance.default,
-    )
-    .unwrap();
-    for _ in 0..2000 {
-        super::prepare_ready(&mut loaded, &reference);
-        if loaded.advance_saved_restore(&reference).unwrap() && !loaded.restore_pending() {
-            break;
-        }
-    }
-    assert!(!loaded.restore_pending());
+    let loaded = load(&reference, &saved);
     let mut reloaded = pieces(&loaded, &reference);
     cut.sort();
     reloaded.sort();
