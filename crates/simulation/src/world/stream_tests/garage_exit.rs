@@ -20,12 +20,10 @@ fn start_car_driver_exits_in_garage() {
     let (reference, mut run) = super::garage_controls::load_garage();
     settle(&mut run, &reference, 3.);
     let mut sandbox = crate::sandbox::Sandbox::default();
-    crate::sandbox::run(
-        &mut run,
-        &reference,
-        r#"[{"action":"seat","seat":"driver"}]"#,
-        &mut sandbox,
-    );
+    sandbox
+        .queued
+        .push(r#"[{"action":"seat","seat":"driver"}]"#.into());
+    crate::sandbox::run(&mut run, &reference, &mut sandbox);
     eprintln!("seat: {:?}", sandbox.replies);
     assert!(run.area.player.seated());
     settle(&mut run, &reference, 2.);
@@ -79,12 +77,8 @@ fn start_car_driver_exits_in_garage() {
     }
     eprintln!("after door: {}", run.area.player.exit_trace(&run.physics));
     sandbox.replies.clear();
-    crate::sandbox::run(
-        &mut run,
-        &reference,
-        r#"[{"action":"stand"}]"#,
-        &mut sandbox,
-    );
+    sandbox.queued.push(r#"[{"action":"stand"}]"#.into());
+    crate::sandbox::run(&mut run, &reference, &mut sandbox);
     eprintln!("stand: {:?}", sandbox.replies);
     assert!(!exits.is_empty(), "no clear exit");
     assert!(!run.area.player.seated());
