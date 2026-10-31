@@ -784,3 +784,68 @@ fn tp_w16_road_trip_stays_in_the_renderer_budget() {
         assert!(run.stream.frame().failure.is_none(), "{distance} m");
     }
 }
+
+/// W5. Source `sandstormscript.Wind` and `WindScan`: the wind does not move an item inside a car.
+#[test]
+#[ignore = "requires the installed source export"]
+fn tp_w5_wind_does_not_move_items_in_a_car() {
+    let (reference, mut run) = load_garage();
+    seconds(&mut run, &reference, 1.);
+    let spawn = reference.area.player_spawn.translation.map(f64::from);
+    // The teleport moves the start car into a row next to the player.
+    act(
+        &mut run,
+        &reference,
+        &json!({"action": "teleport", "x": spawn[0] + 60., "z": spawn[2] + 60.}).to_string(),
+    );
+    wait_loaded(&mut run, &reference);
+    seconds(&mut run, &reference, 2.);
+    act(
+        &mut run,
+        &reference,
+        &json!({"action": "seat", "seat": "driver"}).to_string(),
+    );
+    seconds(&mut run, &reference, 1.);
+    // The passenger seat mirrors the driver seat across the car center line.
+    let key = run.vehicle.clone().unwrap();
+    let chassis = *run.physics.rapier().bodies[run.physics.chassis_handle(&key)].position();
+    let driver =
+        rapier3d::math::Vector::from_array(run.area.player.body_pose(&run.physics).position);
+    let local = chassis.inverse() * driver;
+    let seat = (chassis * local.with_x(-local.x)).to_array();
+    let food = find(&run, "Kolbasz");
+    let at = rapier3d::math::Vector::from_array(seat) + rapier3d::math::Vector::Y * 0.3;
+    crate::world::stream::tests::melee::place(&mut run, food, at);
+    seconds(&mut run, &reference, 3.);
+    assert!(speed(&run, food) < 0.05, "the item rests on the seat");
+    let body = run.area.items.get(food).unwrap().body.unwrap();
+    assert!(
+        run.physics.rapier().bodies[body].is_enabled(),
+        "the item simulates"
+    );
+    act(
+        &mut run,
+        &reference,
+        &json!({"action": "storm", "distance": 0.}).to_string(),
+    );
+    // The wind rocks the car. The item must not move on its seat.
+    let in_car = |run: &GarageRuntime| {
+        let chassis = *run.physics.rapier().bodies[run.physics.chassis_handle(&key)].position();
+        let p = run.area.items.get(food).unwrap().pose.position;
+        chassis.inverse() * rapier3d::math::Vector::from_array(p)
+    };
+    let start = in_car(&run);
+    let mut moved = 0f32;
+    for _ in 0..(6. / crate::simulation::FIXED_DT) as usize {
+        frame(&mut run, &reference);
+        moved = moved.max((in_car(&run) - start).length());
+    }
+    assert!(
+        run.weather.influence().strength > 0.,
+        "the player is in the storm"
+    );
+    assert!(
+        moved < 0.05,
+        "no wind inside the car: the item moves {moved} m on the seat"
+    );
+}

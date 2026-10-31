@@ -34,7 +34,7 @@ fn request(run: &mut GarageRuntime) {
 }
 
 /// Top of fixed collision below a local point.
-pub(super) fn ground(run: &GarageRuntime, local: [f32; 3]) -> Option<f32> {
+pub(crate) fn ground(run: &GarageRuntime, local: [f32; 3]) -> Option<f32> {
     let ray = Ray::new(Vector::new(local[0], local[1] + 3., local[2]), -Vector::Y);
     run.physics
         .queries(QueryFilter::only_fixed().exclude_sensors())
@@ -96,7 +96,7 @@ fn assert_items_kept(run: &GarageRuntime, before: &[(ItemId, [f64; 3])], stage: 
     );
 }
 
-pub(super) fn road_points(run: &GarageRuntime, reference: &ReferenceManifest) -> Vec<[f64; 3]> {
+pub(crate) fn road_points(run: &GarageRuntime, reference: &ReferenceManifest) -> Vec<[f64; 3]> {
     let mut roads = crate::world::RoadIndex::new(
         crate::world::RoadSequence::new(&reference.world, run.stream.seed(), None).unwrap(),
         crate::world::terrain_evaluator(&reference.world, run.stream.seed()),
@@ -129,7 +129,7 @@ pub(super) fn road_points(run: &GarageRuntime, reference: &ReferenceManifest) ->
 }
 
 /// Place the car on the ground at an absolute point, facing along the road.
-pub(super) fn place_car(
+pub(crate) fn place_car(
     run: &mut GarageRuntime,
     reference: &ReferenceManifest,
     point: [f64; 3],
@@ -176,7 +176,7 @@ fn assert_car_resting(run: &GarageRuntime, stage: &str) {
 }
 
 /// Sits in the driver seat of the start Lada copy.
-pub(super) fn enter(run: &mut GarageRuntime, _reference: &ReferenceManifest) -> bool {
+pub(crate) fn enter(run: &mut GarageRuntime, _reference: &ReferenceManifest) -> bool {
     use crate::player::SeatOwner;
     let Some(key) = run.vehicles.keys().find(|key| {
         matches!(key, crate::world::ObjectKey::Generated(id)
@@ -201,7 +201,7 @@ pub(super) fn enter(run: &mut GarageRuntime, _reference: &ReferenceManifest) -> 
 }
 
 /// Step until 75 frames simulated. Generation may block some frames.
-pub(super) fn park(run: &mut GarageRuntime, reference: &ReferenceManifest, stage: [f64; 3]) {
+pub(crate) fn park(run: &mut GarageRuntime, reference: &ReferenceManifest, stage: [f64; 3]) {
     wait_supported(run, reference);
     let mut blocked = 0;
     let mut stepped = 0;

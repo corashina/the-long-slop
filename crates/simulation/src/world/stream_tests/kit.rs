@@ -637,3 +637,89 @@ pub(crate) fn load_placements(run: &mut GarageRuntime, reference: &ReferenceMani
             .collect::<Vec<_>>()
     );
 }
+
+/// The broken lamp bits of light control `control` of structure `parent`.
+pub(crate) fn broken_lamps(
+    run: &GarageRuntime,
+    parent: &crate::world::GeneratedId,
+    control: crate::reference::LightControlId,
+) -> u64 {
+    let source = &run
+        .stream
+        .lamp_bindings
+        .iter()
+        .find(|b| b.control == control && &b.parent == parent)
+        .expect("lamp binding")
+        .source;
+    run.stream.contents.broken_lamps(parent, source)
+}
+
+/// The part conditions of active content `id`: condition id and condition index.
+pub(crate) fn content_conditions(
+    run: &GarageRuntime,
+    id: &crate::world::GeneratedId,
+) -> Option<Vec<(crate::reference::ConditionId, usize)>> {
+    let content = run
+        .stream
+        .contents
+        .active
+        .iter()
+        .find(|c| &c.content.placement.id == id)?;
+    Some(content.conditions.iter().map(|&(c, i, _)| (c, i)).collect())
+}
+
+/// Places world prototype `source` `forward` metres in front of the player. Returns its item
+/// once the stream binds it.
+pub(crate) fn place_prototype(
+    run: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    source: &crate::reference::SourceId,
+    forward: f32,
+) -> ItemId {
+    let before: Vec<_> = run
+        .stream
+        .contents
+        .active
+        .iter()
+        .map(|c| c.content.placement.id.clone())
+        .collect();
+    let body = run.area.player.body_pose(&run.physics);
+    let at = Vector::from_array(body.position)
+        + Rotation::from_array(body.rotation) * -Vector::Z * forward
+        + Vector::Y * 0.3;
+    run.stream
+        .add_startup_placement(
+            source,
+            crate::world::AbsolutePose {
+                position: run.stream.origin.absolute(at.to_array()),
+                rotation: [0., 0., 0., 1.],
+            },
+        )
+        .unwrap();
+    for _ in 0..600 {
+        frame(run, reference);
+        let item = run
+            .stream
+            .contents
+            .active
+            .iter()
+            .filter(|c| &c.content.placement.prototype == source)
+            .filter(|c| !before.contains(&c.content.placement.id))
+            .find_map(|c| c.item);
+        if let Some(item) = item {
+            seconds(run, reference, 0.5);
+            return item;
+        }
+    }
+    panic!("{source:?} does not bind");
+}
+
+/// The trigger role of collider `handle`.
+pub(crate) fn trigger_role(
+    run: &GarageRuntime,
+    handle: rapier3d::prelude::ColliderHandle,
+) -> Option<crate::reference::TriggerRole> {
+    run.stream
+        .trigger_roles
+        .get(handle, &run.physics.rapier().colliders[handle])
+}
