@@ -103,7 +103,7 @@ pub struct ShadowViewCache {
     split_changes: u8,
 }
 impl ShadowViewCache {
-    /// Splits with a caster that entered or left them in the last `prepare`.
+    /// Splits with a static caster that entered or left them in the last `prepare`.
     pub fn split_changes(&self) -> u8 {
         self.split_changes
     }
@@ -131,6 +131,7 @@ impl ShadowViewCache {
         light_mask: u32,
         view_mask: u32,
         fit: &mut ShadowFitInput,
+        animated: &[u32],
     ) -> Result<Option<ShadowFrame>, &'static str> {
         if casters.len() != masks.len() {
             return Err("Source shadow candidate and mask counts differ");
@@ -160,6 +161,10 @@ impl ShadowViewCache {
         self.previous.extend_from_slice(masks);
         self.split_changes = 0b1111;
         let result = prepare_frame(casters, masks, &planes, light_mask, view_mask, fit)?;
+        // Animated casters draw in each refresh, so their changes do not count.
+        for &row in animated {
+            self.previous[row as usize] = masks[row as usize];
+        }
         self.split_changes = (self.previous.iter().zip(masks.iter()))
             .fold(0, |changes, (old, new)| changes | (old ^ new));
         self.input = Some(input);

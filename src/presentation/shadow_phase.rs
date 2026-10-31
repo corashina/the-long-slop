@@ -77,10 +77,19 @@ impl BinnedPhaseItem for SourceShadow {
     }
 }
 
+/// The casters that one atlas draw selects.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CasterSet {
+    All,
+    Static,
+    Animated,
+}
 /// The atlas stage changes this caster slot selector between draws. Uniform slots remain independent.
 #[derive(Component)]
 pub struct ShadowDrawState {
     cascade: AtomicU32,
+    /// `CasterSet` as an index.
+    set: AtomicU32,
     encoded_frame: AtomicU32,
     epoch: AtomicU32,
     attempts: [AtomicU32; TILES],
@@ -93,6 +102,7 @@ impl Default for ShadowDrawState {
         let counts = || std::array::from_fn(|_| AtomicU32::new(0));
         Self {
             cascade: AtomicU32::new(0),
+            set: AtomicU32::new(0),
             encoded_frame: AtomicU32::new(0),
             epoch: AtomicU32::new(0),
             attempts: counts(),
@@ -122,9 +132,10 @@ impl ShadowDrawState {
             count.store(0, Ordering::Relaxed);
         }
     }
-    pub fn select(&self, cascade: usize) {
+    pub fn select(&self, cascade: usize, set: CasterSet) {
         assert!(cascade < TILES);
         self.cascade.store(cascade as u32, Ordering::Relaxed);
+        self.set.store(set as u32, Ordering::Relaxed);
     }
     pub fn instance_counts(&self) -> [[u32; TILES]; 2] {
         [
@@ -157,7 +168,13 @@ impl RenderCommand<SourceShadow> for SelectCaster {
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let cascade = state.cascade.load(Ordering::Relaxed) as usize;
-        if item.key.split_mask & (1 << tile_bit(cascade)) == 0 {
+        let set = state.set.load(Ordering::Relaxed);
+        let excluded = if item.key.animated {
+            CasterSet::Static
+        } else {
+            CasterSet::Animated
+        };
+        if item.key.split_mask & (1 << tile_bit(cascade)) == 0 || set == excluded as u32 {
             return RenderCommandResult::Skip;
         }
         pass.set_bind_group(1, views.binding(cascade), &[]);
@@ -195,9 +212,10 @@ impl<const DONE: bool> RenderCommand<SourceShadow> for MarkDraw<DONE> {
         RenderCommandResult::Success
     }
 }
+// Skipped items select no pipeline.
 type DrawSourceShadow = (
-    SetItemPipeline,
     SelectCaster,
+    SetItemPipeline,
     MarkDraw<false>,
     super::source_lighting::SetSourceViewCamera,
     SetMeshBindGroup<2>,

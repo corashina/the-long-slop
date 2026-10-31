@@ -27,3 +27,10 @@ fn display_copy(@builtin(position) position:vec4<f32>)->@location(0) vec4<f32>{
     let uv=position.xy/vec2<f32>(textureDimensions(source_color));
     return textureSample(source_color,source_sampler,vec2(uv.x,1.0-uv.y));
 }
+
+// Copies the static shadow tile into the atlas tile. Viewport and scissor select the tile.
+@group(0) @binding(2) var static_shadow: texture_depth_2d;
+@fragment
+fn restore_shadow(@builtin(position) position:vec4<f32>)->@builtin(frag_depth) f32{
+    return textureLoad(static_shadow,vec2<i32>(position.xy),0);
+}
