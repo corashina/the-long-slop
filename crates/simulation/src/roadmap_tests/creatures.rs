@@ -626,8 +626,7 @@ fn bats(
         .collect()
 }
 
-/// Visits the road buildings from the 2nd on. Returns the bats near each loaded building.
-/// The first one stalls after a far move: `tp_w17_far_move_to_the_first_gas_station_loads`.
+/// Visits the road buildings. Returns the bats near each loaded building.
 fn bat_tour(
     run: &mut GarageRuntime,
     reference: &ReferenceManifest,
@@ -635,7 +634,7 @@ fn bat_tour(
 ) -> Vec<([f64; 3], Vec<crate::reference::ItemId>)> {
     let mut sequence = crate::world::BuildingSequence::new(&reference.world, run.stream.seed());
     let mut found = Vec::new();
-    for placement in std::iter::from_fn(|| sequence.next()).skip(1).take(400) {
+    for placement in std::iter::from_fn(|| sequence.next()).take(400) {
         if found.len() == count {
             break;
         }
@@ -666,7 +665,7 @@ fn bat_tour(
 /// (15 Oct to 15 Nov) and `Random.Range(0, 1) > 0.35`: `Random.Range(5, 30)` bats;
 /// `randomFlyer.Update`: a held bat squeaks and does not fly.
 #[test]
-#[ignore = "known failure CR2: on Halloween the first road buildings have no bats"]
+#[ignore = "known failure CR2: road buildings 42 km and more out do not load"]
 fn tp_cr2_halloween_bats_near_buildings() {
     let (reference, mut run) = load_on([2026, 10, 31]);
     let tour = bat_tour(&mut run, &reference, 8);

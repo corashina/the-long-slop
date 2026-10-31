@@ -756,19 +756,40 @@ fn position(run: &GarageRuntime, item: ItemId) -> Vector {
     run.physics.rapier().bodies[body].translation()
 }
 
+/// The explosive garage can with the most fuel: the full 20 L can.
+pub(super) fn garage_can(run: &GarageRuntime, reference: &ReferenceManifest) -> ItemId {
+    let interaction = &run.area.interaction;
+    let fluids = interaction.explosions.explosive_fluids();
+    reference
+        .tanks
+        .iter()
+        .filter(|t| t.role == crate::reference::TankRole::Portable)
+        .filter_map(|t| {
+            let fluid = run.area.items.get(t.item)?.fluid.as_ref()?;
+            let e = interaction.tank_explosion(t.item)?;
+            crate::interaction::explosions::tank_factor(e, fluid, fluids, 1e6)
+                .map(|litres| (t.item, litres))
+        })
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(id, _)| id)
+        .expect("an explosive garage can")
+}
+
 /// Source `explosionscript.Explode` from a `tankscript` shot over the explosive amount: the tank
 /// goes, a near bottle breaks, a second tank goes off. Save and load: they stay gone.
+/// `Explode(F.GetAmount())`: the blast force is the litres, so the full 20 L garage can blasts.
+/// A 2 L tank blast has power 0.5 at the bottle, under its health 6.
 #[test]
 #[ignore = "requires the installed source export"]
 fn tp_wd14_a_shot_fuel_can_explodes_breaks_a_bottle_sets_off_a_second_and_stays_gone() {
     let (reference, mut run) = load_garage();
     settle(&mut run, &reference);
-    let tanks = explosive_tanks(&run);
-    let (first, root) = tanks[0];
-    let (_, second) = *tanks
+    let first = garage_can(&run, &reference);
+    let root = first;
+    let (_, second) = *explosive_tanks(&run)
         .iter()
         .find(|(_, r)| *r != root)
-        .expect("two explosive tanks near the start");
+        .expect("a second explosive tank near the start");
     let bottle = spawn(&mut run, &reference, "beer");
     let at = position(&run, root);
     place(&mut run, bottle, at + Vector::new(0.6, 0.3, 0.));
@@ -805,26 +826,7 @@ fn tp_wd14_a_shot_fuel_can_explodes_breaks_a_bottle_sets_off_a_second_and_stays_
 fn tp_wd15_the_shot_garage_can_explodes_and_stays_gone() {
     let (reference, mut run) = load_garage();
     seconds(&mut run, &reference, 1.);
-    let interaction = &run.area.interaction;
-    let fluids = interaction.explosions.explosive_fluids();
-    let can = reference
-        .tanks
-        .iter()
-        .filter(|t| t.role == crate::reference::TankRole::Portable)
-        .map(|t| t.item)
-        .find(|&id| {
-            let state = run.area.items.get(id).unwrap();
-            interaction.tank_explosion(id).is_some_and(|e| {
-                crate::interaction::explosions::tank_factor(
-                    e,
-                    state.fluid.as_ref().unwrap(),
-                    fluids,
-                    1e6,
-                )
-                .is_some()
-            })
-        })
-        .expect("an explosive garage can");
+    let can = garage_can(&run, &reference);
     let body = run.area.items.get(can).unwrap().body;
     let on_body: Vec<ItemId> = run
         .area

@@ -8,7 +8,16 @@ use std::hash::Hash;
 #[serde(deny_unknown_fields)]
 pub struct SourceKey {
     pub file: String,
+    /// A number inside `lossless` records, which decode every `path_id` to a number.
+    #[serde(deserialize_with = "decimal_text")]
     pub path_id: String,
+}
+fn decimal_text<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::String(text) => Ok(text),
+        serde_json::Value::Number(number) if number.is_i64() => Ok(number.to_string()),
+        _ => Err(serde::de::Error::custom("Invalid source key path")),
+    }
 }
 impl From<&SourceId> for SourceKey {
     fn from(source: &SourceId) -> Self {
@@ -184,7 +193,12 @@ pub mod lossless {
     }
     fn scalar(value: &mut Value, encode: bool) -> Result<(), String> {
         if encode {
-            *value = Value::String(value.as_i64().ok_or("Invalid source integer")?.to_string());
+            // A `SourceKey` path is already decimal text.
+            let number = match value {
+                Value::String(text) => text.parse::<i64>().map_err(|_| "Invalid source integer")?,
+                _ => value.as_i64().ok_or("Invalid source integer")?,
+            };
+            *value = Value::String(number.to_string());
         } else {
             let text = value
                 .as_str()

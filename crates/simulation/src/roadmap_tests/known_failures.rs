@@ -41,7 +41,7 @@ fn tp_k5_s1_a_stored_save_starts_the_session_and_its_restore_finishes() {
 }
 
 /// K3. Source `fpscontroller` use ray on a car door handle from outside: the aim takes the door
-/// mechanism, the HUD shows the door action and E opens the door.
+/// mechanism, the HUD shows the door action and E with the mouse opens the door.
 #[test]
 #[ignore = "requires the installed source export"]
 fn tp_k3_e_on_the_outside_door_handle_opens_the_door() {
@@ -151,14 +151,22 @@ fn tp_k3_e_on_the_outside_door_handle_opens_the_door() {
             ..Default::default()
         },
     );
-    for _ in 0..30 {
-        press(
-            &mut run,
-            FrameInput {
-                held: keys::USE,
-                ..Default::default()
-            },
-        );
+    // Source `fpscontroller.UseUsable`: a held E drags the door with the mouse. The closed
+    // door turns one way only, so try both.
+    for x in [6., -6.] {
+        for _ in 0..30 {
+            press(
+                &mut run,
+                FrameInput {
+                    held: keys::USE,
+                    mouse: [x, 0.],
+                    ..Default::default()
+                },
+            );
+        }
+        if run.area.interaction.mechanisms.rotation_degrees(door) != before {
+            break;
+        }
     }
     press(
         &mut run,

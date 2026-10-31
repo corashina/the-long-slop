@@ -1,26 +1,16 @@
 //! X05: world part conditions repair and paint live, like garage surfaces, and stay after save
 //! and load.
 use super::kit::*;
-use super::*;
 use crate::world::ObjectKey;
 
 #[test]
 #[ignore = "requires the installed source export"]
 fn lada_part_paint_and_repair_change_its_appearance_and_save() {
-    let reference = reference();
-    let mut run = GarageRuntime::new_default(&reference).unwrap();
-    let mut lada = None;
-    for _ in 0..2000 {
-        lada = run.vehicles.keys().find_map(|key| match key {
-            ObjectKey::Generated(id) if id.layer == WorldLayer::Startup => Some(id.clone()),
-            _ => None,
-        });
-        if lada.is_some() {
-            break;
-        }
-        frame(&mut run, &reference);
-    }
-    let lada = lada.expect("start car spawns");
+    // A started game: change capture runs in the started step.
+    let (reference, mut run) = load_garage();
+    let Some(ObjectKey::Generated(lada)) = run.vehicle.clone() else {
+        panic!("start car spawns");
+    };
     let content = run
         .stream
         .contents

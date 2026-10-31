@@ -101,15 +101,26 @@ impl WorldStream {
         storage: &mut StorageLocks,
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
-        let Some(body) = items.get(item).and_then(|s| s.body) else {
+        if items.get(item).and_then(|s| s.body).is_none() {
             return Ok(());
-        };
+        }
         storage.unbind_owner(item, |_, _| false, items, physics)?;
+        // Destroy takes the child items too (a bottle cap).
+        let children: Vec<ItemId> = items
+            .iter()
+            .filter(|s| !s.removed && items.descends(s.id, item))
+            .map(|s| s.id)
+            .collect();
+        // Change capture forgets the children: the instance removal covers them.
         self.changes.remove(items.object_key(item));
-        physics.edit_body(body, |body| body.set_enabled(false));
+        for id in children.into_iter().chain([item]) {
+            if let Some(handle) = items.get(id).and_then(|s| s.body) {
+                physics.edit_body(handle, |body| body.set_enabled(false));
+            }
+            items.get_mut(id).expect("removed item").removed = true;
+            items.mark_dirty(id);
+        }
         physics.refresh_queries();
-        items.get_mut(item).expect("removed item").removed = true;
-        items.mark_dirty(item);
         Ok(())
     }
     /// Source Break of a lamp trigger: flashlightscript.Break, then Destroy unless noDestroy.
