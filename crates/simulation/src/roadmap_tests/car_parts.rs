@@ -463,3 +463,145 @@ fn tp_cp1_hood_and_trunk_lid_refit_and_repair() {
         "wire brush and sponge repair: {improved:?}"
     );
 }
+
+/// Holds LMB with the tool in the hand for `frames` inventory frames. Returns the frames with
+/// work, with sound, with particles, and the tool model travel.
+fn use_tool(
+    run: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    item: crate::reference::ItemId,
+    frames: usize,
+) -> (usize, usize, usize, f32) {
+    use crate::simulation::{FrameInput, keys};
+    let (mut work, mut sound, mut particles, mut travel) = (0, 0, 0, 0f32);
+    let rest = rapier3d::math::Vector::from_array(
+        run.area
+            .interaction
+            .cleaning
+            .signal(item)
+            .unwrap()
+            .pose
+            .position,
+    );
+    for i in 0..frames {
+        let input = FrameInput {
+            held: keys::PRIMARY,
+            pressed: if i == 0 { keys::PRIMARY } else { 0 },
+            // Scrub: the mouse moves the view left and right.
+            mouse: [if (i / 8) % 2 == 0 { 4. } else { -4. }, 0.],
+            ..FrameInput::default()
+        };
+        super::weapons::input(run, reference, input);
+        let cleaning = &run.area.interaction.cleaning;
+        let s = cleaning.signal(item).unwrap();
+        work += usize::from(s.doing_work);
+        sound += usize::from(s.playing && s.voice_gain > 0.);
+        particles += usize::from(!cleaning.particles(item, 0).is_empty());
+        let at = rapier3d::math::Vector::from_array(s.pose.position);
+        travel = travel.max((at - rest).length());
+    }
+    super::weapons::input(
+        run,
+        reference,
+        FrameInput {
+            released: keys::PRIMARY,
+            ..FrameInput::default()
+        },
+    );
+    (work, sound, particles, travel)
+}
+
+/// Stands 1.8 m out from the start car center line, on the player side, and aims at the body.
+fn face_the_car(run: &mut GarageRuntime, reference: &ReferenceManifest) {
+    use rapier3d::math::Vector;
+    let key = run.vehicle.clone().unwrap();
+    let chassis = *run.physics.rapier().bodies[run.physics.chassis_handle(&key)].position();
+    let player = Vector::from_array(run.area.player.body_pose(&run.physics).position);
+    let sign = (chassis.inverse() * player).x.signum();
+    let stand = chassis * Vector::new(sign * 1.8, 0., 0.);
+    stand_near(run, reference, stand.to_array(), 0.);
+    let target = chassis * Vector::new(sign * 0.5, 0.3, 0.);
+    run.area.player.look_at(target.to_array(), &run.physics);
+    frame(run, reference);
+}
+
+/// Rust and dirt on the start car, so the brush and the sponge have work.
+fn rust(run: &mut GarageRuntime) {
+    for (id, ..) in start_car_conditions(run) {
+        let c = &mut run.area.interaction.conditions;
+        while c.get(id).state < 2 {
+            c.wear(id);
+        }
+    }
+}
+
+/// CP13-CP16. Source `drotkefescript.Use` and `sprayscript.Update` on loot tools: in the hand,
+/// LMB on a car part works. The brush model moves on the surface with particles and sound. The
+/// spray takes its color, sprays and runs out. A worn brush is disabled.
+#[test]
+#[ignore = "requires the installed source export"]
+fn tp_cp13_cp16_loot_tools_work_from_the_hand() {
+    let (reference, mut run) = load_garage();
+    settle(&mut run, &reference);
+    rust(&mut run);
+    let start = run.area.player.body_pose(&run.physics);
+    for name in ["drotkefe01", "sponge01", "spraypaint01"] {
+        // The sandbox places the tool in front of the player, clear of the car.
+        run.area.player.recover(start, &mut run.physics);
+        seconds(&mut run, &reference, 0.5);
+        let item = super::weapons::take(&mut run, &reference, "hand", name);
+        assert_eq!(
+            run.area.interaction.equipment.item(),
+            Some(item),
+            "{name} in the hand"
+        );
+        face_the_car(&mut run, &reference);
+        let quantity = run.area.interaction.cleaning.get(item).unwrap().quantity;
+        let used = use_tool(&mut run, &reference, item, 150);
+        let state = run.area.interaction.cleaning.get(item).unwrap();
+        eprintln!("{name}: work/sound/particles/travel {used:?}, {quantity:?} -> {state:?}");
+        let (work, sound, particles, travel) = used;
+        assert!(work > 0, "{name} works on the car");
+        assert!(particles > 0, "{name} shows particles");
+        if name == "spraypaint01" {
+            assert!(state.quantity < quantity, "the spray uses paint");
+            let color = state.color.expect("the can has a color");
+            let s = run.area.interaction.cleaning.signal(item).unwrap();
+            assert_eq!(s.color, color, "the can shows its color");
+            // Nearly empty: it runs out and stops.
+            run.area
+                .interaction
+                .cleaning
+                .get_mut(item)
+                .unwrap()
+                .quantity = Some(0.01);
+            use_tool(&mut run, &reference, item, 50);
+            let (work, ..) = use_tool(&mut run, &reference, item, 50);
+            assert_eq!(work, 0, "an empty can does not spray");
+        } else {
+            assert!(travel > 0.01, "{name}: the model moves on the surface");
+            if name == "drotkefe01" {
+                // Wear the brush out.
+                let own = run.area.interaction.conditions.item_condition(item);
+                let own = own.expect("the brush has its own condition");
+                // One state from worn out: the next finished repair wears it out.
+                while run.area.interaction.conditions.get(own).state < 4 {
+                    run.area.interaction.conditions.wear(own);
+                }
+                rust(&mut run);
+                face_the_car(&mut run, &reference);
+                use_tool(&mut run, &reference, item, 400);
+                face_the_car(&mut run, &reference);
+                let (work, ..) = use_tool(&mut run, &reference, item, 50);
+                let state = run.area.interaction.cleaning.get(item).unwrap();
+                assert!(state.disabled, "the worn brush is disabled");
+                assert_eq!(work, 0, "a worn brush stops working");
+            }
+        }
+        // Last, so the other checks run: the loot spray has no voice (FAIL in ROADMAP).
+        assert!(sound > 0, "{name} plays its sound");
+        // Drop the tool.
+        super::weapons::drop_hand(&mut run);
+        seconds(&mut run, &reference, 0.5);
+    }
+}
