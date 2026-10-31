@@ -217,7 +217,7 @@ Prepare once:
 11. The death screen effect fades in over 14 s, then the menu opens. Read the console for DeadV parameters the port ignores.
 12. Load a save: no ragdoll is left.
 13. Put on and take off each wearable type (glasses, hat, cap, helmet, mask) and the cigarette with Tab and X. The cigarette comes off first.
-14. Worn items are hidden in first person but cast shadows.
+14. Worn items are hidden in first person but cast shadows. The worn pumpkin inner mesh stays visible, as in the source.
 15. Save and load with worn items: they stay worn. Die: each worn item drops.
 16. Open Appearance from the start menu and the pause menu. The preview figure shows next to the panel with the export camera and lights. Check the figure pose, the lights and the colors. Changes show at once. Back and Escape save. Reload the page: the outfit stays.
 17. Set Male and Female with custom colors and disabled parts. Check them in game, in the shadow and on the ragdoll. Check the submesh colors of each segment.
@@ -263,7 +263,7 @@ Prepare once:
 
 1. See planes cross the sky at 600 m with their contrails and engine sound. The first plane comes at start, then one every 50 to 500 s, at most 3. About one in ten is a UFO: it spins and hums.
 2. Bats: set the PC date between 15 Oct and 15 Nov, start a new game and drive to a gas station. In 65% of stations, 5 to 30 bats fly near it, flap and squeak. Pick one up: it keeps squeaking and does not fly out of the hand. Save and load near the bats.
-3. Rabbits spawn 30 to 100 m away, first at start, then every 50 to 100 s, at most 10. Big ones are larger and slower.
+3. Rabbits spawn outside the view, up to 100 m around a point 100 m from the player, first at start, then every 50 to 100 s, at most 10. Big ones are larger and slower. Drive far away: far rabbits unload, new ones spawn near, and the old ones come back when you return.
 4. They roam, run from the player and from shots, and jump over small obstacles. Their ears twitch.
 5. They die on hard hits, falls and head shots, with a die sound. A head shot can take the eyes (eyes hide) or the ears.
 6. Dead rabbits fall as ragdolls. Pick up and carry a bone: the body follows.
@@ -312,15 +312,11 @@ Prepare once:
 
 Re-export first: the export now holds `playeranimationscript.sendInterval`. Use two browser tabs on one PC first, then two PCs.
 
-1. Host from the pause menu: a 6-letter room code shows. Join from the start menu with the code and a name.
 2. The guest loads the host world and stands where the host stood. A host in a car seat puts the guest in the same seat until M02.
 3. Each player sees the other walk, run, duck, prone, look up and down, and carry items. Names show above the heads.
 4. Sit in the Lada as driver and passenger: the figure sits in the seat.
 5. Outfit: change the appearance on one peer. The other peer sees the change.
-6. Press Enter to chat. Messages show on all peers for 10 s. The multiplayer screen shows each player and its ping.
 7. Wrong code, wrong password and a full room each show their message. A different build shows "Different game version."
-8. A guest closes the tab: its figure goes away within 5 s. The host closes the tab: guests see "Host left." and keep playing alone.
-9. The guest cannot save: Save, Load and New game hide in the pause menu. Autosave does not run on the guest.
 10. Name labels stand above the heads. Check the label height (port choice 2.1 m).
 11. Each figure keeps its own outfit colors. The local body colors do not change.
 12. F3 with 1 and with 7 remote players. Report the frame time cost per figure.

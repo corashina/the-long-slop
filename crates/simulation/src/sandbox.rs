@@ -69,6 +69,8 @@ enum SeatKind {
 /// Sandbox state that lives across commands.
 #[derive(Default)]
 pub struct Sandbox {
+    /// JSON arrays of commands that wait for a command without hold.
+    pub queued: Vec<String>,
     /// Replies that the next frame sends.
     pub replies: Vec<String>,
     /// Absolute pose of each held car before its first move. `garage` puts the car back there.
@@ -83,8 +85,14 @@ struct Reply {
     data: Value,
 }
 
-/// Runs the commands of one JSON array. Each command adds one JSON reply.
-pub fn run(
+/// Runs the queued JSON arrays. Each command adds one JSON reply.
+pub fn run(runtime: &mut GarageRuntime, reference: &ReferenceManifest, sandbox: &mut Sandbox) {
+    for json in std::mem::take(&mut sandbox.queued) {
+        run_batch(runtime, reference, &json, sandbox);
+    }
+}
+
+fn run_batch(
     runtime: &mut GarageRuntime,
     reference: &ReferenceManifest,
     json: &str,
@@ -166,7 +174,9 @@ fn apply(
             } else {
                 1.
             };
-            let pose = to_rapier(ahead(runtime, forward));
+            // The rabbit faces the player.
+            let mut pose = to_rapier(ahead(runtime, forward));
+            pose.rotation *= Rotation::from_rotation_y(std::f32::consts::PI);
             let id = runtime
                 .creatures
                 .spawn_rabbit(
@@ -376,9 +386,7 @@ fn sit(
         .interaction
         .item_seats()
         .filter(|seat| {
-            wanted
-                .as_ref()
-                .is_none_or(|w| name(seat).to_lowercase().contains(w))
+            wanted.as_ref().is_none_or(|w| car_matches(name(seat), w))
                 && kind.is_none_or(|k| seat.seat.driver == matches!(k, SeatKind::Driver))
                 && seat.can_sit(&runtime.physics)
         })
@@ -398,6 +406,16 @@ fn sit(
         return Err("Cannot sit there.".into());
     }
     Ok(found)
+}
+
+/// The root name (Car02Full), the game name (Volna) or, for the Volna, "Lada" contains `wanted`.
+fn car_matches(root: &str, wanted: &str) -> bool {
+    let game = crate::interaction::labels::vehicle_name(root).unwrap_or("");
+    let lada = if game == "Volna" { "lada" } else { "" };
+    !root.is_empty()
+        && [root, game, lada]
+            .iter()
+            .any(|n| !n.is_empty() && n.to_lowercase().contains(wanted))
 }
 
 /// Spawns a wearable in front of the player and puts it on, as the short Tab release does.
@@ -863,6 +881,8 @@ fn creatures(runtime: &GarageRuntime, reference: &ReferenceManifest) -> Vec<Valu
                 "roar"
             } else if r.brain.fleeing {
                 "flee"
+            } else if r.brain.targeting {
+                "target"
             } else {
                 "roam"
             };
@@ -878,6 +898,7 @@ fn creatures(runtime: &GarageRuntime, reference: &ReferenceManifest) -> Vec<Valu
                 "eyes": r.senses.has_eyes,
                 "ears": r.senses.has_ears,
                 "state": state,
+                "death": r.death.map(|d| format!("{d:?}").to_lowercase()),
             })
         });
     let bats = runtime.flyers.flyers().iter().map(|f| {
@@ -947,6 +968,8 @@ mod tests {
         let action = serde_json::from_value::<Action>(
             json!({"action": "seat", "car": null, "seat": "passenger"}),
         );
+        assert!(car_matches("Car02Full", "volna") && car_matches("Car02Full", "lada"));
+        assert!(car_matches("Car02Full", "car02") && !car_matches("Car07Full", "lada"));
         assert!(matches!(
             action,
             Ok(Action::Seat {
