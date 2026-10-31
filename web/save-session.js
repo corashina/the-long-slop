@@ -6,6 +6,11 @@ export function lastSave({saves,autosave,last},buildId){
  return entry&&entry.version===buildId?last:null;
 }
 export function canLoadLast(list,buildId){return lastSave(list,buildId)!==null;}
+// The save of the page start: a Load reload, else with "Load last save at start" the last save, except after New game.
+export async function startSave({loadName,newGame,autoLoad,list,buildId}){
+ if(loadName!==null)return loadName;
+ return !newGame&&autoLoad?lastSave(await list(),buildId):null;
+}
 
 // `reload` starts the page again from a stored save. It does not resolve.
 export function createSaveSession({storage,runtime,drawDistance,reload,onStatus=()=>{}}){

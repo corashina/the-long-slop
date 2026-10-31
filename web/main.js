@@ -41,7 +41,7 @@ import {actionIndex,compileBindings,inputsField} from './bindings.js';
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
 import {manifestStamp,createSaveStorage,verifyRecord,AUTOSAVE} from './save-storage.js';
-import {createSaveSession,lastSave} from './save-session.js';
+import {createSaveSession,startSave} from './save-session.js';
 import {createSaveBridge} from './save-bridge.js';
 import {createThumbnail} from './thumbnail.js';
 import {createAutosave} from './autosave.js';
@@ -264,7 +264,7 @@ async function load(){
  // The world of a Join reload, of a Load reload, or of Load last at start. `save` is its JSON.
  let joined;
  const storedSave=async()=>{
-  const name=loadName??(newGameSeed===undefined&&settings.values.BAutoLoad?lastSave(await saveStorage.list(),manifest.build_id):null);
+  const name=await startSave({loadName,newGame:newGameSeed!==undefined,autoLoad:settings.values.BAutoLoad,list:()=>saveStorage.list(),buildId:manifest.build_id});
   if(name===null)return null;
   const record=await saveStorage.read(name);if(record===null)throw new Error('No saved game.');
   return {save:new TextEncoder().encode(JSON.stringify(await verifyRecord(record))),operation:'load'};

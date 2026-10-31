@@ -593,3 +593,44 @@ pub(crate) fn take(run: &mut GarageRuntime, reference: &ReferenceManifest, item:
 pub(crate) fn set_calendar(month_day: [u8; 2]) {
     CALENDAR.set(month_day);
 }
+
+/// Publishes the sandbox placements (`spawn`, `hand`, `equip` of a world prototype) as the browser
+/// renderer accepts them. The required publication does not hold them.
+pub(crate) fn load_placements(run: &mut GarageRuntime, reference: &ReferenceManifest) {
+    for _ in 0..600 {
+        let stream = &mut run.stream;
+        let pending: Vec<_> = stream
+            .added_placement_audit()
+            .into_iter()
+            .map(|(p, _)| p.id.clone())
+            .filter(|id| {
+                !stream.structures.iter().any(|s| &s.placement.id == id)
+                    && !stream.ready_structures.contains(id)
+            })
+            .collect();
+        if pending.is_empty() {
+            return;
+        }
+        let placement = stream
+            .wanted_structures
+            .iter()
+            .find(|p| pending.contains(&p.id) && stream.contents_initialized(&p.id))
+            .cloned()
+            .filter(|_| stream.can_request_independent(1));
+        if let Some(p) = placement {
+            stream.hold_prototype(p.prototype.clone()).unwrap();
+            stream.bind_prototype(&p.prototype).unwrap();
+            stream.bind_structure_recipe(&p.prototype).unwrap();
+            accept_structure(stream, &p.id);
+        }
+        frame(run, reference);
+    }
+    panic!(
+        "sandbox placements do not load: {:?}",
+        run.stream
+            .added_placement_audit()
+            .iter()
+            .map(|(_, a)| a)
+            .collect::<Vec<_>>()
+    );
+}

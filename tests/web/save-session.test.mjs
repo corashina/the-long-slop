@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {webcrypto as crypto} from 'node:crypto';
-import {canLoadLast,createSaveSession} from '../../web/save-session.js';
+import {canLoadLast,createSaveSession,startSave} from '../../web/save-session.js';
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 async function record(payload){const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(payload)));return {version:1,payload,checksum:Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('')};}
@@ -52,4 +52,22 @@ test('load_last_requires_matching_build',async()=>{
 });
 test('remove_deletes_named_save',async()=>{
  const {session,calls}=setup();await session.remove('a');assert.deepEqual(calls.remove,['a']);assert.equal(session.pending,false);assert.equal(calls.status.at(-1).operation,'remove');
+});
+// S2, K5: source `settingsscript.BAutoLoad` loads the last save at the scene start. A Load or Load last
+// reload names its save. New game starts empty.
+test('tp_s2_k5_the_page_start_loads_the_named_save_else_the_last_save_with_auto_load',async()=>{
+ const list={saves:[{name:'a',version:3}],autosave:{name:'autosave',version:3},last:'a'};
+ let reads=0;const read=async()=>{reads++;return list;};
+ const start=options=>startSave({loadName:null,newGame:false,autoLoad:true,list:read,buildId:3,...options});
+ assert.equal(await start({loadName:'autosave'}),'autosave');
+ assert.equal(await start({}),'a');
+ assert.equal(await start({autoLoad:false}),null);
+ assert.equal(await start({newGame:true}),null);
+ assert.equal(await start({buildId:4}),null);
+ assert.equal(reads,2);
+ // Load last reloads with the last save name, which the next start loads.
+ const {session,calls}=setup({storage:{list:read}});
+ await session.loadLast(3);
+ assert.deepEqual(calls.reload,['a']);
+ assert.equal(await start({loadName:calls.reload[0],autoLoad:false}),'a');
 });
