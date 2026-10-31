@@ -75,34 +75,14 @@ Blocked checks. Each waits for the fix of its bug. Run them in the next build's 
 - CP12: Paint and brush a roadside car part. Drive away until it unloads, come back: the part keeps its look. Save and load: it still keeps it.
 - CP17: Save and load. Loot tool paint left, color and wear stay. Drive away and back: they stay.
 - W15: Drop an item, drive about 10 km out and back, save and reload. The item stays where it was dropped.
-- MC5: New game. The Lada stands at its garage spot. Drive it, use lights, gauges, radio, horn, wheels off and on, cargo in the trunk. Save and load.
-- MC6: Drive the Lada far from the garage and back: it must not vanish.
-- MC8: Wheel effects: dust on sand and none on asphalt, grass trails, rolling, spring and skid sounds, smoke and sand bursts while skidding.
-- MC9: Mouse driving: U toggles it in the car. Mouse X steers, mouse up is gas, down is brake, mouse look is off.
-- MC11: Find a small trailer and a bus trailer. Pick up the grip and put it on the Lada hitch. Drive, turn, reverse and brake.
-- MC12: Check the trailer rear and brake lamps follow the Lada lights, ignition and brake. Check the bus trailer brake switch.
-- MC13: Pick the grip off the hitch while the car stands and while it rolls. Save and load with the trailer on the hitch.
-- MC14: Tow a trailer far from where it spawned and back: car, trailer and grip must not vanish or freeze apart.
-- MC26: Pick each start car in the Game mode screen, then Random a few times. Each car starts, drives, saves and loads. StartCar06 diesel comes with 0.5 L diesel.
-- MC30: Drive past groups of roadside cars for 2 km. F3 bodies and generated objects fall back after you pass. Your start car and last car keep their area.
-- MC31: Tow a small trailer and drive Bus02 with its trailer: wheel meshes turn and steer. Bus02 leaf springs, axles and tipper rams follow the wheels.
-- CC4: Drive: the view turns behind the car, faster at higher speed.
-- CC9: Drive the Lada into a wall at low, medium and high speed. Light parts (mirrors, hubcaps) fall off first. Fast crashes drop more parts. Worn parts fall off sooner.
-- CC10: Fallen parts do not lock into the trunk until you pick them up. Refit them with F.
-- CC11: A crash can sound the horn. A hard crash puts blood in the car with a sound. A second hard crash kills you.
-- CC12: Wash the blood off with the sponge. The next hard crash only puts blood in the car again.
-- CC13: Save and load with blood in the Lada and in a world car. The blood stays. Drive away from the world car and back: the blood stays.
 - PB5: Drive the Lada. Use the horn, lights, ignition (tap and hold), handbrake and gear stick: a hand moves to each. Press gas, brake and clutch: the feet move to the pedals.
 - PB9: Die on foot and in a moving car. The body falls with joint limits and carries the car speed.
-- PM2: Stand on a trailer bed or the Lada roof while it moves fast: you slide off. While it moves slowly: you ride.
 - AR3: Drive the Lada at speed. The dashboard, wheel and hands stay sharp. The road and terrain behind them have no ghost copies.
 - AR12: Park three cars near the garage. Each car body reflects its own surroundings, and the reflections update as the cars and the sun move.
 
 #### BL: the player cannot exit the car in the garage
 
-- CC5: Tap C: back to the cockpit. Repeat on the passenger seat and on a sled or bike seat.
 - PB1: Look down standing, crouching, walking forward and back. Carry a light and a heavy (>10 kg) item. Sit in the Lada (driver and passenger), on the WC and on the sled. Check legs, arms and hands on the wheel.
-- MP4: Sit in the Lada as driver and passenger: the figure sits in the seat.
 
 #### S3: Load last hangs
 
@@ -177,43 +157,7 @@ Prepare once:
 13. Metal detector: turn it on and off with use. Check the beep pitch and volume and the needle near metal, buried metal, and behind a wall. Save and load with it on.
 17. Move far in one step (sandbox building('Benzinkut01'), or load a far save). Wait while the area loads. The game does not stop with "validated authored material choice".
 
-### More cars
-
-1. Sit on the WC and on each sled seat. Stand up. Check the view limits and the prompt.
-2. Sled: slide down a slope, steer, reverse, stop. Check the slide sound follows speed and stops in the air. Load the sled with items above its slide mass: it slides without a rider.
-3. Ride a sled away from its building: it must not freeze or vanish. You cannot pick up or store a sled you sit on.
-4. Save and load seated on the sled and on the WC.
-7. Gear lever: the Lada lever moves through each gear in manual and automatic.
-10. Steering wheel: with a real wheel or pad, bind every axis and gear button. Check H-shifter on and off and the live values. Steer a sled with the pad.
-15. Check the trailer reflection probe.
-16. Find Bus01, Bus02 and Bus03. Fill a bus with diesel and drive it. With petrol the engine must fail to start.
-17. Bus01: both gauge parts in their kmh slots read speed. Check the counters and the gauge lamps.
-18. Bus doors: the signal button lights green, the open button swings the leaves and lights red. Check the leaf sounds and the stretching colliders. Buttons do nothing without electronics power.
-19. Bus02 trailer: put its grip on the bus hitch. Drive and turn. Its brake switch sets brake force 100 on each wheel. Its rear lamps follow the bus lights and brake.
-20. Save and load with bus doors open and signalled and with the trailer on the bus.
-21. Find Bike01 and Bike03. Ride Bike01: it stays upright, leans into turns, and falls over when nobody rides or pushes it.
-22. Kick start Bike01: ignition on, roll it fast enough, the engine starts with its start sound. No starter motor.
-23. Push a bike and the Lada by hand with their grips. The bike stays upright while you push it.
-24. Bike03: pedal with W from rest. The pedals and feet turn. Kick start the engine by pedaling; pedals stop while the engine runs. Fuel comes from its tank parts.
-25. Swap bike parts: wheels, mirrors, headlight, basket, bag, gauge, tanks. Save and load seated on each bike.
-27. Two-stroke cars (car03, car09, car10): run them on a 2.5 % oil mix, then on plain petrol. The engine weakens without oil. Check the oil lamp.
-28. Find roadside bare and full cars, also Car07 and a bare Lada, and no Car06P. Parts, fluids, rust and body variants differ between copies. No bus spawns as a roadside car.
-29. Car07 shifts by itself in manual mode. Its dashboard clock shows game time, and its knob sets the time.
-32. Look at the Lada, a roadside car, a bus and each bike. The hover text shows the game name, such as "Volna Kombi", not "Car02kFull". The Game mode start car list shows the same names.
-
-### Car camera and crash damage
-
-1. Sit in the Lada driver seat. Tap C: the outside view orbits the car with the mouse. Pitch stops at about 89 degrees.
-2. Hold Q and move the mouse: the view pans up to 1.5 m. Shift+Q pans forward and back.
-3. Scroll: zoom from 1 to 30 m. Hold Tab: the view goes back to 5 m and the default angle.
-6. Hold C for 0.4 s: the camera stays at its spot and turns with the mouse. Hold C again: it follows the car. Tap C: back to the view before.
-7. Press M in a seat: the camera rises over 1/3 s and looks down. Scroll sets the height from 2.5 to 200 m. Q and the mouse pan. Tab recenters. Press M again: the camera comes back down.
-8. In each other view: E does not get out or use things, prompts and the crosshair hide, worn items show, and the sunglasses tint is off. Sleep is not possible.
-15. Overheat a car engine above 110 degrees with coolant: steam rises under the hood and the boil sound grows with the heat. Check that steam is not lost inside the hood colliders. Car08 and Car08c have no steam.
-16. Sit in the garage Volna with the doors closed. E does not get out, same as the original. Drag the driver door open with LMB, look out through it and press E: you get out.
-
 ### Saves
-
 
 ### Settings
 
@@ -254,12 +198,6 @@ Prepare once:
 23. Lenses with the flare flag hide the sun flare. Other lenses keep it.
 25. Take the glasses off: the tint clears. Die with them on: the tint clears and the death effect fades in.
 26. Save and load with the glasses worn: the tint comes back. Read the console for a warning about more than one active lens.
-
-### Player movement
-
-1. Park a bus on a slope, release the handbrake and stand inside while it rolls. The player rides inside.
-3. Jump inside a moving bus: you land in the same place.
-4. Jump at a wall: one extra push. Jump at a ledge: a second push. Hold jump below the ledge: you grip and stop falling, then jump up.
 
 ### Weapons and damage
 
