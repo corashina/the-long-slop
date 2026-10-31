@@ -11,7 +11,7 @@ use crate::world::stream::tests::kit::*;
 use rapier3d::math::{Pose, Vector};
 
 /// Frames from one press to the next.
-const PRESS_FRAMES: usize = 50;
+pub(super) const PRESS_FRAMES: usize = 50;
 
 /// Spawns item `name` (a catalog or world prototype root name) 1.5 m in front of the player and
 /// returns its item. A world prototype waits for the stream.
@@ -69,12 +69,12 @@ fn take(
 }
 
 /// Puts gun `name` in the hand with full ammo.
-fn equip(run: &mut GarageRuntime, reference: &ReferenceManifest, name: &str) -> ItemId {
+pub(super) fn equip(run: &mut GarageRuntime, reference: &ReferenceManifest, name: &str) -> ItemId {
     take(run, reference, "equip", name)
 }
 
 /// One frame with `input`: the inventory frame, as the driver runs it, then one fixed step.
-fn input(run: &mut GarageRuntime, reference: &ReferenceManifest, input: FrameInput) {
+pub(super) fn input(run: &mut GarageRuntime, reference: &ReferenceManifest, input: FrameInput) {
     let view = run.area.player.view(&run.physics).head_pose;
     let frame_input = run
         .advance_inventory_frame(reference, input, FIXED_DT, view)
@@ -83,7 +83,7 @@ fn input(run: &mut GarageRuntime, reference: &ReferenceManifest, input: FrameInp
 }
 
 /// One frame of repeated short presses of `key` with `held` keys down.
-fn press_frame(
+pub(super) fn press_frame(
     run: &mut GarageRuntime,
     reference: &ReferenceManifest,
     i: usize,

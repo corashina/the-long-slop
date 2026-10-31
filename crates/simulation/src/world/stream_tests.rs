@@ -4,13 +4,13 @@ mod bikes;
 #[path = "stream_tests/breakables.rs"]
 mod breakables;
 #[path = "stream_tests/car_types.rs"]
-mod car_types;
+pub(crate) mod car_types;
 #[path = "stream_tests/cargo.rs"]
 mod cargo;
 #[path = "stream_tests/crash.rs"]
 mod crash;
 #[path = "stream_tests/drive_out.rs"]
-mod drive_out;
+pub(crate) mod drive_out;
 #[path = "stream_tests/explosions.rs"]
 mod explosions;
 #[path = "stream_tests/garage_controls.rs"]

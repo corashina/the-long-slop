@@ -75,7 +75,7 @@ fn fill(run: &mut GarageRuntime, tank: ItemId, mix: [f32; 6]) {
 
 /// Fuel of the mix the mounted engine wants (car06 can have the diesel engine), oil and water.
 /// A two-stroke gets its oil in the fuel mix (petrol and 2.5% oil) and no sump oil.
-fn fill_fluids(run: &mut GarageRuntime, key: &ObjectKey) {
+pub(crate) fn fill_fluids(run: &mut GarageRuntime, key: &ObjectKey) {
     let mounted = run.powertrain.mounted_on(&run.area.items, key);
     let engine = run
         .powertrain
@@ -100,7 +100,7 @@ fn fill_fluids(run: &mut GarageRuntime, key: &ObjectKey) {
     }
 }
 
-fn absolute(run: &GarageRuntime, key: &ObjectKey) -> ([f64; 3], [f32; 4]) {
+pub(crate) fn absolute(run: &GarageRuntime, key: &ObjectKey) -> ([f64; 3], [f32; 4]) {
     let pose = run.physics.snapshot(key).pose;
     (run.stream.origin.absolute(pose.position), pose.rotation)
 }
@@ -109,13 +109,13 @@ fn horizontal(a: [f64; 3], b: [f64; 3]) -> f64 {
     ((a[0] - b[0]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
 }
 
-fn running(run: &GarageRuntime, key: &ObjectKey) -> bool {
+pub(crate) fn running(run: &GarageRuntime, key: &ObjectKey) -> bool {
     run.engine_output(key).running
 }
 
 /// Steps frames with `held` and `player_held` keys until `done` or `seconds` pass. `pressed` acts
 /// on the first frame.
-fn hold(
+pub(crate) fn hold(
     run: &mut GarageRuntime,
     reference: &ReferenceManifest,
     held: u32,

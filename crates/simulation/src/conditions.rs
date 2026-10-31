@@ -266,6 +266,10 @@ impl ConditionStore {
     pub fn item_state(&self, item: ItemId) -> Option<u8> {
         self.items.get(&item).map(|id| self.get(*id).state)
     }
+    /// The condition of item `item`.
+    pub fn item_condition(&self, item: ItemId) -> Option<ConditionId> {
+        self.items.get(&item).copied()
+    }
     pub fn item_quality(&self, item: ItemId) -> Option<f32> {
         self.items.get(&item).map(|id| self.quality(*id))
     }
