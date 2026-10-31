@@ -172,6 +172,7 @@ Prepare once:
 13. Save and load with blood in the Lada and in a world car. The blood stays. Drive away from the world car and back: the blood stays.
 14. Blow up a tank next to a car. Parts fall off.
 15. Overheat a car engine above 110 degrees with coolant: steam rises under the hood and the boil sound grows with the heat. Check that steam is not lost inside the hood colliders. Car08 and Car08c have no steam.
+16. Sit in the garage Volna with the doors closed. E does not get out, same as the original. Drag the driver door open with LMB, look out through it and press E: you get out.
 
 ### Saves
 

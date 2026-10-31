@@ -43,29 +43,38 @@ fn start_car_driver_exits_in_garage() {
     }
     eprintln!("exits at yaw {exits:?} with the doors closed");
     // Source CanGetOut casts toward the view on useLayer. A closed door stops the search.
-    for pitch in [0., -20., -40.] {
-        look(&mut run, 270., pitch);
-        frame(&mut run, &reference);
-        eprintln!(
-            "door press at pitch {pitch}:\n{}",
-            run.area.player.exit_trace(&run.physics)
-        );
-        frame_with(
-            &mut run,
-            &reference,
-            FrameInput {
-                held: keys::USE,
-                pressed: keys::USE,
-                ..FrameInput::default()
-            },
-        );
-        settle(&mut run, &reference, 1.);
-        look(&mut run, 270., 0.);
-        frame(&mut run, &reference);
-        if run.area.player.can_exit(&run.physics) {
-            eprintln!("exit clear after the press at pitch {pitch}");
-            exits.push(270.);
-            break;
+    // Doors open with an LMB drag.
+    'open: for pitch in [0., -30.] {
+        for mouse in [[5., 0.], [-5., 0.], [0., 5.], [0., -5.]] {
+            look(&mut run, 270., pitch);
+            frame(&mut run, &reference);
+            for index in 0..40 {
+                frame_with(
+                    &mut run,
+                    &reference,
+                    FrameInput {
+                        held: keys::PRIMARY,
+                        pressed: if index == 0 { keys::PRIMARY } else { 0 },
+                        mouse,
+                        ..FrameInput::default()
+                    },
+                );
+            }
+            frame_with(
+                &mut run,
+                &reference,
+                FrameInput {
+                    released: keys::PRIMARY,
+                    ..FrameInput::default()
+                },
+            );
+            look(&mut run, 270., 0.);
+            frame(&mut run, &reference);
+            if run.area.player.can_exit(&run.physics) {
+                eprintln!("exit clear after a drag at pitch {pitch} with mouse {mouse:?}");
+                exits.push(270.);
+                break 'open;
+            }
         }
     }
     eprintln!("after door: {}", run.area.player.exit_trace(&run.physics));
