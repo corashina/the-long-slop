@@ -62,6 +62,9 @@ Known failures on master c0da737f (2026-10-30 browser retest), fix before the ne
 - W15: `w02_long_trip_keeps_far_edits`. The required publication stalls after the car moves out.
 - CR2: `tp_cr2_halloween_bats_near_buildings`. On Halloween, the area near the 2nd road building (about 14.6 km out) fails with "Generated condition: state". The same area loads in June.
 - W17: `tp_w17_far_move_to_the_first_gas_station_loads`. A far move to the first gas station on the road (about 7.7 km out) never loads: the road plan does not finish.
+- CP5, CP6: `r05_cargo_locks_in_trunk`. The driver cannot exit the Lada in the garage (BL), so the cargo checks do not run.
+- CP7: `tp_cp7_turned_wheels_stay_after_save_and_load`. The seated driver holds steer left, but the garage Lada steer stays 0.
+- CP8, CP9, CP11: `lada_part_paint_and_repair_change_its_appearance_and_save`. Paint on a Lada part is not a world change, so it does not save.
 
 Blocked checks. Each waits for the fix of its bug. Run them in the next build's test pass.
 
@@ -117,9 +120,7 @@ Prepare once:
 
 ### Car parts and repair
 
-1. Repair: swap the hood and the trunk lid, repair rust and dirt.
-2. Electronics: check the Lada radiator fan spins while the engine runs, and stops with the engine. Swap in a loot radiator: its fan spins too.
-3. Exhaust smoke: rate follows rpm, color changes after a fuel mix change, 5x5 sheet animates. Check the particle quads are not upside down.
+2. Swap a loot radiator into the Lada: its fan spins while the engine runs.
 5. Cargo storage: lock items in the Lada trunk, glove box, and engine bay, and in a fridge, a pallet, and a coffin. Open the lid to release them. The source box is manual only: items in it when its area loads lock, items put in it later stay loose. Items in a fridge, pallet or coffin when its area loads lock at once, not after 3 s.
 6. Save and load with the hose attached and with cargo locked.
 7. Park the Lada with the wheels turned. Save and load: the wheels stay turned.
@@ -130,9 +131,6 @@ Prepare once:
 14. Clean rust and dirt with the loot wire brush and sponge. The brush model moves on the surface, with particles and sound.
 15. Paint a car part with loot spray paint. The can shows its color, sprays particles with sound, and runs out.
 16. Use a loot brush until it wears out. Its scrub part hides and it stops working.
-18. Start a new game. The Lada body is Used to Old, not 100%, and rust shows. Every new game draws the same state: the startup random is fixed.
-19. Pick two other start cars in the game mode menu. Each starts worn the same way.
-20. Look at the Lada oil cap and coolant cap. Each shows its name and level, like the fuel cap. E opens and closes it.
 
 ### World and terrain
 
@@ -174,12 +172,6 @@ Prepare once:
 2. Bats: set the PC date between 15 Oct and 15 Nov, start a new game and drive to a gas station. In 65% of stations, 5 to 30 bats fly near it, flap and squeak. Pick one up: it keeps squeaking and does not fly out of the hand. Save and load near the bats.
 10. A bite of a big evil rabbit damages loose items and other rabbits near the bite.
 12. Start a car engine near rabbits. Normal rabbits flee from it.
-
-### Small effects
-
-1. Drop and throw food and cut food pieces. Each makes its hit sound.
-2. Eat each food. Crumbs, meat, turd and chocolate bits fall from the food. Smoke a cigarette: ash falls now and then.
-4. New game between 15 October and 15 November: the start pumpkin glows and flickers at night. Hold it and wear it: the light follows.
 
 ### Multiplayer
 
