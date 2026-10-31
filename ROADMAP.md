@@ -56,6 +56,11 @@ Known failures on master c0da737f (2026-10-30 browser retest), fix before the ne
 - In game, pause > Load > Load last once stayed on "Loading..." for over 6 minutes, with no console messages.
 - 30 of 91 ignored simulation tests fail in release: MC2, BL, stale test data. Debug overflows the stack.
 - SA4: `hazard_trigger_damages_player_until_death` fails. The hazard trigger does not kill the player.
+- W6: `tp_w6_building_keeps_the_pole_with_the_nearest_target`. A building links to the pole whose target 0 is nearest, not the pole with the nearest target (`roadGenScript.CheckCableConnections`).
+- W12: `tp_w12_dig_up_refuse_pickup_and_save`. A buried item loads with a dynamic body. The source freezes it.
+- W13: `tp_w13_detector_beeps_near_metal_and_saves_on`. A metal detector saved on loads off.
+- W15: `w02_long_trip_keeps_far_edits`. The required publication stalls after the car moves out.
+- W17: `tp_w17_far_move_to_the_first_gas_station_loads`. A far move to the first gas station on the road (about 7.7 km out) never loads: the road plan does not finish.
 
 Blocked checks. Each waits for the fix of its bug. Run them in the next build's test pass.
 
@@ -69,7 +74,6 @@ Blocked checks. Each waits for the fix of its bug. Run them in the next build's 
 - CP12: Paint and brush a roadside car part. Drive away until it unloads, come back: the part keeps its look. Save and load: it still keeps it.
 - CP17: Save and load. Loot tool paint left, color and wear stay. Drive away and back: they stay.
 - W15: Drop an item, drive about 10 km out and back, save and reload. The item stays where it was dropped.
-- W16: Load the game at 500 m and at the largest draw distance, then drive for 5 minutes. The game does not stop with "Source renderer allocation exceeds its resource budget".
 - MC5: New game. The Lada stands at its garage spot. Drive it, use lights, gauges, radio, horn, wheels off and on, cargo in the trunk. Save and load.
 - MC6: Drive the Lada far from the garage and back: it must not vanish.
 - MC8: Wheel effects: dust on sand and none on asphalt, grass trails, rolling, spring and skid sounds, smoke and sand bursts while skidding.
@@ -161,18 +165,16 @@ Prepare once:
 
 ### World and terrain
 
-3. Load a Mixed save with Winter set. The world must load as winter.
-4. Check the winter color: colder view in Winter, changes at biome borders in Mixed. Check F3 in Mixed while the color grading rebakes.
-5. Sandstorms: spawn a storm near the player with sandbox `storm(50)`. Check sky, fog, light, sound, dust, wind on loose items, and that dust and wind stop inside buildings and cars. Check the F3 storm line. Save and load inside a storm.
+4. Check the winter color looks colder in Winter and at biome borders in Mixed. Check F3 in Mixed while the color grading rebakes.
+5. Sandstorms: spawn a storm near the player with sandbox `storm(50)`. Check sky, fog, light, sound and dust, and that dust stops inside buildings and cars. Check that wind does not move items inside a car. Check the F3 storm line.
 6. Power cables: check poles link to the next pole on curves and tilted poles, road buildings and the home link to a pole, and the rope meshes are not flipped.
 7. Draw distance: check F3 at 500, 2500 and 5000 m near the garage and on the road.
 8. Check far terrain, buildings and fog at 2500 m against the original.
-9. Check loot in a few building types: gas and oil cans, beer, barrels, buckets and the WC now spawn. Flashlights in loot must not stop the world, and their beams show the cookie on walls and terrain.
-10. Near the Mansion: the crow sound fades in from 1000 m to full at 200 m, and the day and night ambience fades out by the same amount.
-11. Digging: find a buried item (underground spawn). Swing the shovel in each direction (LMB with back, left, right keys). Check the swing sound, hit sounds, hit particles on metal, wood, plants and sand, and that hits push loose items.
+9. Loot flashlight beams show the cookie on walls and terrain.
+10. Near the Mansion: listen to the crow sound fade in and the day and night ambience fade out.
+11. Swing the shovel at metal, wood, plants and sand. Check the hit particles of each.
 12. Dig a buried item up with the shovel. It must lift, become loose, and then allow pickup. A buried item must refuse pickup. Save and load with an item buried and one dug up.
 13. Metal detector: turn it on and off with use. Check the beep pitch and volume and the needle near metal, buried metal, and behind a wall. Save and load with it on.
-14. Tumbleweeds: check they spawn near the player, roll in gusts, stop near walls, and save with the world.
 17. Move far in one step (sandbox building('Benzinkut01'), or load a far save). Wait while the area loads. The game does not stop with "validated authored material choice".
 
 ### More cars
