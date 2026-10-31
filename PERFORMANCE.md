@@ -25,6 +25,7 @@ Add only items that increase render FPS or remove hitches. Remove an item when i
 - Shadow cascades 0 and 1 render each frame, 2 and 3 every 2nd and 4th frame (`crates/simulation/src/reference/shadow_cadence.rs`). A rendered cascade does not draw its tile when its projection, the held sun and its casters did not change. The shadow sun moves in steps of about one texel (`SUN_STEP` in `src/presentation/shadow_scene.rs`). Each atlas has a static copy (`static_atlas` in `render_targets.rs`). Static casters and props draw there. Grass and skinned casters do not change it: their tiles copy the static tile and draw only these casters each frame (`shadow_atlas.rs`).
 - Lamp shadow faces use the same reuse (`LampHistory` in `crates/simulation/src/reference/lamp_shadows.rs`). A face draws only when its projection or the casters of its lamp change. Grass and skinned casters in a lamp draw its faces each frame.
 - Reflection probes: only the camera of the face in the current capture job is active. Mip and publish jobs run no probe camera. Warmup runs all 6 face cameras (`sync_probe_cameras` in `src/presentation/view_frame.rs`).
+- Shadow casters sit in a loose 32 m grid (`crates/simulation/src/reference/shadow_grid.rs`). Each moving view tests only the cells near its shadow hull, and the lamps only the cells near their spheres. Mask users read the sorted row list of each view (`ShadowScene.marked`), not all casters.
 - The FPS limit is off by default: source VSync on makes Unity ignore it. When on, each frame runs in an animation frame (`web/frame-pacer.js`).
 - Release build: fat LTO, simd128, wasm-opt -O3.
 
@@ -46,6 +47,7 @@ Rejected: async compute, bindless, Hi-Z occlusion, f16, subgroups, GPU grass, ow
 Do on Tomasz's PC after the open items are done: F3 frame time and "GPU ms" before and after each item, in a town and in a grass area.
 Also check that a part condition change, such as rust, shows the new material without a frame freeze. The old material shows until the new pipelines compile.
 Also check the shadow tile reuse: F3 shadow atlas "GPU ms" standing still versus walking. No stale shadows under moving cars, the player, doors or fading LOD props. No visible shadow step when the sun moves.
+Also check the shadow caster grid: F3 "WASM main" while driving in a town, before and after. Shadows look the same in the world view, mirrors, probes and lamp shadows at night. Cars that drove far and props that stream in still cast shadows.
 Also check the animated caster split: stand still in grass and in third person with outfit mode 1. F3 shadow "GPU ms" should drop against master. Grass and body shadows move, no trail stays where the body was, and no shadow acne differs from master.
 Also check the render bundles: no WebGPU errors in the console, and terrain, roads, buildings, cars, props and their shadows draw as before, also with Antialiasing off and in reflection probes. F3 "WASM main" should drop in a town.
 Also check the reflection probes: car reflections show all 6 cube faces as before. F3 "WASM main" should drop near cars with Reflections on.

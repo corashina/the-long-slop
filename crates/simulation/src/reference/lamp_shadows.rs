@@ -2,6 +2,7 @@
 //! Positions, bounds and planes use the source frame.
 use super::shadow_candidates::{Bounds, Plane};
 use super::shadow_frame::CasterInput;
+use super::shadow_grid::CasterGrid;
 
 /// Shadowed lamps at one time. Caster mask bits 4..7 hold the slots.
 pub const LAMP_SLOTS: usize = 4;
@@ -90,28 +91,80 @@ pub fn lamp_caster(caster: &CasterInput, lamp: &LampSphere) -> bool {
         && gap2 <= lamp.range * lamp.range
 }
 
-/// Write the lamp bits 4..7 of each caster into `lamp_masks` and `masks`.
-/// `lamp_masks` keeps the last lamp bits, because view preparation clears them in `masks`.
-/// Returns the lamp bits that changed for any caster.
-pub fn write_lamp_bits(
-    casters: &[CasterInput],
-    slots: &[Option<LampSphere>; LAMP_SLOTS],
-    lamp_masks: &mut [u8],
-    masks: &mut [u8],
-) -> u8 {
-    let mut changed = 0;
-    for ((caster, last), mask) in casters.iter().zip(lamp_masks).zip(masks) {
-        let mut bits = 0u8;
+/// Lamp bits of the world view masks. It keeps the rows of the last write, so a write
+/// touches only old and new caster rows.
+#[derive(Default)]
+pub struct LampMasks {
+    /// Rows and their lamp bits, in row order.
+    rows: Vec<(u32, u8)>,
+    /// Retained storage.
+    next: Vec<(u32, u8)>,
+}
+impl LampMasks {
+    /// Call when the mask storage is cleared or its rows change order.
+    pub fn clear(&mut self) {
+        self.rows.clear();
+    }
+    /// Rows with lamp bits, in row order.
+    pub fn rows(&self) -> impl Iterator<Item = u32> + '_ {
+        self.rows.iter().map(|(row, _)| *row)
+    }
+    /// Replace bits 4..7 of each mask. Returns the lamp bits that changed for any caster.
+    pub fn write(
+        &mut self,
+        casters: &[CasterInput],
+        grid: &CasterGrid,
+        slots: &[Option<LampSphere>; LAMP_SLOTS],
+        masks: &mut [u8],
+    ) -> u8 {
+        self.next.clear();
         for (slot, lamp) in slots.iter().enumerate() {
-            if lamp.as_ref().is_some_and(|lamp| lamp_caster(caster, lamp)) {
-                bits |= 1 << (LAMP_BIT as usize + slot);
+            let Some(lamp) = lamp else { continue };
+            let bit = 1 << (LAMP_BIT as usize + slot);
+            grid.visit_sphere(lamp.center, lamp.range, |row| {
+                if lamp_caster(&casters[row as usize], lamp) {
+                    self.next.push((row, bit));
+                }
+            });
+        }
+        self.next.sort_unstable();
+        self.next.dedup_by(|row, kept| {
+            let same = row.0 == kept.0;
+            if same {
+                kept.1 |= row.1;
+            }
+            same
+        });
+        for &(row, _) in &self.rows {
+            masks[row as usize] &= 0x0f;
+        }
+        for &(row, bits) in &self.next {
+            masks[row as usize] |= bits;
+        }
+        // Both lists are in row order. A row in one list only has zero lamp bits in the other.
+        let (old, new) = (&self.rows, &self.next);
+        let (mut a, mut b, mut changed) = (0, 0, 0);
+        while a < old.len() || b < new.len() {
+            match (old.get(a), new.get(b)) {
+                (Some(&(row, bits)), Some(&(next, next_bits))) if row == next => {
+                    changed |= bits ^ next_bits;
+                    a += 1;
+                    b += 1;
+                }
+                (Some(&(row, bits)), next) if next.is_none_or(|&(next, _)| row < next) => {
+                    changed |= bits;
+                    a += 1;
+                }
+                (_, Some(&(_, bits))) => {
+                    changed |= bits;
+                    b += 1;
+                }
+                (_, None) => unreachable!(),
             }
         }
-        changed |= bits ^ *last;
-        *last = bits;
-        *mask = (*mask & 0x0f) | bits;
+        std::mem::swap(&mut self.rows, &mut self.next);
+        changed
     }
-    changed
 }
 
 /// Lamp face tiles: 6 for each lamp slot.
@@ -198,19 +251,20 @@ mod tests {
             material_has_caster: true,
         };
         let casters = [caster(1.4, 0), caster(1.6, 0), caster(0., 1)];
-        let mut lamp_masks = [0, 0, 0b1111_0000];
-        let mut masks = [0b0001, 0, 0b1111_0000];
+        let mut grid = CasterGrid::default();
+        grid.rebuild(&casters);
+        let mut lamps = LampMasks::default();
+        let mut masks = [0b0001, 0, 0];
         let slots = [None, Some(lamp(0, 0.)), None, None];
-        let changed = write_lamp_bits(&casters, &slots, &mut lamp_masks, &mut masks);
-        assert_eq!(changed, 0b1111_0000);
-        assert_eq!(masks, [0b0010_0001, 0, 0]);
-        // View preparation clears the lamp bits. That is no change.
-        masks = [0b0001, 0, 0];
         assert_eq!(
-            write_lamp_bits(&casters, &slots, &mut lamp_masks, &mut masks),
-            0
+            lamps.write(&casters, &grid, &slots, &mut masks),
+            0b0010_0000
         );
         assert_eq!(masks, [0b0010_0001, 0, 0]);
+        assert_eq!(lamps.write(&casters, &grid, &slots, &mut masks), 0);
+        let none = [None; LAMP_SLOTS];
+        assert_eq!(lamps.write(&casters, &grid, &none, &mut masks), 0b0010_0000);
+        assert_eq!(masks, [0b0001, 0, 0]);
     }
 
     #[test]

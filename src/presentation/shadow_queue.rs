@@ -282,11 +282,12 @@ pub fn queue(world: &mut World) {
                         let queued = &mut state.queued[index];
                         queued.reserve(scene.capacity().saturating_sub(queued.len()));
                         let mut ready = true;
-                        for (item, caster) in scene.caster_data.entities.iter().enumerate() {
-                            let mask = scene.masks[index][item];
+                        // Rows outside the marked list have a zero mask.
+                        for &item in &scene.marked[index] {
+                            let mask = scene.masks[index][item as usize];
                             // GPU prop rows draw from their own buffers.
                             let crate::presentation::shadow_scene::CasterKey::Entity(main) =
-                                *caster
+                                scene.caster_data.entities[item as usize]
                             else {
                                 continue;
                             };
@@ -337,7 +338,7 @@ pub fn queue(world: &mut World) {
                                 [&main]
                                 .asset_id;
                             let material = super::caster_material::shadow_material(world, material);
-                            let animated = scene.animated.binary_search(&(item as u32)).is_ok();
+                            let animated = scene.animated.binary_search(&item).is_ok();
                             let next = QueuedShadow {
                                 key: ShadowBatchKey {
                                     pipeline,
