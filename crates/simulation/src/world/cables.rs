@@ -563,6 +563,17 @@ mod tests {
         assert_eq!(nearest_target([0.; 3], poles.into_iter()), Some((8, 1)));
     }
 
+    /// W6. Source `roadGenScript.CheckCableConnections`: after a pole is kept, the best distance
+    /// is its nearest target, not its target 0. A later pole must beat that distance.
+    #[test]
+    #[ignore = "known failure W6: the port compares target 0 distances"]
+    fn tp_w6_building_keeps_the_pole_with_the_nearest_target() {
+        let first = [[50., 0., 0.], [10., 0., 0.]];
+        let second = [[20., 0., 0.]];
+        let poles = [(1, &first[..]), (2, &second[..])];
+        assert_eq!(nearest_target([0.; 3], poles.into_iter()), Some((1, 1)));
+    }
+
     #[test]
     fn building_cable_aims_at_the_target() {
         let id = |path_id| SourceId {

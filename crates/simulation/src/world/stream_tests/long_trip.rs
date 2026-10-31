@@ -7,7 +7,7 @@ use crate::reference::ItemId;
 use crate::world::ObjectKey;
 
 /// Road points from the car start out to `length` metres, one every `stride` metres.
-fn road_path(
+pub(crate) fn road_path(
     run: &GarageRuntime,
     reference: &ReferenceManifest,
     length: f64,
