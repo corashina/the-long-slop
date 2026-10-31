@@ -231,9 +231,7 @@ Prepare once:
 ### Start menu figure
 
 1. The start menu shows the figure in the menu camera view, under the menu art. It wears the Appearance outfit. Change the outfit: the figure follows.
-2. Move the mouse: the head turns toward it. Hands and feet stay at their rest goals.
-3. Click and hold the left button on the figure, then move: the head and right hand follow the mouse. The right button kicks with the left leg. Both buttons slide the body. Release: the figure returns to rest.
-5. The figure is gone in the pause menu, Appearance and in game. F3 on the start menu: frame time near the previous run.
+5. F3 on the start menu: frame time near the previous run.
 6. Compare with the original menu: pose, place, head turn speed. Note the port choices: no idle clip, no menu scenery, gray background.
 
 ### Player body and outfit
