@@ -666,7 +666,7 @@ fn bat_tour(
 /// (15 Oct to 15 Nov) and `Random.Range(0, 1) > 0.35`: `Random.Range(5, 30)` bats;
 /// `randomFlyer.Update`: a held bat squeaks and does not fly.
 #[test]
-#[ignore = "known failure CR2: on Halloween a road building area fails with Generated condition: state"]
+#[ignore = "known failure CR2: on Halloween the first road buildings have no bats"]
 fn tp_cr2_halloween_bats_near_buildings() {
     let (reference, mut run) = load_on([2026, 10, 31]);
     let tour = bat_tour(&mut run, &reference, 8);

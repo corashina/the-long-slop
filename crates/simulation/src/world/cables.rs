@@ -41,7 +41,8 @@ pub fn aim(rope: [f64; 3], parent_rotation: Rotation, target: [f64; 3]) -> ([f32
 }
 
 /// Source `roadGenScript.CheckCableConnections`.
-/// Keep the pole with the nearest target 0 under 200 m. Then pick its nearest target.
+/// A pole with target 0 under 200 m and nearer than the best distance is kept.
+/// Its nearest target distance becomes the best distance.
 pub fn nearest_target<'a>(
     rope0: [f64; 3],
     poles: impl Iterator<Item = (u32, &'a [[f64; 3]])>,
@@ -52,24 +53,24 @@ pub fn nearest_target<'a>(
             .sum::<f64>()
             .sqrt()
     };
-    let mut best: Option<(u32, &[[f64; 3]], f64)> = None;
+    let mut best: Option<(u32, usize, f64)> = None;
     for (pole, targets) in poles {
         let Some(first) = targets.first() else {
             continue;
         };
         let d = distance(first);
         if d < best.map_or(CABLE_RANGE, |(_, _, best)| best) {
-            best = Some((pole, targets, d));
+            let mut nearest = (0, d);
+            for (i, target) in targets.iter().enumerate().skip(1) {
+                let d = distance(target);
+                if d < nearest.1 {
+                    nearest = (i, d);
+                }
+            }
+            best = Some((pole, nearest.0, nearest.1));
         }
     }
-    let (pole, targets, _) = best?;
-    let mut index = 0;
-    for (i, target) in targets.iter().enumerate().skip(1) {
-        if distance(target) < distance(&targets[index]) {
-            index = i;
-        }
-    }
-    Some((pole, index))
+    best.map(|(pole, index, _)| (pole, index))
 }
 
 /// One rope in its pole frame (road) or below the prototype root (building).
@@ -566,7 +567,6 @@ mod tests {
     /// W6. Source `roadGenScript.CheckCableConnections`: after a pole is kept, the best distance
     /// is its nearest target, not its target 0. A later pole must beat that distance.
     #[test]
-    #[ignore = "known failure W6: the port compares target 0 distances"]
     fn tp_w6_building_keeps_the_pole_with_the_nearest_target() {
         let first = [[50., 0., 0.], [10., 0., 0.]];
         let second = [[20., 0., 0.]];

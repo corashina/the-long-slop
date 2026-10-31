@@ -349,10 +349,10 @@ pub(super) fn road_building(
         .position
 }
 
-/// W17. A far move next to the first gas station on the road (about 7.7 km out). The road plan
-/// never finishes: `support_gap` stays `Plan`.
+/// W17. A far move next to the first gas station on the road (about 7.7 km out) loads. The road
+/// grows past the 10 km start road once per world step.
 #[test]
-#[ignore = "known failure W17: a far move to the first gas station never loads"]
+#[ignore = "requires the installed source export"]
 fn tp_w17_far_move_to_the_first_gas_station_loads() {
     let (reference, mut run) = load_garage();
     seconds(&mut run, &reference, 1.);
@@ -455,7 +455,7 @@ fn tp_w11_shovel_swings_hits_and_pushes() {
 /// W12. Source `tosaveitemscript.UpdBuried`, `IsBuriedRay`, `UnBury`; `pickupable.CanPickup`
 /// refuses `IsBuried`. The save keeps `buried`.
 #[test]
-#[ignore = "known failure W12: a buried item loads with a dynamic body"]
+#[ignore = "requires the installed source export"]
 fn tp_w12_dig_up_refuse_pickup_and_save() {
     use crate::interaction::items::ItemLocation;
     use crate::world::stream::tests::melee::{
@@ -599,7 +599,7 @@ fn place_metal(
 /// W13. Source `metalDetectorScript.Turn`, `Update`, `UpdSound`, `Scan`, `UpdMeter`. The wall rule
 /// is `metal_ahead_beeps_and_a_wall_in_front_weakens_it`.
 #[test]
-#[ignore = "known failure W13: a detector saved on loads off"]
+#[ignore = "requires the installed source export"]
 fn tp_w13_detector_beeps_near_metal_and_saves_on() {
     use crate::world::stream::tests::melee::{spawn, weapon};
     let (reference, mut run) = load_garage();

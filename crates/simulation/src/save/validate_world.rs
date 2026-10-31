@@ -226,8 +226,7 @@ impl SaveSnapshot {
             }
             for (i, c) in s.conditions.iter().enumerate() {
                 data(
-                    c.state <= 4
-                        && c.color.iter().all(|v| v.is_finite())
+                    c.color.iter().all(|v| v.is_finite())
                         && c.repair_progress.is_finite()
                         && !s.conditions[..i].iter().any(|o| o.source == c.source),
                     "Generated part condition",

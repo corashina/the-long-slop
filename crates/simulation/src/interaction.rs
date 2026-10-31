@@ -330,23 +330,18 @@ impl InteractionState {
         &self,
         ids: &crate::save::IdentityMap,
     ) -> Result<crate::save::MechanismsSnapshot, crate::save::SaveError> {
-        let mut openings = ids
+        // A destroyed tank (an exploded can) has no openings.
+        let mut openings: Vec<_> = ids
             .openings
             .iter()
-            .map(|(source, id)| {
-                let opening = self
-                    .openings
-                    .iter()
-                    .find(|o| o.reference.id == *id)
-                    .ok_or_else(|| {
-                        crate::save::SaveError::InvalidLinks("Missing source opening".into())
-                    })?;
-                Ok(crate::save::OpeningSnapshot {
+            .filter_map(|(source, id)| {
+                let opening = self.openings.iter().find(|o| o.reference.id == *id)?;
+                Some(crate::save::OpeningSnapshot {
                     source: source.clone(),
                     valve: opening.valve,
                 })
             })
-            .collect::<Result<Vec<_>, crate::save::SaveError>>()?;
+            .collect();
         openings.sort_by(|a, b| a.source.cmp(&b.source));
         Ok(crate::save::MechanismsSnapshot {
             controls: self.mechanisms.capture_save(ids)?,

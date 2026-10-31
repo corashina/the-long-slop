@@ -757,6 +757,13 @@ pub fn restore_motion(
     if let Some(item) = items.get(id) {
         if let Some(handle) = item.body {
             physics.try_edit_body(handle, |body| {
+                // Source tosaveitemscript.FInit: a buried item is kinematic.
+                if snapshot.buried {
+                    body.set_body_type(
+                        rapier3d::prelude::RigidBodyType::KinematicPositionBased,
+                        false,
+                    );
+                }
                 body.set_position(
                     crate::vehicle::to_rapier(item.pose)
                         * crate::vehicle::to_rapier(item.local_pose).inverse(),

@@ -25,6 +25,76 @@ impl WorldStream {
                 }));
         }
     }
+    /// The live state of `id`, with the values its bindings hold.
+    pub(super) fn capture_object(
+        &self,
+        id: crate::reference::ItemId,
+        reference: &ReferenceManifest,
+        items: &ItemStore,
+        interaction: &InteractionState,
+        physics: &PhysicsWorld,
+    ) -> Option<changes::ObjectSnapshot> {
+        let mut snapshot = changes::capture(id, items, interaction, physics, reference)?;
+        let key = items.object_key(id);
+        snapshot.lamp = self
+            .contents
+            .active
+            .iter()
+            .find(|c| c.item == Some(id))
+            .and_then(|c| c.content.portable_lamp());
+        // An unbound dial keeps its saved value.
+        snapshot.dial = self.dial_value(id).unwrap_or_else(|| {
+            self.changes
+                .get(&key)
+                .and_then(|c| c.snapshot.as_ref())
+                .and_then(|s| s.dial)
+        });
+        // An unbound bottle or lamp keeps its saved value.
+        (snapshot.ammo, snapshot.glow) = self.small_item_values(id).unwrap_or_else(|| {
+            let saved = self.changes.get(&key).and_then(|c| c.snapshot.as_ref());
+            (saved.and_then(|s| s.ammo), saved.and_then(|s| s.glow))
+        });
+        // An unbound gun keeps its saved state.
+        if interaction.guns.runtime(id).is_none() {
+            snapshot.gun = self
+                .changes
+                .get(&key)
+                .and_then(|c| c.snapshot.as_ref())
+                .and_then(|s| s.gun);
+        }
+        snapshot.radio = self.radio_value(id).or_else(|| {
+            self.changes
+                .get(&key)
+                .and_then(|c| c.snapshot.as_ref())
+                .and_then(|s| s.radio)
+        });
+        // An unbound loot tool keeps its saved state.
+        snapshot.tool = self.tool_value(id, interaction).unwrap_or_else(|| {
+            self.changes
+                .get(&key)
+                .and_then(|c| c.snapshot.as_ref())
+                .and_then(|s| s.tool)
+        });
+        snapshot.detector = self.detector_value(id).or_else(|| {
+            self.changes
+                .get(&key)
+                .and_then(|c| c.snapshot.as_ref())
+                .and_then(|s| s.detector)
+        });
+        if items.get(id).and_then(|i| i.body).is_some_and(|b| {
+            physics.rapier().bodies[b].body_type()
+                == rapier3d::prelude::RigidBodyType::KinematicPositionBased
+        }) && items.get(id).is_some_and(|i| !i.buried)
+            && self.contents.active.iter().any(|c| c.item == Some(id))
+        {
+            if let Some(previous) = self.changes.get(&key).and_then(|c| c.snapshot.as_ref()) {
+                snapshot.linear_velocity = previous.linear_velocity;
+                snapshot.angular_velocity = previous.angular_velocity;
+                snapshot.sleeping = previous.sleeping;
+            }
+        }
+        Some(snapshot)
+    }
     pub fn capture_changes(
         &mut self,
         reference: &ReferenceManifest,
@@ -44,69 +114,11 @@ impl WorldStream {
             {
                 continue;
             }
-            let Some(mut snapshot) =
-                crate::world::changes::capture(id, items, interaction, physics, reference)
+            let Some(snapshot) = self.capture_object(id, reference, items, interaction, physics)
             else {
                 continue;
             };
-            snapshot.lamp = self
-                .contents
-                .active
-                .iter()
-                .find(|c| c.item == Some(id))
-                .and_then(|c| c.content.portable_lamp());
             let key = items.object_key(id);
-            // An unbound dial keeps its saved value.
-            snapshot.dial = self.dial_value(id).unwrap_or_else(|| {
-                self.changes
-                    .get(&key)
-                    .and_then(|c| c.snapshot.as_ref())
-                    .and_then(|s| s.dial)
-            });
-            // An unbound bottle or lamp keeps its saved value.
-            (snapshot.ammo, snapshot.glow) = self.small_item_values(id).unwrap_or_else(|| {
-                let saved = self.changes.get(&key).and_then(|c| c.snapshot.as_ref());
-                (saved.and_then(|s| s.ammo), saved.and_then(|s| s.glow))
-            });
-            // An unbound gun keeps its saved state.
-            if interaction.guns.runtime(id).is_none() {
-                snapshot.gun = self
-                    .changes
-                    .get(&key)
-                    .and_then(|c| c.snapshot.as_ref())
-                    .and_then(|s| s.gun);
-            }
-            snapshot.radio = self.radio_value(id).or_else(|| {
-                self.changes
-                    .get(&key)
-                    .and_then(|c| c.snapshot.as_ref())
-                    .and_then(|s| s.radio)
-            });
-            // An unbound loot tool keeps its saved state.
-            snapshot.tool = self.tool_value(id, interaction).unwrap_or_else(|| {
-                self.changes
-                    .get(&key)
-                    .and_then(|c| c.snapshot.as_ref())
-                    .and_then(|s| s.tool)
-            });
-            snapshot.detector = self.detector_value(id).or_else(|| {
-                self.changes
-                    .get(&key)
-                    .and_then(|c| c.snapshot.as_ref())
-                    .and_then(|s| s.detector)
-            });
-            if items.get(id).and_then(|i| i.body).is_some_and(|b| {
-                physics.rapier().bodies[b].body_type()
-                    == rapier3d::prelude::RigidBodyType::KinematicPositionBased
-            }) && items.get(id).is_some_and(|i| !i.buried)
-                && self.contents.active.iter().any(|c| c.item == Some(id))
-            {
-                if let Some(previous) = self.changes.get(&key).and_then(|c| c.snapshot.as_ref()) {
-                    snapshot.linear_velocity = previous.linear_velocity;
-                    snapshot.angular_velocity = previous.angular_velocity;
-                    snapshot.sleeping = previous.sleeping;
-                }
-            }
             let baseline = match &key {
                 crate::world::ObjectKey::Imported(_) => self
                     .imported_baselines
