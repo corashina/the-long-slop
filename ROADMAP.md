@@ -54,8 +54,7 @@ Known failures on master c0da737f (2026-10-30 browser retest), fix before the ne
 - Outside the Lada, E on the door handle does not open it. The HUD shows "[LMB]+[Mouse]: Move | [F]: Dismount".
 - First page load can stall at the start of object loading with dependency staging full (7.7/7.8 MiB). A reload clears it.
 - In game, pause > Load > Load last once stayed on "Loading..." for over 6 minutes, with no console messages.
-- 32 of 91 ignored simulation tests fail in release: MC2, BL, stale test data, item seat restore ("Seat item is not bound"). Debug overflows the stack.
-- SA4: `hazard_trigger_damages_player_until_death` fails. The hazard trigger does not kill the player.
+- 31 of 90 ignored simulation tests fail in release: MC2, BL, stale test data, item seat restore ("Seat item is not bound"). Debug overflows the stack.
 
 Blocked checks. Each waits for the fix of its bug. Run them in the next build's test pass.
 
@@ -134,7 +133,6 @@ Prepare once:
 ### Starting area
 
 3. Check paint spray and sponge particles: refraction and soft edges.
-4. Check hazards: a hazard trigger hurts the player until death.
 5. Listen to player sounds: hits, footsteps, ambience, muffling in buildings.
 6. Listen to the music box and the radios. The compass and clock needles look right.
 7. Crosshair icons: look at a car door, a sliding and a vertical sliding usable, a light switch, a radio knob, a tuneable cap and a seat. Push the Lada, hold the hose at a cap and a trailer grip at the hitch, fill a can, carry a heavy item. Each case shows the source images together. No name or condition line shows above the crosshair.

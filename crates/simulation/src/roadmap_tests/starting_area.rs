@@ -602,6 +602,42 @@ fn tp_sa4_ladder_climb() {
     assert!(down < end, "back climbs down: {end} -> {down}");
 }
 
+/// SA4: source `playerdeathtriggerscript.OnTriggerStay`
+/// (`DamageInstant(damagePlayer * Time.deltaTime)`) and `survivalscript.DamageInstant` (death at 0 hp).
+#[test]
+#[ignore = "requires the installed source export"]
+fn tp_sa4_hazard_damages_until_death() {
+    let (reference, mut run) = load_garage();
+    seconds(&mut run, &reference, 1.);
+    let hp = run.needs_output().needs.hp;
+    // A hazard trigger around the player, as `trigger_roles` publishes it.
+    let position = run.area.player.body_pose(&run.physics).position;
+    let handle = run.physics.insert_collider(
+        rapier3d::prelude::ColliderBuilder::cuboid(5., 5., 5.)
+            .translation(rapier3d::math::Vector::from_array(position))
+            .sensor(true)
+            .build(),
+    );
+    run.physics.refresh_queries();
+    // Damage per second equal to full hp kills in 1 s.
+    add_trigger_role(
+        &mut run,
+        handle,
+        crate::reference::TriggerRole::Hazard {
+            damage_player: hp,
+            damage_breakable: 0.,
+        },
+    );
+    seconds(&mut run, &reference, 0.5);
+    let half = run.needs_output();
+    assert!(!half.dead);
+    assert!(half.needs.hp < hp * 0.6, "hurt: {hp} -> {}", half.needs.hp);
+    seconds(&mut run, &reference, 1.);
+    let end = run.needs_output();
+    assert!(end.dead, "hp {}", end.needs.hp);
+    assert_eq!(end.needs.hp, 0.);
+}
+
 /// SA4: source `mainscript` `menu.GV.SetActive(player.showSleepText && canSleep)`.
 #[test]
 #[ignore = "requires the installed source export"]
