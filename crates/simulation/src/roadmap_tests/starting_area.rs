@@ -57,25 +57,6 @@ fn named(run: &GarageRuntime, name: &str) -> ItemId {
         .id
 }
 
-/// Moves the player on foot to `distance` metres from a local point, on the side of the
-/// current player position.
-fn stand_near(
-    run: &mut GarageRuntime,
-    reference: &ReferenceManifest,
-    point: [f32; 3],
-    distance: f32,
-) {
-    let mut pose = run.area.player.body_pose(&run.physics);
-    let from = rapier3d::math::Vector::from_array(pose.position);
-    let to = rapier3d::math::Vector::from_array(point);
-    let away = (from - to).with_y(0.).normalize_or_zero();
-    let at = to + away * distance;
-    pose.position = [at.x, pose.position[1], at.z];
-    run.area.player.recover(pose, &mut run.physics);
-    seconds(run, reference, 0.5);
-}
-
-/// Picks up an item from 1 m away, as the hand would.
 /// The crosshair bits while the use ray hits `collider`.
 fn looking_at(run: &mut GarageRuntime, collider: rapier3d::prelude::ColliderHandle) -> u32 {
     let point = run.physics.rapier().colliders[collider]
@@ -90,36 +71,6 @@ fn looking_at(run: &mut GarageRuntime, collider: rapier3d::prelude::ColliderHand
         slot: None,
     });
     crosshair_bits(run)
-}
-
-/// Turns the head to an item pose and steps until the use ray hits the item.
-fn aim_at_item(run: &mut GarageRuntime, reference: &ReferenceManifest, item: ItemId) -> bool {
-    for _ in 0..20 {
-        let point = run.area.items.get(item).unwrap().pose.position;
-        run.area.player.look_at(point, &run.physics);
-        frame(run, reference);
-        if run.aim.use_target.is_some_and(|t| t.item == item) {
-            return true;
-        }
-    }
-    eprintln!("aim missed {item:?}: use {:?}", run.aim.use_target);
-    false
-}
-
-fn pick_up(run: &mut GarageRuntime, reference: &ReferenceManifest, item: ItemId) {
-    let point = run.area.items.get(item).unwrap().pose.position;
-    stand_near(run, reference, point, 1.);
-    run.area
-        .interaction
-        .pickup_item(
-            item,
-            point,
-            &run.area.player,
-            &mut run.area.items,
-            &mut run.physics,
-        )
-        .unwrap();
-    run.area.sync_inventory();
 }
 
 /// SA8: source `tavcsoscript.Update`, `fpscontroller.Sight` (0.1 look scale) and

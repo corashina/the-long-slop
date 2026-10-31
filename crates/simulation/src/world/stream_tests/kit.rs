@@ -22,6 +22,8 @@ const MANIFEST: &str = concat!(
 thread_local! {
     /// Surface renderer claim kept across frames, as the WASM presentation keeps it.
     static CLAIM: std::cell::RefCell<Option<(WorldRequest, SurfaceKey)>> = const { std::cell::RefCell::new(None) };
+    /// Local month and day of the next new game, as the browser sends it.
+    static CALENDAR: std::cell::Cell<[u8; 2]> = const { std::cell::Cell::new([1, 1]) };
     /// Sandbox state across `act` calls, as the `?sandbox` page keeps it.
     static SANDBOX: std::cell::RefCell<Sandbox> = std::cell::RefCell::new(Sandbox::default());
 }
@@ -170,7 +172,7 @@ pub(crate) fn prepare_step_for_views(
         )
         .unwrap();
     assert!(stream.failure.is_none(), "{:?}", stream.failure);
-    run.align_startup(reference, [1, 1]).unwrap();
+    run.align_startup(reference, CALENDAR.get()).unwrap();
 }
 
 /// Publishes until the required world is ready. The run does not step.
@@ -482,4 +484,112 @@ pub(crate) fn add_trigger_role(
     role: crate::reference::TriggerRole,
 ) {
     run.stream.trigger_roles.insert(collider, role);
+}
+
+/// Part condition entries of the start car content: store entry, input index, prototype node.
+pub(crate) fn start_car_conditions(
+    run: &GarageRuntime,
+) -> Vec<(crate::reference::ConditionId, usize, usize)> {
+    let Some(crate::world::ObjectKey::Generated(id)) = run.vehicle.as_ref() else {
+        panic!("start car key");
+    };
+    run.stream
+        .contents
+        .active
+        .iter()
+        .find(|c| &c.content.placement.id == id)
+        .expect("start car content")
+        .conditions
+        .clone()
+}
+
+/// Moves the player on foot to `distance` metres from a local point, on the side of the
+/// current player position.
+pub(crate) fn stand_near(
+    run: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    point: [f32; 3],
+    distance: f32,
+) {
+    let mut pose = run.area.player.body_pose(&run.physics);
+    let from = rapier3d::math::Vector::from_array(pose.position);
+    let to = rapier3d::math::Vector::from_array(point);
+    let away = (from - to).with_y(0.).normalize_or_zero();
+    let at = to + away * distance;
+    pose.position = [at.x, pose.position[1], at.z];
+    run.area.player.recover(pose, &mut run.physics);
+    seconds(run, reference, 0.5);
+}
+
+/// Turns the head to an item pose and steps until the use ray hits the item.
+pub(crate) fn aim_at_item(
+    run: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    item: ItemId,
+) -> bool {
+    for _ in 0..20 {
+        let point = run.area.items.get(item).unwrap().pose.position;
+        run.area.player.look_at(point, &run.physics);
+        frame(run, reference);
+        if run.aim.use_target.is_some_and(|t| t.item == item) {
+            return true;
+        }
+    }
+    eprintln!("aim missed {item:?}: use {:?}", run.aim.use_target);
+    false
+}
+
+/// Picks up an item from 1 m away, as the hand would.
+pub(crate) fn pick_up(run: &mut GarageRuntime, reference: &ReferenceManifest, item: ItemId) {
+    let point = run.area.items.get(item).unwrap().pose.position;
+    stand_near(run, reference, point, 1.);
+    run.area
+        .interaction
+        .pickup_item(
+            item,
+            point,
+            &run.area.player,
+            &mut run.area.items,
+            &mut run.physics,
+        )
+        .unwrap();
+    run.area.sync_inventory();
+}
+
+/// Moves a loose item 0.6 m in front of the eyes and picks it up there.
+pub(crate) fn take(run: &mut GarageRuntime, reference: &ReferenceManifest, item: ItemId) {
+    let view = run.area.player.view(&run.physics).camera_pose;
+    let point =
+        Vector::from_array(view.position) + Rotation::from_array(view.rotation) * -Vector::Z * 0.6;
+    let body = run.area.items.get(item).unwrap().body.unwrap();
+    run.physics.edit_body(body, |b| {
+        let mut pose = *b.position();
+        pose.translation = point;
+        b.set_position(pose, true);
+        b.set_linvel(Vector::ZERO, true);
+    });
+    run.area.items.get_mut(item).unwrap().pose.position = point.to_array();
+    run.physics.refresh_queries();
+    run.area
+        .interaction
+        .pickup_item(
+            item,
+            point.to_array(),
+            &run.area.player,
+            &mut run.area.items,
+            &mut run.physics,
+        )
+        .unwrap();
+    run.area.sync_inventory();
+    frame(run, reference);
+    assert_eq!(
+        run.area.interaction.held(),
+        Some(item),
+        "item stays in hand"
+    );
+}
+
+/// Sets the local month and day that the next new games start on.
+pub(crate) fn set_calendar(month_day: [u8; 2]) {
+    CALENDAR.set(month_day);
 }
