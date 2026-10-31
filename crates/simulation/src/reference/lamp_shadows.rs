@@ -231,6 +231,53 @@ mod tests {
         assert_eq!(lights(&slots), [Some(0), None, None, None]);
     }
 
+    /// Only the 4 nearest lamps cast. Two chosen lamps that swap order keep their slots and caster bits.
+    #[test]
+    fn tp_ar9_only_the_4_nearest_lamps_cast_and_a_swap_does_not_pop() {
+        let mut slots = [None; LAMP_SLOTS];
+        let lights = |s: &[Option<LampSphere>; 4]| s.map(|l| l.map(|l| l.light));
+        let mut lamps: Vec<_> = (0..6).map(|i| lamp(i, 2. + i as f32 * 3.)).collect();
+        assign_slots(&lamps, [0.; 3], &OPEN, 100., &mut slots);
+        assert_eq!(lights(&slots), [Some(0), Some(1), Some(2), Some(3)]);
+        let caster = |x: f32| CasterInput {
+            bounds: Bounds {
+                center: [x, 0., 0.],
+                extents: [0.5; 3],
+            },
+            state: CandidateState {
+                shadow_casting_mode: 1,
+                layer: 0,
+                renderer_present: true,
+                disabled: false,
+                force_off: false,
+                lod_group: 0,
+                lod_index_mask: 0,
+                active_lod: 0,
+            },
+            material_has_caster: true,
+        };
+        // One caster at each lamp. Each caster takes the bit of its lamp's slot.
+        let casters: Vec<_> = [2., 5., 8., 11.].into_iter().map(caster).collect();
+        let mut grid = CasterGrid::default();
+        grid.rebuild(&casters);
+        let (mut masks, mut bits) = (LampMasks::default(), [0u8; 4]);
+        masks.write(&casters, &grid, &slots, &mut bits);
+        let first = bits;
+        // Lamps 1 and 2 swap places, and their casters too: slots and caster bits stay.
+        lamps[1].center[0] = 8.;
+        lamps[2].center[0] = 5.;
+        assign_slots(&lamps, [0.; 3], &OPEN, 100., &mut slots);
+        assert_eq!(lights(&slots), [Some(0), Some(1), Some(2), Some(3)]);
+        let moved: Vec<_> = [2., 8., 5., 11.].into_iter().map(caster).collect();
+        grid.rebuild(&moved);
+        masks.write(&moved, &grid, &slots, &mut bits);
+        assert_eq!(bits, first);
+        // A fifth lamp nearer than lamp 3 takes lamp 3's slot only.
+        lamps[5].center[0] = 1.;
+        assign_slots(&lamps, [0.; 3], &OPEN, 100., &mut slots);
+        assert_eq!(lights(&slots), [Some(0), Some(1), Some(2), Some(5)]);
+    }
+
     #[test]
     fn casters_need_the_sphere_and_the_layer() {
         let caster = |x: f32, layer: u8| CasterInput {
