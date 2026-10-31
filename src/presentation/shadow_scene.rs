@@ -58,12 +58,14 @@ pub struct ShadowScene {
     lamp_revision: u64,
     /// Held sun rotation of the shadow fit. It follows the sun in steps of `SUN_STEP`.
     pub sun: Quat,
-    /// Caster content counter of each view and cascade. It changes when the tile content would change.
+    /// Static caster content counter of each view and cascade. It changes when the static tile content would change.
     pub contents: [[u64; 4]; VIEW_COUNT],
+    /// Cascade bits of each view with an animated caster.
+    pub animated_tiles: [u8; VIEW_COUNT],
     /// Caster rows read again this frame. Retained storage.
     touched: Vec<u32>,
     /// Caster rows that change each frame, in row order. Retained storage.
-    animated: Vec<u32>,
+    pub animated: Vec<u32>,
 }
 /// About one texel of a 2048 tile, in radians. A smaller sun turn keeps the cascade tiles.
 const SUN_STEP: f32 = 1. / 2048.;
@@ -227,6 +229,7 @@ pub(super) fn prepare_scene(
             scene.views[index].clear();
             scene.mask_revisions[index] = scene.views[index].revision();
             scene.contents[index] = scene.contents[index].map(|c| c + 1);
+            scene.animated_tiles[index] = 0;
             continue;
         };
         let atlas = frame
@@ -265,6 +268,7 @@ pub(super) fn prepare_scene(
             light.mask,
             v.mask,
             &mut input,
+            &scene.animated,
         ) {
             Ok(Some(value)) => {
                 scene.fits[index] = Some(value.fit);
@@ -286,9 +290,13 @@ pub(super) fn prepare_scene(
                 | scene
                     .touched
                     .iter()
-                    .chain(&scene.animated)
                     .fold(0, |dirty, &row| dirty | masks[row as usize])
         };
+        scene.animated_tiles[index] = scene
+            .animated
+            .iter()
+            .fold(0, |tiles, &row| tiles | masks[row as usize])
+            & 0b1111;
         for (cascade, content) in scene.contents[index].iter_mut().enumerate() {
             *content += u64::from(dirty >> cascade & 1);
         }
@@ -395,7 +403,10 @@ fn update_caster(
     } else if animated != scene.animated.binary_search(&row).is_ok() {
         return Ok(false);
     }
-    scene.touched.push(row);
+    // Animated casters draw in each refresh, so their changes keep the static tile.
+    if !animated {
+        scene.touched.push(row);
+    }
     Ok(true)
 }
 /// Rows enter the caster list after the entities, in slot order.
@@ -485,5 +496,8 @@ pub fn extract_scene(
     output.origin = input.origin;
     output.sun = input.sun;
     output.contents = input.contents;
+    output.animated_tiles = input.animated_tiles;
+    output.animated.clear();
+    output.animated.extend_from_slice(&input.animated);
     output.frame = input.frame;
 }

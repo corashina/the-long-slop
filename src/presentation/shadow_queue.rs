@@ -60,6 +60,8 @@ pub struct ShadowQueues {
     revision: u64,
     /// Queued instances of each caster mask bit: 4 cascades, then 4 lamp slots.
     pub instances: [[u32; 8]; VIEW_COUNT],
+    /// The animated part of `instances`.
+    pub animated: [[u32; 8]; VIEW_COUNT],
     pub ready: [bool; VIEW_COUNT],
     pub frame: u32,
 }
@@ -74,6 +76,7 @@ impl FromWorld for ShadowQueues {
             epoch: None,
             revision: 0,
             instances: [[0; 8]; VIEW_COUNT],
+            animated: [[0; 8]; VIEW_COUNT],
             ready: [false; VIEW_COUNT],
             frame: 0,
         }
@@ -189,6 +192,7 @@ pub fn queue(world: &mut World) {
     world.resource_scope(|world, mut state: Mut<ShadowQueues>| {
         state.ready = [false; VIEW_COUNT];
         state.instances = [[0; 8]; VIEW_COUNT];
+        state.animated = [[0; 8]; VIEW_COUNT];
         state.revision += 1;
         let revision = state.revision;
         state.frame = 0;
@@ -333,12 +337,14 @@ pub fn queue(world: &mut World) {
                                 [&main]
                                 .asset_id;
                             let material = super::caster_material::shadow_material(world, material);
+                            let animated = scene.animated.binary_search(&(item as u32)).is_ok();
                             let next = QueuedShadow {
                                 key: ShadowBatchKey {
                                     pipeline,
                                     draw,
                                     material,
                                     split_mask: mask,
+                                    animated,
                                     indexed: base.1,
                                 },
                                 mesh,
@@ -373,7 +379,9 @@ pub fn queue(world: &mut World) {
                                 state.queued[index].insert(main, next);
                             }
                             for bit in 0..8 {
-                                state.instances[index][bit] += u32::from(mask & (1 << bit) != 0);
+                                let member = u32::from(mask & (1 << bit) != 0);
+                                state.instances[index][bit] += member;
+                                state.animated[index][bit] += member * u32::from(animated);
                             }
                         }
                         state.queued[index].retain(|main, queued| {

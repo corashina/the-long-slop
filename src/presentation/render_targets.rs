@@ -143,6 +143,8 @@ pub struct SourceViewTargets {
     pub multisample_depth: Option<Target>,
     pub depth: Target,
     pub atlas: Target,
+    /// Static casters of each cascade tile. The atlas tile copies it, then animated casters draw.
+    pub static_atlas: Target,
     /// Excludes shared color storage. Count each color pair once in the graph total.
     pub logical_bytes: u64,
 }
@@ -182,6 +184,15 @@ impl SourceViewTargets {
             SHADOW_FORMAT,
             true,
         );
+        let static_atlas = Target::new(
+            device,
+            "source_shadow_static_atlas",
+            atlas_size,
+            atlas_size,
+            1,
+            SHADOW_FORMAT,
+            true,
+        );
         // D24S8 uses four logical bytes. Backend allocation overhead is excluded.
         let logical_bytes = u64::from(width)
             * u64::from(height)
@@ -190,13 +201,14 @@ impl SourceViewTargets {
             } else {
                 0
             })
-            + 2 * u64::from(atlas_size).pow(2);
+            + 2 * 2 * u64::from(atlas_size).pow(2);
         Ok(Self {
             colors,
             atlas_size,
             multisample_depth,
             depth,
             atlas,
+            static_atlas,
             logical_bytes,
         })
     }

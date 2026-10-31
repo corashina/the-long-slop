@@ -17,6 +17,8 @@ pub struct CascadeInputs {
     pub sun: [u32; 4],
     /// Caster content counter of each cascade. It changes when the tile content would change.
     pub contents: [u64; 4],
+    /// The tile holds a grass or skinned caster. These change each frame.
+    pub animated: [bool; 4],
     /// The atlas is new, or its last planned frame was not encoded.
     pub forced: bool,
 }
@@ -28,6 +30,8 @@ pub struct CascadeHistory {
     pub suns: [[u32; 4]; 4],
     /// Caster content counter of each tile at its last draw.
     pub contents: [u64; 4],
+    /// The tile holds animated casters since its last refresh.
+    pub animated: [bool; 4],
 }
 impl CascadeHistory {
     /// Keep the current fit for each rendered cascade. Returns true when a value changed.
@@ -43,21 +47,27 @@ impl CascadeHistory {
             if plan.draw[index] {
                 self.contents[index] = current.contents[index];
             }
+            if plan.refresh[index] {
+                self.animated[index] = current.animated[index];
+            }
         }
         changed
     }
 }
 /// `render`: the cascade takes the current fit. Else it keeps its last fit and tile.
-/// `draw`: the tile draws. A rendered cascade without a draw has the same projection and content.
+/// `draw`: the static casters draw into the static tile. Else it has the same projection and content.
+/// `refresh`: the atlas tile copies the static tile, then the animated casters draw.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CascadePlan {
     pub render: [bool; 4],
     pub draw: [bool; 4],
+    pub refresh: [bool; 4],
 }
 impl CascadePlan {
     pub const ALL: Self = Self {
         render: [true; 4],
         draw: [true; 4],
+        refresh: [true; 4],
     };
 }
 fn same(a: &ShadowCascade, b: &ShadowCascade) -> bool {
@@ -88,7 +98,8 @@ fn same_projection(a: &ShadowCascade, b: &ShadowCascade) -> bool {
 }
 /// Cascades 0 and 1 render each frame, cascade 2 on even frames, cascade 3 when frame % 4 == 1.
 /// All render after an epoch change, a forced refresh, or a cascade 2 or 3 sphere move above 25% of its radius.
-/// A rendered tile does not draw when its projection, sun and content did not change.
+/// A rendered tile does not draw when its projection, sun and static content did not change.
+/// A rendered tile refreshes when it draws, or when it holds animated casters now or since its last refresh.
 pub fn plan_cascades(frame: u32, last: &CascadeHistory, current: &CascadeInputs) -> CascadePlan {
     let render = cascades_to_render(frame, last, current);
     if current.forced || last.epoch != Some(current.epoch) {
@@ -100,7 +111,13 @@ pub fn plan_cascades(frame: u32, last: &CascadeHistory, current: &CascadeInputs)
                 || last.contents[i] != current.contents[i]
                 || !same_projection(&last.cascades[i], &current.cascades[i]))
     });
-    CascadePlan { render, draw }
+    let refresh =
+        std::array::from_fn(|i| draw[i] || render[i] && (current.animated[i] || last.animated[i]));
+    CascadePlan {
+        render,
+        draw,
+        refresh,
+    }
 }
 fn cascades_to_render(frame: u32, last: &CascadeHistory, current: &CascadeInputs) -> [bool; 4] {
     // Cascades 0 and 1 render each frame, so only the skipped cascades can hold a stale fit.
@@ -140,6 +157,7 @@ mod tests {
             }; 4],
             sun: [0, 0, 0, 1f32.to_bits()],
             contents,
+            animated: [false; 4],
             forced: false,
         }
     }
@@ -158,7 +176,20 @@ mod tests {
         let plan = plan_cascades(1, &history, &same);
         assert_eq!(plan.render, [true, true, false, true]);
         assert_eq!(plan.draw, [false; 4]);
+        assert_eq!(plan.refresh, [false; 4]);
         history.commit(&plan, &same);
+
+        // An animated caster refreshes its tile without a static draw, also once after it leaves.
+        let mut animated = inputs([0; 4]);
+        animated.animated[0] = true;
+        let plan = plan_cascades(3, &history, &animated);
+        assert_eq!(plan.draw, [false; 4]);
+        assert_eq!(plan.refresh, [true, false, false, false]);
+        history.commit(&plan, &animated);
+        let plan = plan_cascades(5, &history, &same);
+        assert_eq!(plan.refresh, [true, false, false, false]);
+        history.commit(&plan, &same);
+        assert_eq!(plan_cascades(5, &history, &same).refresh, [false; 4]);
 
         // A content change or a projection change draws only that cascade.
         let mut next = inputs([0, 1, 0, 0]);
