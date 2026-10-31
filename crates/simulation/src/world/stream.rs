@@ -468,7 +468,7 @@ impl WorldStream {
                     })
                 });
             if let (Some(current), Some(baseline)) = (
-                super::changes::capture(item.id, items, interaction, physics, reference),
+                self.capture_object(item.id, reference, items, interaction, physics),
                 baseline,
             ) {
                 changes.record(object.clone(), current.clone(), baseline);

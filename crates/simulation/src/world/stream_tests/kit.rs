@@ -101,6 +101,8 @@ pub(crate) fn prepare_step_for_views(
     required_views: &[crate::world::RequiredView],
 ) {
     let stream = &mut run.stream;
+    // The driver extends the road once per world step.
+    stream.advance_generation();
     stream.prepare(100.);
     if stream
         .ready
@@ -177,7 +179,8 @@ pub(crate) fn prepare_step_for_views(
 
 /// Publishes until the required world is ready. The run does not step.
 pub(crate) fn prepare_ready(run: &mut GarageRuntime, reference: &ReferenceManifest) {
-    let mut surface_claim = None;
+    // A surface that `frame` reserved stays reserved until its claim finishes.
+    let mut surface_claim = CLAIM.take();
     for step in 0..2000 {
         prepare_step(run, reference, &mut surface_claim);
         if run.stream.required_ready() {

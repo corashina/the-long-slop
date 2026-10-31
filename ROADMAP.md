@@ -56,24 +56,20 @@ Known failures on master c0da737f (2026-10-30 browser retest), fix before the ne
 - First page load can stall at the start of object loading with dependency staging full (7.7/7.8 MiB). A reload clears it.
 - In game, pause > Load > Load last once stayed on "Loading..." for over 6 minutes, with no console messages. The simulation and the save bridge finish the load (`tp_k5_s1_a_stored_save_starts_the_session_and_its_restore_finishes`), so the hang is in the browser.
 - 29 of 90 ignored simulation tests fail in release: MC2, BL, stale test data. Debug overflows the stack.
-- W6: `tp_w6_building_keeps_the_pole_with_the_nearest_target`. A building links to the pole whose target 0 is nearest, not the pole with the nearest target (`roadGenScript.CheckCableConnections`).
-- W12: `tp_w12_dig_up_refuse_pickup_and_save`. A buried item loads with a dynamic body. The source freezes it.
-- W13: `tp_w13_detector_beeps_near_metal_and_saves_on`. A metal detector saved on loads off.
-- W15, SA2: `w02_long_trip_keeps_far_edits`, `w02_garage_can_returns_after_far_trip`. The required publication stalls after the car moves out.
+- W15, SA2: `w02_long_trip_keeps_far_edits`: no loose roadside item lies within 60 m of a road stop, so no far edit is made. `w02_garage_can_returns_after_far_trip`: the dropped can is not active again after the return.
 - MC2 on the road: `tp_sa1_fill_start_drive_return_save_reload`. The Lada on the road, engine running in gear 2 at 2427 rpm, moves 0 m. MC2 is not only the garage floor.
 - CP17: `tp_cp17_loot_tool_state_saves_and_streams`. After save and load, a loot spray can has 100 paint again and its default color.
 - CP12: `tp_cp12_roadside_part_keeps_paint_and_repair`. Paint on a placed bus part stays live and after a 3 km move. Then save fails with "Invalid source integer". A save before the paint works.
 - WD19: `tp_wd19_cactus_breaks_once_and_stays`. A car hit, a shot and a blast break cacti once, with one gib each, and they stay. After an 8 km move the broken cactus is still bound, so its area does not stream in again.
 - CP15: `tp_cp13_cp16_loot_tools_work_from_the_hand`. The loot spray paints, shows its color, sprays particles and runs out, but plays no sound. Its prototype tool has no `voice`, so the spray signal never plays and its tool loop never starts.
 - WD2: `tp_wd2_shovel_breaks_a_building_lamp`. The shovel breaks the lamps and they stay dark. Save and load at the Mansion: the restore stays pending.
-- CR2: `tp_cr2_halloween_bats_near_buildings`. On Halloween, the area near the 2nd road building (about 14.6 km out) fails with "Generated condition: state". The same area loads in June.
-- W17: `tp_w17_far_move_to_the_first_gas_station_loads`. A far move to the first gas station on the road (about 7.7 km out) never loads: the road plan does not finish.
+- CR2: `tp_cr2_halloween_bats_near_buildings`. On Halloween the first three road buildings load, but none has bats. The source spawns them at each building with a 65% chance.
 - CP5, CP6: `r05_cargo_locks_in_trunk`. The driver cannot exit the Lada in the garage (BL), so the cargo checks do not run.
 - CP7: `tp_cp7_turned_wheels_stay_after_save_and_load`. The seated driver holds steer left, but the garage Lada steer stays 0.
 - CP8, CP9, CP11: `lada_part_paint_and_repair_change_its_appearance_and_save`. Paint on a Lada part is not a world change, so it does not save.
 - WD1: `tp_wd1_bottle_vase_and_box_keep_soft_drops_break_on_hard_ones_and_stay_broken`. After a bottle breaks, save fails with "Removed or missing attachment owner".
 - WD3: `tp_wd3_each_melee_weapon_swings_with_each_key_and_breaks_a_bottle`. The export has melee weapon records only for the crowbar and the shovel. The katana, fly swatter and leg have none.
-- WD14, WD15, CC14: `tp_wd14_a_shot_fuel_can_explodes_breaks_a_bottle_sets_off_a_second_and_stays_gone`, `tp_wd15_the_shot_garage_can_explodes_and_stays_gone`, `tp_cc14_a_tank_blast_next_to_a_car_knocks_parts_off`. The frame after a tank blast panics at `save/world.rs:408` "no entry found for key".
+- WD14, WD15, CC14: `tp_wd14_a_shot_fuel_can_explodes_breaks_a_bottle_sets_off_a_second_and_stays_gone`, `tp_wd15_the_shot_garage_can_explodes_and_stays_gone`, `tp_cc14_a_tank_blast_next_to_a_car_knocks_parts_off`. The blast does not break a nearby bottle or set off a second tank, and knocks no car parts off. After the garage can explodes, save fails with "Fixed source attachment changed".
 - WD20: `tp_wd20_a_hard_hit_breaks_a_tumbleweed_with_its_gib_and_it_stays_gone`. A broken tumbleweed spawns no gib.
 
 Blocked checks. Each waits for the fix of its bug. Run them in the next build's test pass.

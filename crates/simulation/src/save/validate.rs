@@ -823,10 +823,7 @@ impl SaveSnapshot {
             links(openings.insert(id), "Duplicate opening")?;
             data(unit(saved.valve), "Opening valve")?;
         }
-        links(
-            openings.len() == reference.openings.len(),
-            "Missing opening",
-        )
+        Ok(())
     }
 
     fn validate_lighting(

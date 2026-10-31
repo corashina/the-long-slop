@@ -405,7 +405,10 @@ impl PersistentWorld {
                     record.handle = None;
                 }
                 Key::Source(id) => {
-                    let handle = area.bodies[&id];
+                    // A destroyed imported item (an exploded tank) has no body.
+                    let Some(&handle) = area.bodies.get(&id) else {
+                        continue;
+                    };
                     if self
                         .reference_items
                         .get(&id)
