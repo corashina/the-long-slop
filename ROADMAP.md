@@ -300,20 +300,18 @@ Prepare once:
 2. Turn quickly and walk sideways past wires and poles. Edges stay sharp, with no trails behind thin objects.
 4. Watch another moving car or a falling item from a standing view. It shows no trail.
 5. Teleport (sandbox `building`), load a save and switch the car camera with C. The first frame after each shows no smear.
-6. Turn Antialiasing off and reload. The image has hard edges and no TAA. Check F3 frame time with it on and off, standing and driving.
+6. Turn Antialiasing off and reload. The image has hard edges. Check F3 frame time with it on and off, standing and driving.
 7. Lamp shadows: at night, turn on the Lada headlights, a road lamp and a house lamp near the car. Objects cast shadows from each lamp. Compare with the original: hard and soft edges, strength, fade with distance.
 8. Look for shadow acne and gaps at contact points. Tune `BIAS_TEXELS` in `src/presentation/lamp_shadows.rs` if needed.
-9. Stand near 5 or more shadowed lamps: only the 4 nearest cast shadows. No shadow pops when two lamps swap order.
 11. Check the page log for "layout requires ... textures": the lamp atlas adds one texture to each surface pipeline.
 12. At night, stand still near a lit street lamp, then open a door and drive a car past it. The lamp shadows follow each move with no stale shadow. Compare F3 frame time and "GPU ms" with the previous test pass.
 15. Check F3 near four cars with Reflections on and off. Live probes render one 64 px cube face each frame.
 16. Re-export first: the export now has the live mirror records.
 17. Sit in the Lada with Mirrors on. The side and front mirrors show the world behind the car, not flipped.
 18. Turn Mirrors off, or walk more than 4 m from the car. The mirrors show the glass material.
-19. Move the Mirror draw distance slider. Far objects appear and disappear in the mirrors. Reload: the setting stays.
+19. Move the Mirror draw distance slider. Far objects appear and disappear in the mirrors.
 20. Stand among several cars. Check F3 with 5 live mirrors against the frame rate rule.
-21. Depth of field is off by default. Turn it on. Look at the dashboard from the driver seat: it stays sharp and the far road softens a little. Look out of the window: the focus moves out over a short time.
-22. At night and at dusk with Depth of field on: the focus stays closer than by day.
+21. Turn Depth of field on. Look at the dashboard from the driver seat: it stays sharp and the far road softens a little. Look out of the window: the focus moves out over a short time.
 23. Check F3 frame time with Depth of field on and off, with Antialiasing on and off. With Antialiasing on, the soft edges do not flicker. Drive with Motion blur on: the blur still works.
 24. Use the binoculars with Depth of field off: near and far things blur with the focus, and scroll moves the sharp distance. The image bulges at the center and edges show color fringes.
 25. Release the binoculars: the lens effects stop, and DoF returns to the setting.
