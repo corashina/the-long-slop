@@ -494,9 +494,8 @@ mod tests {
         assert!(segment_distance(p, q, Vec3::ZERO, Vec3::Y) > 3.9);
     }
 
-    /// A small rig in the exported shape: limbs reach their goals and the head turns to the mouse.
-    #[test]
-    fn rig_reaches_goals() {
+    /// A small rig in the exported shape.
+    fn rig() -> (MenuIk, MenuView) {
         let joint = |name: &str, x: f32, y: f32| serde_json::json!({"name": name, "pose": {"translation": [x, y, 0.], "rotation": [0., 0., 0., 1.], "scale": [1., 1., 1.]}});
         let at = |x: f32, y: f32, z: f32| serde_json::json!({"translation": [x, y, z], "rotation": [0., 0., 0., 1.], "scale": [1., 1., 1.]});
         let names = [
@@ -537,12 +536,19 @@ mod tests {
                     "right_upper_leg": "thigh_r", "right_lower_leg": "calf_r", "right_foot": "foot_r"}}
         }))
         .unwrap();
-        let mut ik = MenuIk::new(&record, &parents).unwrap();
+        let ik = MenuIk::new(&record, &parents).unwrap();
         let view = MenuView {
             pose: pose(&record.camera.pose),
             fov: 75f32.to_radians(),
             aspect: 16. / 9.,
         };
+        (ik, view)
+    }
+
+    /// Limbs reach their goals and the head turns to the mouse.
+    #[test]
+    fn rig_reaches_goals() {
+        let (mut ik, view) = rig();
         // The mouse on the right of the screen, which is the figure's left (-X).
         let mouse = MenuMouse {
             position: Vec2::new(0.9, 0.5),
@@ -577,6 +583,67 @@ mod tests {
             ik.update(1. / 60., drag, &view);
         }
         assert!(ik.clicked && ik.poses()[8].translation.distance(rest) > 0.1);
+    }
+
+    /// Source `menuIkScript.OnAnimatorIK`: the right button kicks with the left foot, both buttons
+    /// slide the body, and a release takes every goal back to its `FStart` default.
+    #[test]
+    fn tp_sm3_kick_slide_and_release_return_to_rest() {
+        let (mut ik, view) = rig();
+        let rest_mouse = MenuMouse {
+            position: Vec2::new(0.5, 0.5),
+            ..default()
+        };
+        for _ in 0..120 {
+            ik.update(1. / 60., rest_mouse, &view);
+        }
+        let rest: Vec<Vec3> = ik.poses().iter().map(|p| p.translation).collect();
+        // Press at `at`, then drag to `to`.
+        let hold = |ik: &mut MenuIk, buttons: u32, at: Vec2, to: Vec2| {
+            let press = MenuMouse {
+                position: at,
+                buttons,
+                pressed: buttons,
+            };
+            ik.update(1. / 60., press, &view);
+            for _ in 0..60 {
+                let drag = MenuMouse {
+                    position: to,
+                    buttons,
+                    pressed: 0,
+                };
+                ik.update(1. / 60., drag, &view);
+            }
+        };
+        let center = Vec2::new(0.5, 0.5);
+        // Right button: the left foot (11) moves; the right hand (8) and right foot (14) stay.
+        hold(&mut ik, RIGHT_MOUSE, center, center);
+        let p = ik.poses();
+        assert!(p[11].translation.distance(rest[11]) > 0.1);
+        assert!(p[8].translation.distance(rest[8]) < 1e-3);
+        assert!(p[14].translation.distance(rest[14]) < 1e-3);
+        hold(&mut ik, 0, center, center);
+        // Both buttons: `B` moves, so the root joint (pelvis, 0) moves, by at most `bodystance`.
+        hold(
+            &mut ik,
+            LEFT_MOUSE | RIGHT_MOUSE,
+            center,
+            Vec2::new(0.8, 0.2),
+        );
+        let moved = ik.poses()[0].translation.distance(rest[0]);
+        assert!(moved > 0.05 && moved <= 0.5 + 1e-3, "{moved}");
+        // Release: every joint returns to rest.
+        for _ in 0..240 {
+            ik.update(1. / 60., rest_mouse, &view);
+        }
+        assert!(!ik.clicked);
+        for (i, p) in ik.poses().iter().enumerate() {
+            assert!(p.translation.distance(rest[i]) < 2e-3, "joint {i}");
+        }
+        // A press beside the figure does not count as a click.
+        hold(&mut ik, RIGHT_MOUSE, Vec2::new(0.02, 0.02), center);
+        assert!(!ik.clicked);
+        assert!(ik.poses()[11].translation.distance(rest[11]) < 2e-3);
     }
 
     #[test]
