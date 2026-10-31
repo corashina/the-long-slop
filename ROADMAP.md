@@ -55,6 +55,7 @@ Known failures on master c0da737f (2026-10-30 browser retest), fix before the ne
 - First page load can stall at the start of object loading with dependency staging full (7.7/7.8 MiB). A reload clears it.
 - In game, pause > Load > Load last once stayed on "Loading..." for over 6 minutes, with no console messages.
 - 30 of 91 ignored simulation tests fail in release: MC2, BL, stale test data. Debug overflows the stack.
+- SA4: `hazard_trigger_damages_player_until_death` fails. The hazard trigger does not kill the player.
 
 Blocked checks. Each waits for the fix of its bug. Run them in the next build's test pass.
 
@@ -133,14 +134,11 @@ Prepare once:
 ### Starting area
 
 3. Check paint spray and sponge particles: refraction and soft edges.
-4. Check slope normals far from origin, ladders, head bob, sleep hint, hazards.
-5. Check player sounds: hits, footsteps, ambience, muffling in buildings.
-6. Check the music box, radios, compass, clock, and small items.
-7. Crosshair icons: look at a car door, a sliding and a vertical sliding usable, a light switch, a radio knob, a tuneable cap and a seat. Push the Lada, hold the hose at a cap and a trailer grip at the hitch, fill a can. Carry a light, a medium and a heavy item. Each case shows the source icons together, and the heavy item shows the too heavy icon. No name or condition line shows above the crosshair.
-8. Binoculars: pick up the garage binoculars and hold LMB. The view zooms through the lens with the black two-circle mask, the binoculars and the crosshair hide, and look speed drops. Scroll changes the zoom between 3 and 4 degrees. Release LMB to return. Try it with the binoculars equipped too.
-9. Tune icons: look at the radio volume and tune knobs, the compass and clock knobs, and a tuneable sink tap. Each shows its own mouse wheel image. A tuneable cap without an image shows the cap image.
-11. Stairs: walk up stairs without a jump. Walk out of the garage inspection pit. Duck and walk up again. Prone does not step up.
-12. Press B many times on foot and in the Lada until a turd spawns. The game does not stop. Cut a food with the knife: the piece shows.
+4. Check hazards: a hazard trigger hurts the player until death.
+5. Listen to player sounds: hits, footsteps, ambience, muffling in buildings.
+6. Listen to the music box and the radios. The compass and clock needles look right.
+7. Crosshair icons: look at a car door, a sliding and a vertical sliding usable, a light switch, a radio knob, a tuneable cap and a seat. Push the Lada, hold the hose at a cap and a trailer grip at the hitch, fill a can, carry a heavy item. Each case shows the source images together. No name or condition line shows above the crosshair.
+8. Binoculars: the lens view shows the black two-circle mask. Try it with the binoculars equipped too.
 
 ### Car parts and repair
 
