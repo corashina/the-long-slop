@@ -52,9 +52,9 @@ Known failures on master c0da737f (2026-10-30 browser retest), fix before the ne
 
 - Appearance preview shows only the legs and shoes. The camera framing is wrong for Male and Female.
 - Looking down shows hollow shirt sleeves, floating hands and hollow pant legs. It also shows at normal pitch while walking.
-- Outside the Lada, E on the door handle does not open it. The HUD shows "[LMB]+[Mouse]: Move | [F]: Dismount".
+- K3: `tp_k3_e_on_the_outside_door_handle_opens_the_door`. Outside the Lada, the use ray takes the door and the door action shows, but E does not turn the door.
 - First page load can stall at the start of object loading with dependency staging full (7.7/7.8 MiB). A reload clears it.
-- In game, pause > Load > Load last once stayed on "Loading..." for over 6 minutes, with no console messages.
+- In game, pause > Load > Load last once stayed on "Loading..." for over 6 minutes, with no console messages. The simulation and the save bridge finish the load (`tp_k5_s1_a_stored_save_starts_the_session_and_its_restore_finishes`), so the hang is in the browser.
 - 29 of 90 ignored simulation tests fail in release: MC2, BL, stale test data. Debug overflows the stack.
 - W6: `tp_w6_building_keeps_the_pole_with_the_nearest_target`. A building links to the pole whose target 0 is nearest, not the pole with the nearest target (`roadGenScript.CheckCableConnections`).
 - W12: `tp_w12_dig_up_refuse_pickup_and_save`. A buried item loads with a dynamic body. The source freezes it.
@@ -65,6 +65,10 @@ Known failures on master c0da737f (2026-10-30 browser retest), fix before the ne
 - CP5, CP6: `r05_cargo_locks_in_trunk`. The driver cannot exit the Lada in the garage (BL), so the cargo checks do not run.
 - CP7: `tp_cp7_turned_wheels_stay_after_save_and_load`. The seated driver holds steer left, but the garage Lada steer stays 0.
 - CP8, CP9, CP11: `lada_part_paint_and_repair_change_its_appearance_and_save`. Paint on a Lada part is not a world change, so it does not save.
+- WD1: `tp_wd1_bottle_vase_and_box_keep_soft_drops_break_on_hard_ones_and_stay_broken`. After a bottle breaks, save fails with "Removed or missing attachment owner".
+- WD3: `tp_wd3_each_melee_weapon_swings_with_each_key_and_breaks_a_bottle`. The export has melee weapon records only for the crowbar and the shovel. The katana, fly swatter and leg have none.
+- WD14, WD15, CC14: `tp_wd14_a_shot_fuel_can_explodes_breaks_a_bottle_sets_off_a_second_and_stays_gone`, `tp_wd15_the_shot_garage_can_explodes_and_stays_gone`, `tp_cc14_a_tank_blast_next_to_a_car_knocks_parts_off`. The frame after a tank blast panics at `save/world.rs:408` "no entry found for key".
+- WD20: `tp_wd20_a_hard_hit_breaks_a_tumbleweed_with_its_gib_and_it_stays_gone`. A broken tumbleweed spawns no gib.
 
 Blocked checks. Each waits for the fix of its bug. Run them in the next build's test pass.
 
@@ -79,18 +83,12 @@ Blocked checks. Each waits for the fix of its bug. Run them in the next build's 
 - CP17: Save and load. Loot tool paint left, color and wear stay. Drive away and back: they stay.
 - W15: Drop an item, drive about 10 km out and back, save and reload. The item stays where it was dropped.
 - PB5: Drive the Lada. Use the horn, lights, ignition (tap and hold), handbrake and gear stick: a hand moves to each. Press gas, brake and clutch: the feet move to the pedals.
-- PB9: Die on foot and in a moving car. The body falls with joint limits and carries the car speed.
 - AR3: Drive the Lada at speed. The dashboard, wheel and hands stay sharp. The road and terrain behind them have no ghost copies.
 - AR12: Park three cars near the garage. Each car body reflects its own surroundings, and the reflections update as the cars and the sun move.
 
 #### BL: the player cannot exit the car in the garage
 
 - PB1: Look down standing, crouching, walking forward and back. Carry a light and a heavy (>10 kg) item. Sit in the Lada (driver and passenger), on the WC and on the sled. Check legs, arms and hands on the wheel.
-
-#### S3: Load last hangs
-
-- S1: Load, Load last and New game after death do not fail with "Asset CPU budget exceeded". Reload the page, then Load last from the start menu: the game starts, no "Source building metadata exceeds prototype CPU budget".
-- S2: Turn on "Load last save at start" and reload the page. The last save loads.
 
 #### Appearance camera: the preview shows only the legs
 
@@ -101,12 +99,7 @@ Blocked checks. Each waits for the fix of its bug. Run them in the next build's 
 
 - CC14: Blow up a tank next to a car. Parts fall off.
 - WD8: Reload and unload with R and E from aimed or carried ammo. Round totals stay the same. The left hand moves to the gun.
-- WD9: Shotguns and BB gun: hold R and move the mouse to break the barrel. Closed barrels fire; open barrels reload. The BB gun gains power.
-- WD10: Revolver: hold R and scroll to turn the cylinder. Empty chambers click. Bullets show in full chambers.
-- WD11: SMG: load from a magazine item. No magazine: no fire. Save and load keeps ammo, barrel, chambers, power and magazine.
-- WD12: SMG: unload with E at loose ammo, or with R while you hold ammo. A magazine drops at the gun with the gun rounds, and the gun is empty. Load it back with R. Load a held magazine into a loaded SMG: the old magazine drops. Save and load: a dropped magazine keeps its rounds.
 - WD15: Shoot the full 20 L garage fuel can. It explodes, and the can and its cap go away. Save and load: they stay gone.
-- WD17: Shoot a tank that does not explode, and the garage water tank, with a shotgun. Holes that face down leak, and the fluid amount falls.
 - WD19: Drive into a cactus, shoot one until it breaks, and blow one up. Cactus pieces fly off and the cactus stays, as in the original. It does not break again until its area streams in again.
 - WD20: Hit a tumbleweed hard with the car, a shot and a melee swing. It breaks with its gib and sound. Save and load: it stays gone.
 
@@ -145,12 +138,7 @@ Prepare once:
 6. Use doors and handles. Push a car on foot and from a seat.
 7. Carry a two-hand item.
 8. Hold Left Alt: the hand points at the aimed surface. Rub dirt off a car and wash a wash trigger. Hold Left Alt at the sky: the hand waves.
-10. The camera stays in the head. Mouse look fades out.
-11. The death screen effect fades in over 14 s, then the menu opens. Read the console for DeadV parameters the port ignores.
-12. Load a save: no ragdoll is left.
-13. Put on and take off each wearable type (glasses, hat, cap, helmet, mask) and the cigarette with Tab and X. The cigarette comes off first.
 14. Worn items are hidden in first person but cast shadows. The worn pumpkin inner mesh stays visible, as in the source.
-15. Save and load with worn items: they stay worn. Die: each worn item drops.
 21. The dark lens (profile 0) dims the view by 2 stops.
 23. Lenses with the flare flag hide the sun flare. Other lenses keep it.
 25. Take the glasses off: the tint clears. Die with them on: the tint clears and the death effect fades in.
@@ -162,8 +150,6 @@ Prepare once:
 2. Hit a building lamp with the shovel. It goes dark and stays dark when switched. Save and load: it stays broken.
 3. Swing the katana, crowbar, fly swatter and leg with each attack key. Each plays its own animation and sounds and breaks a bottle. The hands follow the weapon grips.
 5. Hit a sausage with the shovel or a hurtFood weapon: it splits into pieces. Save and load: the pieces keep their bites.
-6. Fire each gun: revolver, BB gun, SMG and the three shotguns. Check the shot sound, muzzle flash, recoil, tracer, sand or spark particles and hit sounds. A shot breaks a bottle. Shotgun pellets push a crowbar.
-7. Check the HUD crosshair per gun, and its empty color.
 13. Shoot metal, wood, sand, glass and flesh: bullet holes show with the right texture, face out, move with items and fade per lifetime. Check the first hole for a hitch.
 14. Shoot a world fuel can or tank with gas, oil or diesel over 40%. It explodes with particles and sound, breaks nearby bottles, pushes items and sets off a second tank. Save and load: the exploded items stay gone.
 
@@ -172,10 +158,3 @@ Prepare once:
 2. Bats: set the PC date between 15 Oct and 15 Nov, start a new game and drive to a gas station. In 65% of stations, 5 to 30 bats fly near it, flap and squeak. Pick one up: it keeps squeaking and does not fly out of the hand. Save and load near the bats.
 10. A bite of a big evil rabbit damages loose items and other rabbits near the bite.
 12. Start a car engine near rabbits. Normal rabbits flee from it.
-
-### Multiplayer
-
-Re-export first: the export now holds `playeranimationscript.sendInterval`. Use two browser tabs on one PC first, then two PCs.
-
-2. The guest loads the host world and stands where the host stood. A host in a car seat puts the guest in the same seat until M02.
-3. Each player sees the other walk, run, duck, prone, look up and down, and carry items. Names show above the heads.
