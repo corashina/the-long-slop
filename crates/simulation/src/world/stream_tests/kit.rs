@@ -389,3 +389,97 @@ pub(crate) fn find(run: &GarageRuntime, name: &str) -> ItemId {
         .map(|i| i.id)
         .unwrap_or_else(|| panic!("no item named {name}"))
 }
+
+/// Spawns the first world prototype with each script class in front of the player. Returns
+/// the placements once each binds.
+pub(crate) fn spawn_scripts(
+    run: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    classes: &[&str],
+) -> Vec<crate::world::GeneratedId> {
+    let rules = &run.stream.contents.rules;
+    let sources: Vec<_> = classes
+        .iter()
+        .map(|class| {
+            reference
+                .world
+                .prototypes
+                .iter()
+                .find(|p| {
+                    rules
+                        .component(&reference.world, &p.source, class)
+                        .ok()
+                        .flatten()
+                        .is_some()
+                })
+                .unwrap_or_else(|| panic!("{class} prototype"))
+                .source
+                .clone()
+        })
+        .collect();
+    let view = run.area.player.view(&run.physics).camera_pose;
+    let rotation = rapier3d::math::Rotation::from_array(view.rotation);
+    let forward = rotation * -rapier3d::math::Vector::Z;
+    let right = rotation * rapier3d::math::Vector::X;
+    for (i, source) in sources.iter().enumerate() {
+        let p = rapier3d::math::Vector::from_array(view.position)
+            + forward.with_y(0.).normalize() * 0.8
+            + right.with_y(0.).normalize() * (0.4 * (i as f32 - 1.));
+        let position = run
+            .stream
+            .origin
+            .absolute((p - rapier3d::math::Vector::Y * 0.6).to_array());
+        run.stream
+            .add_startup_placement(
+                source,
+                crate::world::AbsolutePose {
+                    position,
+                    rotation: [0., 0., 0., 1.],
+                },
+            )
+            .unwrap();
+    }
+    let parent = |run: &GarageRuntime, source: &crate::reference::SourceId| {
+        run.stream
+            .contents
+            .active
+            .iter()
+            .find(|c| &c.content.placement.prototype == source)
+            .map(|c| c.content.placement.id.clone())
+    };
+    let bound = |run: &GarageRuntime, class: &str, p: &crate::world::GeneratedId| match class {
+        "musicboxscript" => run.stream.music_box(p).is_some(),
+        _ => run.stream.dial(p).is_some(),
+    };
+    for _ in 0..600 {
+        frame(run, reference);
+        if sources
+            .iter()
+            .zip(classes)
+            .all(|(s, c)| parent(run, s).is_some_and(|p| bound(run, c, &p)))
+        {
+            seconds(run, reference, 1.);
+            return sources.iter().map(|s| parent(run, s).unwrap()).collect();
+        }
+    }
+    panic!("{classes:?} do not bind");
+}
+
+/// The item of an active world content.
+pub(crate) fn content_item(run: &GarageRuntime, id: &crate::world::GeneratedId) -> Option<ItemId> {
+    run.stream
+        .contents
+        .active
+        .iter()
+        .find(|c| &c.content.placement.id == id)
+        .and_then(|c| c.item)
+}
+
+/// Gives a test collider a trigger role, as `trigger_roles` publishes it.
+pub(crate) fn add_trigger_role(
+    run: &mut GarageRuntime,
+    collider: rapier3d::prelude::ColliderHandle,
+    role: crate::reference::TriggerRole,
+) {
+    run.stream.trigger_roles.insert(collider, role);
+}
