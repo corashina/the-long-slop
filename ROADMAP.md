@@ -217,8 +217,8 @@ Prepare once:
 
 ### Settings
 
-5. Crosshair off hides it. Old crosshair shows the source dot, tinted for E, F and MMB, with the carry bar. Crosshair scale changes its size.
-9. Fresh profile: FPS limit is off, and F3 follows the display refresh. FPS limit 60 on holds F3 at 59 to 61 FPS while playing, also on a 144 Hz display. The menu runs at 30.
+5. Crosshair off hides it. Old crosshair shows the source dot with the carry bar. Crosshair scale changes its size.
+9. Fresh profile: F3 follows the display refresh. FPS limit 60 on holds F3 at 59 to 61 FPS while playing, also on a 144 Hz display.
 
 ### Languages and help text
 
