@@ -663,9 +663,10 @@ fn bat_tour(
 
 /// CR2. Source `buildingscript.RandomFlyerSpawn` with `mainscript.CheckHoliday(halloween)`
 /// (15 Oct to 15 Nov) and `Random.Range(0, 1) > 0.35`: `Random.Range(5, 30)` bats;
-/// `randomFlyer.Update`: a held bat squeaks and does not fly.
+/// `randomFlyer.Update`: a bat flies and squeaks. `RandomBat` has no `pickupable`: it cannot
+/// be carried.
 #[test]
-#[ignore = "known failure CR2: road buildings 42 km and more out do not load"]
+#[ignore = "requires the installed source export"]
 fn tp_cr2_halloween_bats_near_buildings() {
     let (reference, mut run) = load_on([2026, 10, 31]);
     let tour = bat_tour(&mut run, &reference, 8);
@@ -674,7 +675,7 @@ fn tp_cr2_halloween_bats_near_buildings() {
     for (_, b) in &with {
         assert!((5..30).contains(&b.len()), "{} bats", b.len());
     }
-    // Go back to the last building with bats and take one.
+    // Go back to the last building with bats.
     let at = with.last().unwrap().0;
     act(
         &mut run,
@@ -687,18 +688,22 @@ fn tp_cr2_halloween_bats_near_buildings() {
         .first()
         .expect("the bats are still there");
     let point = run.area.items.get(bat).unwrap().pose.position;
-    run.area
-        .interaction
-        .pickup_item(
-            bat,
-            point,
-            &run.area.player,
-            &mut run.area.items,
-            &mut run.physics,
-        )
-        .unwrap();
+    assert!(
+        run.area
+            .interaction
+            .pickup_item(
+                bat,
+                point,
+                &run.area.player,
+                &mut run.area.items,
+                &mut run.physics,
+            )
+            .is_err(),
+        "a bat cannot be carried"
+    );
+    // Source `NextSound`: a bat squeaks 10 to 60 s after the last squeak.
     let mut squeaks = 0;
-    for _ in 0..steps(10.) {
+    for _ in 0..steps(61.) {
         frame(&mut run, &reference);
         squeaks += run
             .flyers
@@ -706,16 +711,14 @@ fn tp_cr2_halloween_bats_near_buildings() {
             .iter()
             .filter(|s| s.item == bat)
             .count();
-        assert_eq!(
-            run.area.interaction.held(),
-            Some(bat),
-            "the bat stays in the hand"
-        );
     }
-    assert!(squeaks > 0, "a held bat squeaks");
-    run.area
-        .interaction
-        .drop_held(&mut run.area.items, &mut run.physics);
+    assert!(squeaks > 0, "a bat squeaks");
+    let flown = run.area.items.get(bat).unwrap().pose.position;
+    let distance = (0..3)
+        .map(|i| (flown[i] - point[i]).powi(2))
+        .sum::<f32>()
+        .sqrt();
+    assert!(distance > 0.5, "a bat flies: {point:?} -> {flown:?}");
     let before = run.flyers.flyers().len();
     let mut loaded = save_load(&run, &reference);
     seconds(&mut loaded, &reference, 2.);

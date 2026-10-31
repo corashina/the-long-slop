@@ -127,9 +127,14 @@ fn w02_long_trip_keeps_far_edits() {
         }
         if building.is_none() && km >= 15. {
             // New building items still fall when the stop loads.
-            seconds(&mut run, &reference, 3.);
+            seconds(&mut run, &reference, 10.);
             let near: Vec<_> = roadside(&run, path[index])
                 .filter(|(key, _)| edited.iter().all(|(_, k, _)| k != key))
+                // A settled item keeps its place.
+                .filter(|(_, id)| {
+                    let body = run.area.items.get(*id).unwrap().body.unwrap();
+                    run.physics.rapier().bodies[body].is_sleeping()
+                })
                 .map(|(key, id)| (key, absolute(&run, id)))
                 .collect();
             if !near.is_empty() {
@@ -157,8 +162,9 @@ fn w02_long_trip_keeps_far_edits() {
     let (site, near) = building.expect("generated contents after 15 km");
 
     // Return and check each site.
-    let check = |run: &GarageRuntime, stage: &str| {
-        for (_, key, rest) in &edited {
+    // Only the items at this stop load.
+    let check = |run: &GarageRuntime, stop: usize, stage: &str| {
+        for (_, key, rest) in edited.iter().filter(|(index, _, _)| *index == stop) {
             let id = run.area.items.resolve_key(key).expect(stage);
             let now = absolute(run, id);
             assert!(
@@ -168,18 +174,24 @@ fn w02_long_trip_keeps_far_edits() {
         }
     };
     stop(&mut run, &reference, &path, site);
-    for (key, position) in &near {
-        let id = run
-            .area
-            .items
-            .resolve_key(key)
-            .unwrap_or_else(|| panic!("revisited building lost {key:?}"));
-        let now = absolute(&run, id);
-        assert!(
-            horizontal(now, *position) < 0.3,
-            "revisited {key:?} {position:?} -> {now:?}"
-        );
-    }
+    let moved: Vec<_> = near
+        .iter()
+        .filter_map(|(key, position)| {
+            let id = run
+                .area
+                .items
+                .resolve_key(key)
+                .unwrap_or_else(|| panic!("revisited building lost {key:?}"));
+            let now = absolute(&run, id);
+            (horizontal(now, *position) >= 0.3).then(|| (key.clone(), *position, now))
+        })
+        .collect();
+    assert!(
+        moved.is_empty(),
+        "{} of {} revisited items moved: {moved:?}",
+        moved.len(),
+        near.len()
+    );
     for (index, key, rest) in edited.iter().rev() {
         stop(&mut run, &reference, &path, *index);
         let id = run
@@ -198,9 +210,9 @@ fn w02_long_trip_keeps_far_edits() {
     }
     let mut loaded = load(&reference, &saved);
     seconds(&mut loaded, &reference, 1.);
-    check(&loaded, "after reload");
+    check(&loaded, edited[0].0, "after reload");
     stop(&mut loaded, &reference, &path, edited[1].0);
-    check(&loaded, "after reload at the second edit");
+    check(&loaded, edited[1].0, "after reload at the second edit");
 }
 
 #[test]

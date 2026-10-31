@@ -495,7 +495,10 @@ impl PersistentWorld {
             self.records[index].extent = extent;
             self.records[index].fixed = !body.is_dynamic();
             let bounded = [0, 1, 2].iter().all(|&axis| {
-                (absolute[axis] - stream.origin.offset[axis]).abs() + extent <= REBASE_LIMIT as f64
+                // The focus can lie up to the rebase limit from the origin, so a body near it
+                // can lie up to twice the limit away.
+                (absolute[axis] - stream.origin.offset[axis]).abs() + extent
+                    <= 2. * REBASE_LIMIT as f64
             }) && [0, 2].iter().all(|&axis| {
                 (absolute[axis] - stream.focus()[axis]).abs() + extent <= REBASE_LIMIT as f64
             });

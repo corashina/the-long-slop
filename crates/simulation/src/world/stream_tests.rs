@@ -703,10 +703,11 @@ fn roadside_owner_controls_keep_state_after_owner_retirement() {
     .unwrap();
     let mut changed = baseline.clone();
     changed.temperature = Some(baseline.temperature.unwrap_or(0.) + 1.);
+    // The item holds the change: a capture keeps the record.
+    let origin = owner.origin.clone();
+    run.area.items.get_mut(item).unwrap().temperature = changed.temperature;
     run.stream.changes.record(key.clone(), changed, &baseline);
-    run.stream
-        .changes
-        .set_replay(&key, &owner.origin, &instance);
+    run.stream.changes.set_replay(&key, &origin, &instance);
     let source_tank = reference
         .tanks
         .iter()
@@ -789,6 +790,10 @@ fn roadside_owner_controls_keep_state_after_owner_retirement() {
         .find(|entry| entry.fluid_type == 3)
         .unwrap()
         .amount -= 1.;
+    run.area
+        .items
+        .restore_generated(tank, &supply_changed)
+        .unwrap();
     run.stream
         .changes
         .record(supply_key.clone(), supply_changed, &supply_baseline);
@@ -809,6 +814,7 @@ fn roadside_owner_controls_keep_state_after_owner_retirement() {
     let sibling_key = super::super::ObjectKey::Imported(imported);
     let mut sibling_changed = sibling_baseline.clone();
     sibling_changed.temperature = Some(sibling_baseline.temperature.unwrap_or(0.) + 1.);
+    run.area.items.get_mut(imported).unwrap().temperature = sibling_changed.temperature;
     run.stream
         .changes
         .record(sibling_key.clone(), sibling_changed, &sibling_baseline);
@@ -1664,8 +1670,10 @@ fn replay_restore_replaces_selection_and_saved_readiness_checks_revision() {
     run.stream.select_changed_destinations();
     assert!(run.stream.saved_bindings_ready(&run.area.items));
     drop(candidate);
-    saved.changes.remove(replacement);
-    assert_eq!(old_replay_keys(&run.stream), vec![old]);
+    saved.changes.remove(replacement.clone());
+    // The garage items that settled have records too.
+    let keys = old_replay_keys(&run.stream);
+    assert!(keys.contains(&old) && !keys.contains(&replacement));
     assert!(run.stream.saved_bindings_ready(&run.area.items));
     let missing = ObjectKey::Generated(
         replay_placement(

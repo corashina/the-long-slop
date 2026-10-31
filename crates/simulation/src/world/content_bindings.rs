@@ -203,6 +203,10 @@ impl WorldStream {
                 }
             }
         }
+        // Deletion compacts records. Refresh indices before any replay consumer runs.
+        if self.change_revision != self.changes.revision() {
+            self.select_changed_destinations();
+        }
     }
 
     /// A generated storage owner needs a record while an item locks to it.
@@ -351,6 +355,12 @@ impl WorldStream {
                     .static_controls
                     .iter()
                     .any(|c| c.content.placement.id == instance.placement.id)
+                // A content child structure without a request retires with its content.
+                || (!instance.placement.id.children.is_empty()
+                    && !self
+                        .wanted_structures
+                        .iter()
+                        .any(|p| p.id == instance.placement.id))
                 || !reference
                     .world
                     .mechanisms
@@ -593,7 +603,12 @@ impl WorldStream {
                         .rules
                         .component(&self.reference, pickup_root, "pickupable")?;
                 // Car and trailer roots are items without a pickupable. Only bikes have one.
-                if pickup.is_none() && prototype.trailer.is_none() && prototype.vehicle.is_none() {
+                // A bat has none: `randomFlyer` moves its Rigidbody.
+                if pickup.is_none()
+                    && prototype.trailer.is_none()
+                    && prototype.vehicle.is_none()
+                    && placement.prototype != reference.sky.flyer.prefab
+                {
                     continue;
                 }
                 (|| -> Result<(), ReferenceError> {
