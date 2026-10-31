@@ -31,11 +31,11 @@ function broker(){
 }
 const tick=()=>new Promise(r=>setTimeout(r,0));
 function setup(Peer,clock,extra={}){
- const events={packets:[],leaves:[],status:[],chat:[],saves:[],sessions:[]};let timer=null;
+ const events={packets:[],leaves:[],status:[],chat:[],saves:[],sessions:[],looks:[]};let timer=null;
  const net=createNet({Peer,buildId:'b1',exportHash:'h1',capture:async()=>'{"world":1}',now:()=>clock.t,
   setTimer:fn=>{timer=fn;return 1;},clearTimer:()=>{timer=null;},...extra,
   on:{packet:p=>events.packets.push([...p]),leave:s=>events.leaves.push(s),status:s=>events.status.push(s),chat:c=>events.chat.push(c),
-   save:b=>events.saves.push(new TextDecoder().decode(b)),session:(r,s)=>events.sessions.push([r,s])}});
+   save:b=>events.saves.push(new TextDecoder().decode(b)),session:(r,s)=>events.sessions.push([r,s]),looks:l=>events.looks.push(l)}});
  return {net,events,run:()=>timer?.()};
 }
 
@@ -117,4 +117,21 @@ test('guests see the host leave',async()=>{
  assert.deepEqual(a.events.status.at(-1),STATUS.hostLeft);
  assert.equal(a.net.role,ROLE.OFF);
  assert.ok(PREFIX);
+});
+
+// Roadmap MP5: an outfit change on one peer reaches every other peer through the host.
+test('tp_mp5_an_outfit_change_reaches_the_other_peers',async()=>{
+ const {Peer}=broker(),clock={t:0};
+ const host=setup(Peer,clock),a=setup(Peer,clock),b=setup(Peer,clock);
+ const code=await host.net.host({name:'H',outfit:{model:0}});
+ a.net.join({code,name:'A',outfit:{model:1}});b.net.join({code,name:'B',outfit:{model:2}});
+ for(let i=0;i<10;i++)await tick();
+ const last=peer=>peer.events.looks.at(-1);
+ assert.deepEqual(last(b).get(1),{name:'A',outfit:{model:1}});
+ a.net.look({model:3});
+ for(const peer of [host,b,a])assert.deepEqual(last(peer).get(1),{name:'A',outfit:{model:3}});
+ host.net.look({model:4});
+ for(const peer of [a,b])assert.deepEqual(last(peer).get(0),{name:'H',outfit:{model:4}});
+ // The other figures keep their own outfits.
+ assert.deepEqual(last(a).get(2),{name:'B',outfit:{model:2}});
 });

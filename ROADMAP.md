@@ -322,8 +322,6 @@ Re-export first: the export now holds `playeranimationscript.sendInterval`. Use 
 
 2. The guest loads the host world and stands where the host stood. A host in a car seat puts the guest in the same seat until M02.
 3. Each player sees the other walk, run, duck, prone, look up and down, and carry items. Names show above the heads.
-5. Outfit: change the appearance on one peer. The other peer sees the change.
-7. Wrong code, wrong password and a full room each show their message. A different build shows "Different game version."
 10. Name labels stand above the heads. Check the label height (port choice 2.1 m).
 11. Each figure keeps its own outfit colors. The local body colors do not change.
 12. F3 with 1 and with 7 remote players. Report the frame time cost per figure.
