@@ -48,52 +48,40 @@ Run these checks on Tomasz's PC in one run. Passed checks are removed.
 Check F3 in each scenario below. Compare with the frame rate rule.
 Look, listen and F3-only checks are on Tomasz's eyes list (project file `plans/tp-eyes-list.md`), not here.
 
-Known failures on master c0da737f (2026-10-30 browser retest), fix before the next run:
+Known failures on master e927770 (2026-10-31 headless run, export ee6554d), fix before the next run:
 
-- Appearance preview shows only the legs and shoes. The camera framing is wrong for Male and Female.
-- Looking down shows hollow shirt sleeves, floating hands and hollow pant legs. It also shows at normal pitch while walking.
-- First page load can stall at the start of object loading with dependency staging full (7.7/7.8 MiB). A reload clears it.
-- In game, pause > Load > Load last once stayed on "Loading..." for over 6 minutes, with no console messages. The simulation and the save bridge finish the load (`tp_k5_s1_a_stored_save_starts_the_session_and_its_restore_finishes`), so the hang is in the browser.
-- 31 of 169 ignored simulation tests fail in release: MC2, BL, stale test data. Debug overflows the stack.
+- K1 (browser): Appearance preview shows only the legs and shoes. The camera framing is wrong for Male and Female.
+- K2 (browser): Looking down shows hollow shirt sleeves, floating hands and hollow pant legs. It also shows at normal pitch while walking.
+- K4 (browser): First page load can stall at the start of object loading with dependency staging full (7.7/7.8 MiB). A reload clears it.
+- K5 (browser): In game, pause > Load > Load last once stayed on "Loading..." for over 6 minutes, with no console messages. The simulation and the save bridge finish the load (`tp_k5_s1_a_stored_save_starts_the_session_and_its_restore_finishes`), so the hang is in the browser.
+- 32 of 169 ignored simulation tests fail in release. Debug overflows the stack. The lines below name each one.
 - MC2 on the road: `tp_sa1_fill_start_drive_return_save_reload`. The Lada on the road, engine running in gear 2 at 2427 rpm, moves 0 m. MC2 is not only the garage floor.
+- W15: `w02_long_trip_keeps_far_edits` is flaky. In 2 of 3 runs, 1 or 2 of 52 revisited building items moved.
 - WD19: `tp_wd19_cactus_breaks_once_and_stays`. A car hit, a shot and a blast break cacti once, with one gib each, and they stay. After an 8 km move the broken cactus is still bound, so its area does not stream in again.
 - CP15: `tp_cp13_cp16_loot_tools_work_from_the_hand`. The loot spray paints, shows its color, sprays particles and runs out, but plays no sound. Its prototype tool has no `voice`, so the spray signal never plays and its tool loop never starts.
 - WD2: `tp_wd2_shovel_breaks_a_building_lamp`. The shovel breaks the lamps and they stay dark. Save and load at the Mansion: the restore stays pending.
 - CP5, CP6: `r05_cargo_locks_in_trunk`. The driver cannot exit the Lada in the garage (BL), so the cargo checks do not run.
 - CP7: `tp_cp7_turned_wheels_stay_after_save_and_load`. The seated driver holds steer left, but the garage Lada steer stays 0.
 - WD3: `tp_wd3_each_melee_weapon_swings_with_each_key_and_breaks_a_bottle`. The export has melee weapon records only for the crowbar and the shovel. The katana, fly swatter and leg have none.
-- WD20: `tp_wd20_a_hard_hit_breaks_a_tumbleweed_with_its_gib_and_it_stays_gone`. The tumbleweed gib prototype holds only a particle system: no body, pickup or renderer. So the gib spawns no item, and the test finds none. The export has no gib particle data.
+- WD20: `tp_wd20_a_hard_hit_breaks_a_tumbleweed_with_its_gib_and_it_stays_gone`. The tumbleweed gib prototype holds only a particle system: no body, pickup or renderer. So the gib spawns no item, and the test finds none. The export has no gib particle data. `tumbleweed_breaks_on_a_hard_drop_and_leaves_the_spawned_list` fails the same way.
+- MC2, older tests: `garage_start_car_drives_in_automatic`, `car07_drives_in_forced_automatic`, `start_cars_drive_save_and_load`, `two_ladas_drive_save_and_load`, `lada_tows_the_trailer_and_the_hitch_saves`. The car or trailer does not move.
+- BL, older test: `start_car_driver_exits_in_garage` finds no clear exit.
+- Stale test data: these tests do not find their fixture near the start (bottle, lamp trigger, buried item, natural item, bike prototype): `bottle_breaks_on_a_hard_drop_once_and_stays_removed_after_reload`, `shovel_broken_lamp_stays_broken_after_reload`, `revolver_shot_breaks_a_bottle`, `katana_swing_breaks_a_bottle`, `shotgun_pellets_push_an_item`, `x02_leftovers_smg_unload_drops_the_magazine`, `crowbar_hit_does_not_lift_a_buried_item`, `roadside_possession_survives_owner_retirement_without_duplicate_spawn`, `bike03_pedals_then_kick_starts`.
+- `bike01_kick_starts_and_rides_upright`: panic "validated neutral" at `simulation/drivetrain.rs:149`.
+- `a_blast_sets_off_a_second_tank`: the second tank is not removed. `a_shot_tank_explodes_and_breaks_a_nearby_bottle`: the blast does not break the bottle. The `tp_wd14` and `tp_cc14` tests with the full 20 L can pass.
+- `fixed_decoration_possessions_restore_on_item_path`: the restored item is not an interaction part.
+- `fixed_decorations_preserve_collision_without_item_bindings`: "Missing source rule wrong.assets:84448".
+- `road_building_cable_is_in_building_appearance`: no building cables.
+- `required_publication_reaches_ready_and_withholds_dependencies`: the world is not supported.
 
 Blocked checks. Each waits for the fix of its bug. Run them in the next build's test pass.
 
-#### MC2: the garage Lada does not drive
+#### MC2: the Lada does not drive
 
 - SA1: Play the garage loop in the browser: repair, fill, start, drive out, return, save, reload.
-- SA2: Check the 20 L can stays on the ground after drive-out and return.
 - SA10: Drive the Lada and check that parked cars and dropped items still settle and sleep.
 - CP4: Siphon hose: first check the garage hose spawns clear of the walls. Attach it to the Lada tank and a can. Siphon by height, drain with LMB, coil with R, store it, tear it off by driving.
-- CP12: Paint and brush a roadside car part. Drive away until it unloads, come back: the part keeps its look. Save and load: it still keeps it.
-- CP17: Save and load. Loot tool paint left, color and wear stay. Drive away and back: they stay.
 - W15: Drop an item, drive about 10 km out and back, save and reload. The item stays where it was dropped.
-- AR3: Drive the Lada at speed. The dashboard, wheel and hands stay sharp. The road and terrain behind them have no ghost copies.
-- AR12: Park three cars near the garage. Each car body reflects its own surroundings, and the reflections update as the cars and the sun move.
-
-#### BL: the player cannot exit the car in the garage
-
-- PB1: Look down standing, crouching, walking forward and back. Carry a light and a heavy (>10 kg) item. Sit in the Lada (driver and passenger), on the WC and on the sled. Check legs, arms and hands on the wheel.
-
-#### Appearance camera: the preview shows only the legs
-
-- PB16: Open Appearance from the start menu and the pause menu. The preview figure shows next to the panel with the export camera and lights. Check the figure pose, the lights and the colors. Changes show at once.
-- PB17: Set Male and Female with custom colors and disabled parts. Check them in game, in the shadow and on the ragdoll. Check the submesh colors of each segment.
-
-#### Guns from equip(): sandbox guns do not load
-
-- CC14: Blow up a tank next to a car. Parts fall off.
-- WD8: Reload and unload with R and E from carried ammo. Round totals stay the same.
-- WD15: Shoot the full 20 L garage fuel can. It explodes, and the can and its cap go away. Save and load: they stay gone.
-- WD19: Drive into a cactus, shoot one until it breaks, and blow one up. Cactus pieces fly off and the cactus stays, as in the original. It does not break again until its area streams in again.
-- WD20: Hit a tumbleweed hard with the car, a shot and a melee swing. It breaks with its gib and sound. Save and load: it stays gone.
 
 Prepare once:
 
@@ -109,32 +97,17 @@ Prepare once:
 5. Cargo storage: lock items in the Lada trunk, glove box, and engine bay, and in a fridge, a pallet, and a coffin. Open the lid to release them. The source box is manual only: items in it when its area loads lock, items put in it later stay loose. Items in a fridge, pallet or coffin when its area loads lock at once, not after 3 s.
 6. Save and load with the hose attached and with cargo locked.
 7. Park the Lada with the wheels turned. Save and load: the wheels stay turned.
-8. Brush rust off a Lada part and a roadside car part. Rub dirt off with the sponge. The material changes at once.
-9. Paint a Lada door and a loose part with spray paint. The color changes while you spray.
-11. A state change binds a new material. Check the part does not blink for a frame.
 15. Paint a car part with loot spray paint. The can shows its color, sprays particles with sound, and runs out.
-
-### World and terrain
-
-6. Power cables: check poles link to the next pole on curves and tilted poles, road buildings and the home link to a pole, and the rope meshes are not flipped.
-12. Dig a buried item up with the shovel. It must lift, become loose, and then allow pickup. A buried item must refuse pickup. Save and load with an item buried and one dug up.
-13. Metal detector: turn it on and off with use. Check the beep pitch and volume and the needle near metal, buried metal, and behind a wall. Save and load with it on.
-17. Move far in one step (sandbox building('Benzinkut01'), or load a far save). Wait while the area loads. The game does not stop with "validated authored material choice".
 
 ### Player body and outfit
 
 6. Use doors and handles. Push a car from a seat.
 8. Hold Left Alt to rub dirt off a car and to wash a wash trigger.
-14. Worn items are hidden in first person but cast shadows. The worn pumpkin inner mesh stays visible, as in the source.
-21. The dark lens (profile 0) dims the view by 2 stops.
 
 ### Weapons and damage
 
-1. Drop and throw beer bottles, the vase and a box. Soft drops keep them whole. Hard hits break them with pieces and a break sound. The pieces scatter and fade.
 2. Hit a building lamp with the shovel. It goes dark and stays dark when switched. Save and load: it stays broken.
 3. Swing the katana, crowbar, fly swatter and leg with each attack key. Each plays its own animation and sounds and breaks a bottle. The hands follow the weapon grips.
-14. Shoot a world fuel can or tank with gas, oil or diesel over 40%. It explodes with particles and sound, breaks nearby bottles, pushes items and sets off a second tank. Save and load: the exploded items stay gone.
-
-### Creatures
-
-2. Bats: set the PC date between 15 Oct and 15 Nov, start a new game and drive to a gas station. In 65% of stations, 5 to 30 bats fly near it, flap and squeak. A bat cannot be picked up: the source `RandomBat` has no `pickupable`. Save and load near the bats.
+8. Reload and unload with R and E from carried ammo. Round totals stay the same.
+19. Drive into a cactus, shoot one until it breaks, and blow one up. Cactus pieces fly off and the cactus stays, as in the original. It does not break again until its area streams in again.
+20. Hit a tumbleweed hard with the car, a shot and a melee swing. It breaks with its gib and sound. Save and load: it stays gone.
