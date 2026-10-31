@@ -40,7 +40,7 @@ fn spawn_rabbit(
 }
 
 /// The garage scene with the player on open ground 113 m from the spawn.
-fn outdoors() -> (ReferenceManifest, GarageRuntime) {
+pub(super) fn outdoors() -> (ReferenceManifest, GarageRuntime) {
     let (reference, mut run) = load_garage();
     seconds(&mut run, &reference, 1.);
     let spawn = reference.area.player_spawn.translation.map(f64::from);

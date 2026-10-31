@@ -244,3 +244,82 @@ fn tp_pb9_the_ragdoll_carries_the_speed_of_the_car() {
         );
     }
 }
+
+/// PB6. Source `pushscript` grip: F on a push grip of a car holds it, and W pushes the car.
+#[test]
+#[ignore = "requires the installed source export"]
+fn tp_pb6_f_on_a_push_grip_pushes_the_car_on_foot() {
+    use crate::simulation::keys;
+    let (reference, mut run) = super::creatures::outdoors();
+    let key = run.vehicle.clone().unwrap();
+    let body = run.physics.chassis_handle(&key);
+    let car = |run: &GarageRuntime| *run.physics.rapier().bodies[body].position();
+    // The start car push grip, from its world prototype.
+    let name = run
+        .area
+        .items
+        .resolve_key(&key)
+        .and_then(|id| run.area.items.name(id))
+        .unwrap()
+        .to_string();
+    let grip = reference
+        .world
+        .prototypes
+        .iter()
+        .find(|p| p.nodes.iter().any(|n| n.parent.is_none() && n.name == name))
+        .and_then(|p| p.pushes.iter().find_map(|push| push.grip.as_ref()))
+        .expect("the start car has a push grip");
+    let local = Vector::from_array(grip.local_pose.translation);
+    let mut found = false;
+    // Stand beside the grip, out from the car side, at a few distances.
+    'search: for side in [1.0f32, 0.8, 1.2, 0.6] {
+        let pose = car(&run);
+        let stand = pose * Vector::new(local.x.signum() * side, 0., local.z);
+        stand_near(&mut run, &reference, stand.to_array(), 0.);
+        run.area
+            .player
+            .look_at((car(&run) * local).to_array(), &run.physics);
+        frame(&mut run, &reference);
+        // F at a push target: the grip holds only on a push grip.
+        if run.aim.push_target.is_some() {
+            for i in 0..3 {
+                let input = FrameInput {
+                    held: keys::GRAB,
+                    pressed: if i == 0 { keys::GRAB } else { 0 },
+                    ..FrameInput::default()
+                };
+                super::weapons::input(&mut run, &reference, input);
+            }
+            if run.area.interaction.push_gripping() {
+                found = true;
+                break 'search;
+            }
+            super::weapons::input(
+                &mut run,
+                &reference,
+                FrameInput {
+                    released: keys::GRAB,
+                    ..FrameInput::default()
+                },
+            );
+        }
+    }
+    assert!(found, "the aim takes a push grip of the car");
+    // Source: a parked car holds on its handbrake. Release it, as the driver would.
+    let vehicle = run.vehicles.get_mut(&key).unwrap();
+    vehicle.handbrake = false;
+    let start = car(&run).translation;
+    let push = FrameInput {
+        held: keys::GRAB | keys::FORWARD,
+        ..FrameInput::default()
+    };
+    let mut gripping = 0;
+    for _ in 0..(4. / FIXED_DT) as usize {
+        super::weapons::input(&mut run, &reference, push);
+        gripping += usize::from(run.area.interaction.push_gripping());
+    }
+    let moved = (car(&run).translation - start).length();
+    eprintln!("gripping {gripping} frames, the car moves {moved} m");
+    assert!(gripping > 100, "F holds the grip");
+    assert!(moved > 0.5, "W pushes the car: {moved} m");
+}

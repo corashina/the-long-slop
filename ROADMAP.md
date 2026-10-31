@@ -102,7 +102,7 @@ Blocked checks. Each waits for the fix of its bug. Run them in the next build's 
 #### Guns from equip(): sandbox guns do not load
 
 - CC14: Blow up a tank next to a car. Parts fall off.
-- WD8: Reload and unload with R and E from aimed or carried ammo. Round totals stay the same. The left hand moves to the gun.
+- WD8: Reload and unload with R and E from carried ammo. Round totals stay the same.
 - WD15: Shoot the full 20 L garage fuel can. It explodes, and the can and its cap go away. Save and load: they stay gone.
 - WD19: Drive into a cactus, shoot one until it breaks, and blow one up. Cactus pieces fly off and the cactus stays, as in the original. It does not break again until its area streams in again.
 - WD20: Hit a tumbleweed hard with the car, a shot and a melee swing. It breaks with its gib and sound. Save and load: it stays gone.
@@ -135,7 +135,7 @@ Prepare once:
 
 ### Player body and outfit
 
-6. Use doors and handles. Push a car on foot and from a seat.
+6. Use doors and handles. Push a car from a seat.
 8. Hold Left Alt to rub dirt off a car and to wash a wash trigger.
 14. Worn items are hidden in first person but cast shadows. The worn pumpkin inner mesh stays visible, as in the source.
 21. The dark lens (profile 0) dims the view by 2 stops.

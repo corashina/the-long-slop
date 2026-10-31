@@ -916,3 +916,77 @@ fn tp_wd13_bullet_holes_by_surface_follow_items_and_fade() {
         );
     }
 }
+
+/// WD8. Source `fpscontroller` reload rules and `weaponscript.Reload`: with the gun in the hand,
+/// R at aimed loose ammo loads it and E unloads into it. The round total stays the same. Held R
+/// moves the left hand to the gun.
+#[test]
+#[ignore = "requires the installed source export"]
+fn tp_wd8_r_and_e_at_aimed_ammo_reload_and_unload() {
+    use super::weapons::{PRESS_FRAMES, equip, input, press_frame, spawn};
+    let (reference, mut run) = load_garage();
+    settle(&mut run, &reference);
+    let gun = equip(&mut run, &reference, "Revolver");
+    let guns = &mut run.area.interaction.guns;
+    let rule = guns.record(gun).unwrap().fr.reload.clone();
+    let fr = [0., 1., rule.value, 0.5]
+        .into_iter()
+        .find(|v| crate::interaction::guns::fr_allows(&rule, *v))
+        .expect("reload FR value");
+    let rt = guns.runtime_mut(gun).unwrap();
+    rt.fr = fr;
+    rt.ammo.count = 1.;
+    let ammo = spawn(&mut run, &reference, "revolverammo");
+    seconds(&mut run, &reference, 0.5);
+    // The reload rules read the focus, grab and use aims.
+    let aim = |run: &mut GarageRuntime| {
+        let point = run.area.items.get(ammo).unwrap().pose.position;
+        run.area.player.look_at(point, &run.physics);
+        frame(run, &reference);
+        let a = &run.aim;
+        [a.focus_target, a.grab_target, a.use_target]
+            .iter()
+            .flatten()
+            .any(|t| t.item == ammo)
+    };
+    assert!(aim(&mut run), "the aim takes the ammo");
+    let rounds = |run: &GarageRuntime| {
+        let g = run.area.interaction.guns.runtime(gun).unwrap().ammo.count;
+        (
+            g,
+            run.stream.ammo_item(ammo).expect("loose ammo").ammo.count,
+        )
+    };
+    let (g0, a0) = rounds(&run);
+    // The left hand reaches for the gun while R is held.
+    let left = |run: &GarageRuntime| {
+        let t = run.area.body.sent_targets()[1];
+        let hand = Vector::new(t[0], t[1], t[2]);
+        let body = to_rapier(run.area.player.body_pose(&run.physics)).inverse();
+        let at = Vector::from_array(run.area.items.get(gun).unwrap().pose.position);
+        (hand - body * at).length()
+    };
+    let rest = left(&run);
+    let mut reach = f32::MAX;
+    for i in 0..PRESS_FRAMES {
+        press_frame(&mut run, &reference, i, keys::RELOAD, 0);
+        reach = reach.min(left(&run));
+    }
+    let (g1, a1) = rounds(&run);
+    eprintln!("R: gun {g0} -> {g1}, ammo {a0} -> {a1}, left hand {rest} -> {reach}");
+    assert!(g1 > g0, "R loads the gun from the aimed ammo");
+    assert_eq!(g1 + a1, g0 + a0, "the reload keeps the rounds");
+    assert!(reach < rest - 0.05, "the left hand moves to the gun");
+    // E unloads into the aimed ammo.
+    let rt = run.area.interaction.guns.runtime_mut(gun).unwrap();
+    rt.fr = fr;
+    assert!(aim(&mut run), "the aim takes the ammo");
+    for i in 0..PRESS_FRAMES {
+        press_frame(&mut run, &reference, i, keys::USE, 0);
+    }
+    input(&mut run, &reference, FrameInput::default());
+    let (g2, a2) = rounds(&run);
+    eprintln!("E: gun {g1} -> {g2}, ammo {a1} -> {a2}");
+    assert!(g2 < g1, "E unloads the gun into the aimed ammo");
+    assert_eq!(g2 + a2, g0 + a0, "the unload keeps the rounds");
+}
