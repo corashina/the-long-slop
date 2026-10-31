@@ -14,9 +14,11 @@ use super::{
     },
 };
 use crate::reference::{
+    lamp_shadows::LampMasks,
     shadow_bounds::{BoundsKey, WorldBoundsCache},
     shadow_candidates::CandidateState,
     shadow_frame::{CasterInput, ShadowViewCache},
+    shadow_grid::CasterGrid,
     shadow_planes::CullPlanes,
     shadow_scene::{CasterData, CasterIndex},
     shadows::{ShadowFit, ShadowFitInput},
@@ -39,12 +41,16 @@ pub struct ShadowScene {
     pub generated_capacity: usize,
     pub caster_data: CasterData<CasterKey>,
     pub masks: [Vec<u8>; VIEW_COUNT],
+    /// Rows that can have a nonzero mask in each view, in row order. Other masks are zero.
+    pub marked: [Vec<u32>; VIEW_COUNT],
     pub fits: [Option<ShadowFit>; VIEW_COUNT],
     pub candidates: [usize; VIEW_COUNT],
     pub split_counts: [[usize; 4]; VIEW_COUNT],
     pub shadow_only: usize,
     bounds: WorldBoundsCache<Entity>,
     index: CasterIndex<CasterKey>,
+    grid: CasterGrid,
+    lamp_masks: LampMasks,
     /// GPU prop owner with its row membership.
     rows: Option<(u64, u64)>,
     /// Caster state of each GPU prop batch material.
@@ -64,6 +70,8 @@ pub struct ShadowScene {
     touched: Vec<u32>,
     /// Caster rows that change each frame, in row order. Retained storage.
     animated: Vec<u32>,
+    /// Entity rows with a nonzero mask in any view. Retained storage.
+    visible: Vec<u32>,
 }
 /// About one texel of a 2048 tile, in radians. A smaller sun turn keeps the cascade tiles.
 const SUN_STEP: f32 = 1. / 2048.;
@@ -204,6 +212,22 @@ pub(super) fn prepare_scene(
             return;
         }
     }
+    let scene = &mut *scene;
+    if rebuild {
+        // Rows changed order. Masks and their row lists start again from zero.
+        scene.grid.rebuild(&scene.caster_data.casters);
+        for (masks, view) in scene.masks.iter_mut().zip(&mut scene.views) {
+            masks.clear();
+            view.clear();
+        }
+        scene.lamp_masks.clear();
+    } else {
+        for &row in &scene.touched {
+            scene
+                .grid
+                .update(row, scene.caster_data.casters[row as usize].bounds);
+        }
+    }
     if let Err(error) = scene.caster_data.publish() {
         fail(error);
         return;
@@ -220,10 +244,10 @@ pub(super) fn prepare_scene(
         h(rotation * Vec3::Y),
         h(rotation * -Vec3::Z),
     ];
-    let scene = &mut *scene;
     for index in 0..VIEW_COUNT {
         let Some(v) = frame.views[index] else {
             scene.masks[index].clear();
+            scene.marked[index].clear();
             scene.views[index].clear();
             scene.mask_revisions[index] = scene.views[index].revision();
             scene.contents[index] = scene.contents[index].map(|c| c + 1);
@@ -257,6 +281,7 @@ pub(super) fn prepare_scene(
         match scene.views[index].prepare(
             scene.caster_data.revision(),
             &scene.caster_data.casters,
+            &scene.grid,
             &mut scene.masks[index],
             CullPlanes {
                 camera: v.source_camera_planes,
@@ -278,6 +303,8 @@ pub(super) fn prepare_scene(
             }
         }
         scene.mask_revisions[index] = scene.views[index].revision();
+        scene.marked[index].clear();
+        scene.marked[index].extend_from_slice(scene.views[index].rows());
         let masks = &scene.masks[index];
         let dirty = if all_changed {
             0b1111
@@ -294,36 +321,46 @@ pub(super) fn prepare_scene(
         }
     }
     // Lamp slots draw only in the world view atlas. Both revisions only grow, so their sum changes with either.
-    if frame.views[0].is_some()
-        && crate::reference::lamp_shadows::write_lamp_bits(
+    if frame.views[0].is_some() {
+        if scene.lamp_masks.write(
             &scene.caster_data.casters,
+            &scene.grid,
             &lamps.spheres,
             &mut scene.masks[0],
-        )
-    {
-        scene.lamp_revision += 1;
+        ) {
+            scene.lamp_revision += 1;
+        }
+        let marked = &mut scene.marked[0];
+        marked.extend(scene.lamp_masks.rows());
+        marked.sort_unstable();
+        marked.dedup();
+    } else {
+        scene.lamp_masks.clear();
     }
     scene.mask_revisions[0] = scene.views[0].revision() + scene.lamp_revision;
     drop(changes);
     let mut visibility = updates.p1();
     scene.shadow_only = 0;
-    for (i, key) in scene.caster_data.entities.iter().enumerate() {
-        let CasterKey::Entity(entity) = key else {
+    let entities = &scene.caster_data.entities;
+    scene.visible.clear();
+    for (masks, marked) in scene.masks.iter().zip(&scene.marked) {
+        scene.visible.extend(marked.iter().copied().filter(|&row| {
+            masks[row as usize] != 0 && matches!(entities[row as usize], CasterKey::Entity(_))
+        }));
+    }
+    scene.visible.sort_unstable();
+    scene.visible.dedup();
+    for &row in &scene.visible {
+        let CasterKey::Entity(entity) = entities[row as usize] else {
             continue;
         };
-        let Ok(mut visible) = visibility.get_mut(*entity) else {
+        let Ok(mut visible) = visibility.get_mut(entity) else {
             continue;
         };
-        if scene
-            .masks
-            .iter()
-            .any(|m| m.get(i).is_some_and(|mask| *mask != 0))
-        {
-            if !camera.entities.contains(entity) {
-                scene.shadow_only += 1;
-            }
-            visible.set_visible();
+        if !camera.entities.contains(&entity) {
+            scene.shadow_only += 1;
         }
+        visible.set_visible();
     }
     scene.casters_ready = true;
     scene.origin = origin.0;
@@ -475,6 +512,8 @@ pub fn extract_scene(
         if output.mask_revisions[i] != input.mask_revisions[i] {
             output.masks[i].clear();
             output.masks[i].extend_from_slice(&input.masks[i]);
+            output.marked[i].clear();
+            output.marked[i].extend_from_slice(&input.marked[i]);
             output.mask_revisions[i] = input.mask_revisions[i];
         }
     }

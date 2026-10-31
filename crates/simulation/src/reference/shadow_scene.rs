@@ -7,6 +7,9 @@ pub struct CasterData<K> {
     pub casters: Vec<CasterInput>,
     revision: u64,
     changed: bool,
+    /// Changes when rows change order or count. Bounds and state changes keep it.
+    membership: u64,
+    reordered: bool,
 }
 impl<K> Default for CasterData<K> {
     fn default() -> Self {
@@ -15,12 +18,17 @@ impl<K> Default for CasterData<K> {
             casters: Vec::new(),
             revision: 0,
             changed: false,
+            membership: 0,
+            reordered: false,
         }
     }
 }
 impl<K: Copy> CasterData<K> {
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+    pub fn membership(&self) -> u64 {
+        self.membership
     }
     pub fn reserve(&mut self, count: usize) {
         self.entities
@@ -37,6 +45,10 @@ impl<K: Copy> CasterData<K> {
                 .checked_add(1)
                 .expect("Source shadow caster revision exhausted");
             self.changed = false;
+            if self.reordered {
+                self.membership += 1;
+                self.reordered = false;
+            }
         }
         Ok(())
     }
@@ -50,6 +62,7 @@ impl<K: Copy> CasterData<K> {
         self.casters.clear();
         self.casters.extend_from_slice(&input.casters);
         self.revision = input.revision;
+        self.membership = input.membership;
         self.changed = false;
         true
     }
@@ -75,6 +88,7 @@ impl<K: Copy + Eq + Hash> CasterIndex<K> {
         data.entities.clear();
         data.casters.clear();
         data.changed = true;
+        data.reordered = true;
     }
     /// Returns the row of the caster.
     pub fn update(&mut self, data: &mut CasterData<K>, entity: K, caster: CasterInput) -> usize {
@@ -90,6 +104,7 @@ impl<K: Copy + Eq + Hash> CasterIndex<K> {
             data.entities.push(entity);
             data.casters.push(caster);
             data.changed = true;
+            data.reordered = true;
             row
         }
     }

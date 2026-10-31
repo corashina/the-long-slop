@@ -148,7 +148,12 @@ struct ViewState {
     pipelines: Vec<BatchPipelines>,
     /// Rows of each batch in each caster mask bit. Empty bits draw nothing.
     cascades: Vec<[u32; 8]>,
-    masks: Option<(u64, u64, u64, u64, u32)>,
+    /// Mask revision, then the membership, owner, batch revision and row count of the mask bytes.
+    masks: Option<(u64, (u64, u64, u64, u32))>,
+    /// Mask bytes of this view, by row slot.
+    mask_bytes: Vec<u8>,
+    /// Slots with a nonzero mask byte, in no order.
+    mask_slots: Vec<u32>,
     /// Draw attempts and issued draws in this frame.
     draws: [AtomicU32; 2],
     /// Draws of the camera, then of each caster slot. Batches change rarely, so the same bundle runs each frame.
@@ -314,7 +319,6 @@ pub struct PropDraws {
     templates: Vec<Option<Template>>,
     buffers: Option<Buffers>,
     views: [ViewState; VIEW_COUNT],
-    mask_bytes: Vec<u8>,
     cull: Option<[CachedComputePipelineId; 2]>,
     readback: Option<Readback>,
     pub ready: [bool; VIEW_COUNT],
@@ -336,7 +340,6 @@ impl FromWorld for PropDraws {
             templates: Vec::new(),
             buffers: None,
             views: std::array::from_fn(|_| ViewState::default()),
-            mask_bytes: Vec::new(),
             cull: None,
             readback: None,
             ready: [false; VIEW_COUNT],
@@ -640,25 +643,46 @@ impl PropDraws {
         let scene = world.resource::<ShadowScene>();
         let buffers = self.buffers.as_ref().unwrap();
         let queue = world.resource::<RenderQueue>();
-        let mask_key = (
-            scene.mask_revision(index),
-            scene.caster_data.revision(),
+        let structure = (
+            scene.caster_data.membership(),
             self.owner,
             self.batch_revision.unwrap_or(0),
             rows,
         );
+        let mask_key = (scene.mask_revision(index), structure);
         if view.masks != Some(mask_key) {
+            // A mask change keeps the structure. Then only old and new slots change.
+            let full = view.masks.is_none_or(|(_, old)| old != structure);
             view.masks = Some(mask_key);
-            self.mask_bytes.clear();
-            self.mask_bytes.resize(buffers.mask_region as usize, 0);
+            let region = buffers.mask_region as usize;
+            let mut range = region..0;
+            if full {
+                view.mask_bytes.clear();
+                view.mask_bytes.resize(region, 0);
+                range = 0..region;
+            } else {
+                for &slot in &view.mask_slots {
+                    view.mask_bytes[slot as usize] = 0;
+                    range.start = range.start.min(slot as usize);
+                    range.end = range.end.max(slot as usize + 1);
+                }
+            }
+            view.mask_slots.clear();
             view.cascades.clear();
             view.cascades.resize(batches, [0; 8]);
-            for (item, key) in scene.caster_data.entities.iter().enumerate() {
-                let CasterKey::Row(slot) = *key else {
+            let masks = &scene.masks[index];
+            for &item in &scene.marked[index] {
+                let CasterKey::Row(slot) = scene.caster_data.entities[item as usize] else {
                     continue;
                 };
-                let mask = scene.masks[index].get(item).copied().unwrap_or(0);
-                self.mask_bytes[slot as usize] = mask;
+                let mask = masks[item as usize];
+                if mask == 0 {
+                    continue;
+                }
+                view.mask_bytes[slot as usize] = mask;
+                view.mask_slots.push(slot);
+                range.start = range.start.min(slot as usize);
+                range.end = range.end.max(slot as usize + 1);
                 let batch = word_batch(self.words[slot as usize * ROW_WORDS + KEY_WORD]);
                 if batch == NO_BATCH {
                     continue;
@@ -667,11 +691,15 @@ impl PropDraws {
                     view.cascades[batch as usize][bit] += u32::from(mask >> bit & 1);
                 }
             }
-            queue.write_buffer(
-                &buffers.masks,
-                index as u64 * buffers.mask_region,
-                &self.mask_bytes,
-            );
+            if !range.is_empty() {
+                // Buffer writes need 4-byte offsets and sizes. The region is 256-byte aligned.
+                let range = range.start & !3..range.end.next_multiple_of(4).min(region);
+                queue.write_buffer(
+                    &buffers.masks,
+                    index as u64 * buffers.mask_region + range.start as u64,
+                    &view.mask_bytes[range],
+                );
+            }
         }
         let snapshot = world.resource::<SourceViewFrame>().views[index].unwrap();
         let mut cull = [0u32; CULL_WORDS];

@@ -30,6 +30,7 @@ pub mod shadow_bounds;
 pub mod shadow_cadence;
 pub mod shadow_candidates;
 pub mod shadow_frame;
+pub mod shadow_grid;
 pub mod shadow_planes;
 pub mod shadow_scene;
 pub mod shadow_splits;

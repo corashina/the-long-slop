@@ -2,6 +2,7 @@
 //! Positions, bounds and planes use the source frame.
 use super::shadow_candidates::{Bounds, Plane};
 use super::shadow_frame::CasterInput;
+use super::shadow_grid::CasterGrid;
 
 /// Shadowed lamps at one time. Caster mask bits 4..7 hold the slots.
 pub const LAMP_SLOTS: usize = 4;
@@ -90,25 +91,60 @@ pub fn lamp_caster(caster: &CasterInput, lamp: &LampSphere) -> bool {
         && gap2 <= lamp.range * lamp.range
 }
 
-/// Replace bits 4..7 of each mask. Returns true when a mask changes.
-pub fn write_lamp_bits(
-    casters: &[CasterInput],
-    slots: &[Option<LampSphere>; LAMP_SLOTS],
-    masks: &mut [u8],
-) -> bool {
-    let mut changed = false;
-    for (caster, mask) in casters.iter().zip(masks.iter_mut()) {
-        let mut bits = 0u8;
-        for (slot, lamp) in slots.iter().enumerate() {
-            if lamp.as_ref().is_some_and(|lamp| lamp_caster(caster, lamp)) {
-                bits |= 1 << (LAMP_BIT as usize + slot);
-            }
-        }
-        let next = (*mask & 0x0f) | bits;
-        changed |= next != *mask;
-        *mask = next;
+/// Lamp bits of the world view masks. It keeps the rows of the last write, so a write
+/// touches only old and new caster rows.
+#[derive(Default)]
+pub struct LampMasks {
+    /// Rows and their lamp bits, in row order.
+    rows: Vec<(u32, u8)>,
+    /// Retained storage.
+    next: Vec<(u32, u8)>,
+}
+impl LampMasks {
+    /// Call when the mask storage is cleared or its rows change order.
+    pub fn clear(&mut self) {
+        self.rows.clear();
     }
-    changed
+    /// Rows with lamp bits, in row order.
+    pub fn rows(&self) -> impl Iterator<Item = u32> + '_ {
+        self.rows.iter().map(|(row, _)| *row)
+    }
+    /// Replace bits 4..7 of each mask. Returns true when a mask changes.
+    pub fn write(
+        &mut self,
+        casters: &[CasterInput],
+        grid: &CasterGrid,
+        slots: &[Option<LampSphere>; LAMP_SLOTS],
+        masks: &mut [u8],
+    ) -> bool {
+        self.next.clear();
+        for (slot, lamp) in slots.iter().enumerate() {
+            let Some(lamp) = lamp else { continue };
+            let bit = 1 << (LAMP_BIT as usize + slot);
+            grid.visit_sphere(lamp.center, lamp.range, |row| {
+                if lamp_caster(&casters[row as usize], lamp) {
+                    self.next.push((row, bit));
+                }
+            });
+        }
+        self.next.sort_unstable();
+        self.next.dedup_by(|row, kept| {
+            let same = row.0 == kept.0;
+            if same {
+                kept.1 |= row.1;
+            }
+            same
+        });
+        for &(row, _) in &self.rows {
+            masks[row as usize] &= 0x0f;
+        }
+        for &(row, bits) in &self.next {
+            masks[row as usize] |= bits;
+        }
+        let changed = self.rows != self.next;
+        std::mem::swap(&mut self.rows, &mut self.next);
+        changed
+    }
 }
 
 #[cfg(test)]
@@ -161,10 +197,15 @@ mod tests {
             material_has_caster: true,
         };
         let casters = [caster(1.4, 0), caster(1.6, 0), caster(0., 1)];
-        let mut masks = [0b0001, 0, 0b1111_0000];
+        let mut grid = CasterGrid::default();
+        grid.rebuild(&casters);
+        let mut lamps = LampMasks::default();
+        let mut masks = [0b0001, 0, 0];
         let slots = [None, Some(lamp(0, 0.)), None, None];
-        assert!(write_lamp_bits(&casters, &slots, &mut masks));
+        assert!(lamps.write(&casters, &grid, &slots, &mut masks));
         assert_eq!(masks, [0b0010_0001, 0, 0]);
-        assert!(!write_lamp_bits(&casters, &slots, &mut masks));
+        assert!(!lamps.write(&casters, &grid, &slots, &mut masks));
+        assert!(lamps.write(&casters, &grid, &[None; LAMP_SLOTS], &mut masks));
+        assert_eq!(masks, [0b0001, 0, 0]);
     }
 }
