@@ -288,7 +288,7 @@ impl SourceContents {
     pub fn active_revision(&self) -> u64 {
         self.active_revision
     }
-    fn push_active(&mut self, mut content: ContentInstance) {
+    pub(super) fn push_active(&mut self, mut content: ContentInstance) {
         self.boxes.place(&mut content.content.placement);
         self.active.push(content);
         self.active_revision += 1;

@@ -1842,8 +1842,7 @@ fn publish_decoration_fixture(run: &mut GarageRuntime, placement: Placement) {
     let stream = &mut run.stream;
     stream
         .contents
-        .active
-        .push(super::super::contents::ContentInstance::for_structure(
+        .push_active(super::super::contents::ContentInstance::for_structure(
             placement.clone(),
         ));
     stream.wanted_structures.push(placement.clone());
