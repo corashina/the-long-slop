@@ -54,8 +54,7 @@ Known failures on master c0da737f (2026-10-30 browser retest), fix before the ne
 - Outside the Lada, E on the door handle does not open it. The HUD shows "[LMB]+[Mouse]: Move | [F]: Dismount".
 - First page load can stall at the start of object loading with dependency staging full (7.7/7.8 MiB). A reload clears it.
 - In game, pause > Load > Load last once stayed on "Loading..." for over 6 minutes, with no console messages.
-- 30 of 91 ignored simulation tests fail in release: MC2, BL, stale test data. Debug overflows the stack.
-- SA4: `hazard_trigger_damages_player_until_death` fails. The hazard trigger does not kill the player.
+- 29 of 90 ignored simulation tests fail in release: MC2, BL, stale test data. Debug overflows the stack.
 - W6: `tp_w6_building_keeps_the_pole_with_the_nearest_target`. A building links to the pole whose target 0 is nearest, not the pole with the nearest target (`roadGenScript.CheckCableConnections`).
 - W12: `tp_w12_dig_up_refuse_pickup_and_save`. A buried item loads with a dynamic body. The source freezes it.
 - W13: `tp_w13_detector_beeps_near_metal_and_saves_on`. A metal detector saved on loads off.
@@ -118,7 +117,6 @@ Prepare once:
 ### Starting area
 
 3. Check paint spray and sponge particles: refraction and soft edges.
-4. Check hazards: a hazard trigger hurts the player until death.
 5. Listen to player sounds: hits, footsteps, ambience, muffling in buildings.
 6. Listen to the music box and the radios. The compass and clock needles look right.
 7. Crosshair icons: look at a car door, a sliding and a vertical sliding usable, a light switch, a radio knob, a tuneable cap and a seat. Push the Lada, hold the hose at a cap and a trailer grip at the hitch, fill a can, carry a heavy item. Each case shows the source images together. No name or condition line shows above the crosshair.

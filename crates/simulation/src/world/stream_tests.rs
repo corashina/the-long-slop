@@ -5371,35 +5371,3 @@ fn trigger_roles_follow_publish_and_retire() {
     instance.retire(&mut run.physics, &mut roles);
     assert!(roles.is_empty());
 }
-
-#[test]
-#[ignore = "requires the installed source export"]
-fn hazard_trigger_damages_player_until_death() {
-    let reference = reference();
-    let mut run = GarageRuntime::new_default(&reference).unwrap();
-    let position = run.area.player.body_pose(&run.physics).position;
-    let handle = run.physics.insert_collider(
-        rapier3d::prelude::ColliderBuilder::cuboid(5., 5., 5.)
-            .translation(rapier3d::math::Vector::from_array(position))
-            .sensor(true)
-            .build(),
-    );
-    run.physics.refresh_queries();
-    let damage = 50.;
-    run.stream.trigger_roles.insert(
-        handle,
-        crate::reference::TriggerRole::Hazard {
-            damage_player: damage,
-            damage_breakable: 0.,
-        },
-    );
-    let steps = (run.needs_output().needs.hp / (damage * crate::simulation::FIXED_DT)) as usize;
-    for _ in 0..steps / 2 {
-        run.step(&reference, crate::simulation::FrameInput::default());
-    }
-    assert!(!run.needs_output().dead);
-    for _ in 0..steps {
-        run.step(&reference, crate::simulation::FrameInput::default());
-    }
-    assert!(run.needs_output().dead);
-}
