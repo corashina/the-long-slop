@@ -223,11 +223,9 @@ Prepare once:
 ### Languages and help text
 
 1. Re-export first: the export now holds the word table, the 9 language files and the car help boxes.
-2. Settings > Misc lists English, then the 9 file languages. Pick Deutsch: menus, tabs, settings rows, the key list and save screen texts change at once. Reload: Deutsch stays.
-3. Pick Русский, 日本語 and 中国人: the text shows without empty boxes. Note any glyph that the browser cannot show.
-4. In game with Deutsch: action hints, tank texts (name, Liter, voll, percents and fluids), radio volume and AM/FM, and the session distance use the German words.
-5. Look at the dashboard of a world car: the help box shows the car set with the bound keys. Toggle Auto clutch, then Auto shift: the set changes.
-6. A bus shows the auto shift set whatever the assists are. A motorcycle shows the motorcycle auto shift set.
+2. Pick Deutsch in Settings > Misc: menus, tabs, settings rows, the key list and save screen texts change at once.
+3. Pick 日本語 and 中国人: the text shows without empty boxes. The menu font has no CJK glyphs, so the browser fallback font shows them.
+4. In game with Deutsch: the action hints use the German words. Port words without a source word (Drop, Grip, Tap, Hold, Distance, Posture, Roll) stay English.
 8. Compare the help box place and the line breaks with the original.
 
 ### Start menu figure

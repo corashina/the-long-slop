@@ -69,6 +69,13 @@ export function oldCrosshairColor(bits,colors){
  if(bits&CROSSHAIR.MMB)return colors.mmb;
  return colors.default;
 }
+// Hint templates: `{action}` is the bound key name of a source action in brackets, `<word>` an `ls.w` word.
+// They fill once per binding or language change.
+export const HINTS={translationHelp:'{rmb}+[<mouse>]: <move>\n{scrollup}: Distance\n{looklean}+{scrollup}: Posture',
+ rotationHelp:'{rmb}+[<mouse>]: <move>\n{mmb}+[<mouse>]: <rotate>\n{rmb}+{mmb}+[<mouse>]: Roll\n{scrollup}: Distance\n{looklean}+{scrollup}: Posture',
+ doorMove:'{lmb}+[<mouse>]: <move>',doorOpen:'{lmb}+[<mouse>]: <openclose>',useLmbSwitch:'{use} / {lmb}: <turnSwitch>',useSwitch:'{use}: <turnSwitch>',useOpen:'{use}: <openclose>',
+ tuneLmb:'{use} / {lmb}+[<mouse>]: <tune>',tune:'{use}+[<mouse>]: <tune>',tuneOpen:'{use}+[<mouse>] / {scrollup}: <openclose>',scrollTune:'{scrollup}: <tune>',scrollOpen:'{scrollup}: <openclose>',
+ crankLmb:'{use} / {lmb}+[<mouse>]: <crank>',crank:'{use}+[<mouse>]: <crank>'};
 const css=([r,g,b,a])=>`rgba(${r*255},${g*255},${b*255},${a})`;
 // `settings` is the settings store: `BHelp`, `BCrosshair`, `BOldCrosshair` and `FCrosshairScale`.
 // `actions` is the action index by source name (`actionIndex`). `language` is the word table (`createLanguage`).
@@ -133,19 +140,12 @@ export function createFeedback(ui,manifest,settings,actions,language) {
  let lastLayers=-1,lastOld=-1,lastWeight=-1,lastFluid='',lastNotice='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='',lastPrimary='',lastCrank='',lastHelp='';
  // Bound key names by action, and the driving assist bits (1 auto clutch, 2 auto shift).
  let names={},assists=0;
- // Hint templates: `{action}` is the bound key name of a source action in brackets, `<word>` an `ls.w` word.
- // They fill once per binding or language change.
- const templates={translationHelp:'{rmb}+[<mouse>]: <move>\n{scrollup}: Distance\n{looklean}+{scrollup}: Posture',
-  rotationHelp:'{rmb}+[<mouse>]: <move>\n{mmb}+[<mouse>]: <rotate>\n{rmb}+{mmb}+[<mouse>]: Roll\n{scrollup}: Distance\n{looklean}+{scrollup}: Posture',
-  doorMove:'{lmb}+[<mouse>]: <move>',doorOpen:'{lmb}+[<mouse>]: <openclose>',useLmbSwitch:'{use} / {lmb}: <turnSwitch>',useSwitch:'{use}: <turnSwitch>',useOpen:'{use}: <openclose>',
-  tuneLmb:'{use} / {lmb}+[<mouse>]: <tune>',tune:'{use}+[<mouse>]: <tune>',tuneOpen:'{use}+[<mouse>] / {scrollup}: <openclose>',scrollTune:'{scrollup}: <tune>',scrollOpen:'{scrollup}: <openclose>',
-  crankLmb:'{use} / {lmb}+[<mouse>]: <crank>',crank:'{use}+[<mouse>]: <crank>'};
  const texts={};
  function fillTexts(){
   names=boundNames(settings.values.inputs,actions);
   const fill=t=>t.replace(/<(\w+)>/g,(_,w)=>language.word(w)).replace(/\{(\w+)\}/g,(_,a)=>'['+names[a]+']');
   for(const row of rows)row.n.textContent=fill(row.template);
-  for(const [name,t] of Object.entries(templates))texts[name]=fill(t);
+  for(const [name,t] of Object.entries(HINTS))texts[name]=fill(t);
   lastCarry=lastDoor=lastUse=lastTune=lastScroll=lastPrimary=lastCrank=lastHelp='';
  }
  // Prompt families stack in screen order. A family starts below the lines of the families above it, so no two rows share a line.
