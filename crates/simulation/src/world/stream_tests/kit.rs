@@ -173,6 +173,23 @@ pub(crate) fn prepare_step_for_views(
             &mut run.powertrain,
         )
         .unwrap();
+    // As `advance_world`: capture, then far contents retire.
+    stream.capture_changes(
+        reference,
+        &mut run.area.items,
+        &run.area.interaction,
+        &run.physics,
+    );
+    stream
+        .retire_structures(
+            &mut run.physics,
+            &mut run.area.items,
+            &mut run.area.interaction,
+            &mut run.wheels,
+            &mut run.vehicles,
+            &mut run.powertrain,
+        )
+        .unwrap();
     assert!(stream.failure.is_none(), "{:?}", stream.failure);
     run.align_startup(reference, CALENDAR.get()).unwrap();
 }
@@ -607,7 +624,13 @@ pub(crate) fn load_placements(run: &mut GarageRuntime, reference: &ReferenceMani
             .into_iter()
             .map(|(p, _)| p.id.clone())
             .filter(|id| {
-                !stream.structures.iter().any(|s| &s.placement.id == id)
+                // A removed placement (a broken bottle) stays gone.
+                let removed = stream
+                    .changes
+                    .get(crate::world::ObjectKey::Generated((*id).clone()))
+                    .is_some_and(|c| c.snapshot.is_none());
+                !removed
+                    && !stream.structures.iter().any(|s| &s.placement.id == id)
                     && !stream.ready_structures.contains(id)
             })
             .collect();

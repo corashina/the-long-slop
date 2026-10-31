@@ -17,7 +17,29 @@ fn wait_supported(run: &mut GarageRuntime, reference: &ReferenceManifest) {
         }
         frame(run, reference);
     }
-    panic!("world support did not return");
+    let gap = |point: [f32; 3]| {
+        let center = run.stream.origin.absolute(point);
+        let bounds = crate::world::WorldBounds {
+            min: center.map(|v| v - 8.),
+            max: center.map(|v| v + 8.),
+        };
+        (
+            center,
+            format!("{:?}", run.stream.support_gap(bounds)),
+            run.persistent_world.waits_for(bounds),
+        )
+    };
+    let player = gap(run.area.player.focus_position(&run.physics));
+    let cars: Vec<_> = run
+        .vehicles
+        .keys()
+        .map(|key| gap(run.physics.snapshot(key).pose.position))
+        .collect();
+    panic!(
+        "world support did not return: restore {}, aligned {}, player {player:?}, cars {cars:?}",
+        run.restore_pending(),
+        run.startup_aligned
+    );
 }
 
 fn request(run: &mut GarageRuntime) {

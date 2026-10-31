@@ -54,13 +54,11 @@ Known failures on master c0da737f (2026-10-30 browser retest), fix before the ne
 - Looking down shows hollow shirt sleeves, floating hands and hollow pant legs. It also shows at normal pitch while walking.
 - First page load can stall at the start of object loading with dependency staging full (7.7/7.8 MiB). A reload clears it.
 - In game, pause > Load > Load last once stayed on "Loading..." for over 6 minutes, with no console messages. The simulation and the save bridge finish the load (`tp_k5_s1_a_stored_save_starts_the_session_and_its_restore_finishes`), so the hang is in the browser.
-- 29 of 90 ignored simulation tests fail in release: MC2, BL, stale test data. Debug overflows the stack.
-- W15, SA2: `w02_garage_can_returns_after_far_trip`. Back at the start after a 3 km drive, terrain tile [0, 1] next to the garage gets no collider, so world support does not return. `w02_long_trip_keeps_far_edits` now edits building items about 90 m off the road: run it again.
+- 31 of 169 ignored simulation tests fail in release: MC2, BL, stale test data. Debug overflows the stack.
 - MC2 on the road: `tp_sa1_fill_start_drive_return_save_reload`. The Lada on the road, engine running in gear 2 at 2427 rpm, moves 0 m. MC2 is not only the garage floor.
 - WD19: `tp_wd19_cactus_breaks_once_and_stays`. A car hit, a shot and a blast break cacti once, with one gib each, and they stay. After an 8 km move the broken cactus is still bound, so its area does not stream in again.
 - CP15: `tp_cp13_cp16_loot_tools_work_from_the_hand`. The loot spray paints, shows its color, sprays particles and runs out, but plays no sound. Its prototype tool has no `voice`, so the spray signal never plays and its tool loop never starts.
 - WD2: `tp_wd2_shovel_breaks_a_building_lamp`. The shovel breaks the lamps and they stay dark. Save and load at the Mansion: the restore stays pending.
-- CR2: `tp_cr2_halloween_bats_near_buildings`. Bats now spawn at road buildings (5 to 29 each). The test tour stalls: road buildings 42 km and more out do not load within 60 s of a teleport.
 - CP5, CP6: `r05_cargo_locks_in_trunk`. The driver cannot exit the Lada in the garage (BL), so the cargo checks do not run.
 - CP7: `tp_cp7_turned_wheels_stay_after_save_and_load`. The seated driver holds steer left, but the garage Lada steer stays 0.
 - WD3: `tp_wd3_each_melee_weapon_swings_with_each_key_and_breaks_a_bottle`. The export has melee weapon records only for the crowbar and the shovel. The katana, fly swatter and leg have none.
@@ -139,4 +137,4 @@ Prepare once:
 
 ### Creatures
 
-2. Bats: set the PC date between 15 Oct and 15 Nov, start a new game and drive to a gas station. In 65% of stations, 5 to 30 bats fly near it, flap and squeak. Pick one up: it keeps squeaking and does not fly out of the hand. Save and load near the bats.
+2. Bats: set the PC date between 15 Oct and 15 Nov, start a new game and drive to a gas station. In 65% of stations, 5 to 30 bats fly near it, flap and squeak. A bat cannot be picked up: the source `RandomBat` has no `pickupable`. Save and load near the bats.
