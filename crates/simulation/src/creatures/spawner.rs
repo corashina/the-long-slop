@@ -160,6 +160,33 @@ mod tests {
         assert!(outside_cone(&r, &player, Vector::new(0., 0., -0.5)));
     }
 
+    /// CR3. Source `aispawn.SpawnRoutine`: no `TrySpawn` at `maxAINum`; the next wait is
+    /// `Random.Range(minTime, maxTime)`.
+    #[test]
+    fn tp_cr3_spawner_stops_at_the_max_and_waits() {
+        let r = spawner();
+        let player = Player {
+            position: Vector::ZERO,
+            rotation: Rotation::IDENTITY,
+        };
+        let physics = PhysicsWorld::empty_for_tests();
+        for seed in 0..20 {
+            let mut random = StormRandom(seed);
+            let mut spawner = Spawner::new(0.);
+            let mut tries = 0;
+            spawner.step(&r, 0., 10, &player, &physics, &mut random, |_, _| {
+                tries += 1
+            });
+            assert_eq!(tries, 0, "no spawn at the max count");
+            assert!(
+                (50. ..=100.).contains(&spawner.next),
+                "wait {}",
+                spawner.next
+            );
+            assert!(!spawner.due(spawner.next - 0.01));
+        }
+    }
+
     #[test]
     fn random_place_lies_around_the_offset_center() {
         let r = spawner();

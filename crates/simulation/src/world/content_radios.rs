@@ -495,3 +495,12 @@ mod tests {
         assert!(saved_controls(&loaded, &other).is_none());
     }
 }
+
+#[cfg(test)]
+impl WorldStream {
+    /// Test probe: the first knob of `kind` on the portable radio `item`.
+    pub fn radio_knob(&self, item: ItemId, kind: Knob) -> Option<ColliderId> {
+        let b = self.radio_bindings.iter().find(|b| b.item == item)?;
+        b.knobs.iter().find(|(_, k)| *k == kind).map(|(c, _)| *c)
+    }
+}
