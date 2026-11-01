@@ -729,6 +729,13 @@ impl MechanismState {
         self.apply(index);
         Some(rotation * self.frames[control_node].world.rotation.inverse() * root)
     }
+    /// The usable of part `part`, such as the hinge of a hood.
+    pub fn part_usable(&self, part: ItemId) -> Option<ItemId> {
+        self.controls
+            .iter()
+            .find(|c| c.reference.parent_item == Some(part))
+            .map(|c| c.reference.item)
+    }
     pub fn set_mounted(&mut self, parent: ItemId, mounted: bool) {
         self.clear_reactions();
         for c in &mut self.controls {
