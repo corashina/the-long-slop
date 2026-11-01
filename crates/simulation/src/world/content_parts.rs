@@ -1,7 +1,10 @@
 //! Generated general parts join the existing source slot and mechanism owners.
 use super::contents::ContentInstance;
 use super::spawn_rules::*;
-use crate::interaction::{InteractionState, items::ItemStore};
+use crate::interaction::{
+    InteractionState,
+    items::{ItemLocation, ItemStore},
+};
 use crate::reference::*;
 use crate::vehicle::{PhysicsWorld, STEP_SURFACE_MASK};
 pub(super) fn bind(
@@ -41,19 +44,6 @@ pub(super) fn bind(
             0,
         )?;
     }
-    // Slots of this prototype: (main types, part types).
-    let mut own_slots = Vec::new();
-    for (i, node) in prototype.nodes.iter().enumerate() {
-        if !super::spawn_appearance::node_active(prototype, i, &content.content.appearance) {
-            continue;
-        }
-        if let Some(slot) = rules.component(&reference.world, &node.source, "partslotscript")? {
-            own_slots.push((
-                texts(slot.fields, "maintipus")?,
-                texts(slot.fields, "tipus")?,
-            ));
-        }
-    }
     let attached = attached_at_start(content, prototype, rules, reference)?;
     // An attached body rides on its target body.
     let rides_on = |c: &WorldColliderReference, body_index: usize| {
@@ -82,18 +72,7 @@ pub(super) fn bind(
         }
         let main_types = texts(part.fields, "maintipus")?;
         let part_types = texts(part.fields, "tipus")?;
-        let fits = |slot_main: &[String], slot_types: &[String]| {
-            crate::interaction::parts::fits(slot_main, slot_types, &main_types, &part_types)
-        };
-        if !own_slots.iter().any(|(m, t)| fits(m, t))
-            && !reference
-                .part_slots
-                .iter()
-                .any(|slot| fits(&slot.main_types, &slot.part_types))
-        {
-            continue;
-        }
-
+        // Every part registers: a slot of any car can take it, even one that loads later.
         let pickup_record = rules.get(&reference.world, link(part.fields, "p")?)?;
         // Car roots have no pickupable. Only a root that is itself a part needs one.
         let pickup = if part_node == 0 {
@@ -245,6 +224,11 @@ pub(super) fn bind(
                 .ok_or_else(|| ReferenceError("Generated part member missing".into()))?;
             if nearest_owner(content, prototype, rules, reference, node)? == Some(item) {
                 members.push((binding.item, content.nodes[node], 0.));
+                // A tank or cap in the part, such as the radiator coolant, leaves with the part.
+                let state = items.get_mut(binding.item).unwrap();
+                if state.location == ItemLocation::Attached(owner) {
+                    state.location = ItemLocation::Attached(item);
+                }
             }
         }
         interaction.parts.register_generated(

@@ -612,7 +612,7 @@ fn tp_wd2_shovel_breaks_a_building_lamp() {
 }
 
 /// Teleports the player on foot to absolute `x`, `z` and waits for the area.
-fn teleport(run: &mut GarageRuntime, reference: &ReferenceManifest, x: f64, z: f64) {
+pub(super) fn teleport(run: &mut GarageRuntime, reference: &ReferenceManifest, x: f64, z: f64) {
     act(
         run,
         reference,

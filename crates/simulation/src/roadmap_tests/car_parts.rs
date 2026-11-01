@@ -341,6 +341,98 @@ fn tp_cp2_cp3_running_engine_spins_the_fan_and_smokes() {
     assert_eq!(angle(&run), stopped, "the fan stops with the engine");
 }
 
+/// CP2: source `partslotscript.UnCraft` and `Craft` swap the start Lada radiator for a loot
+/// `Car02Coolant`. Source `coolantTankscript.Cool` then turns the loot fan while the engine runs.
+#[test]
+#[ignore = "requires the installed source export"]
+fn tp_cp2_loot_radiator_fan_spins_in_the_lada() {
+    use crate::interaction::items::ItemLocation;
+    let (reference, mut run) = load_garage();
+    seconds(&mut run, &reference, 1.);
+    let key = run.vehicle.clone().unwrap();
+    let old = run
+        .powertrain
+        .mounted_on(&run.area.items, &key)
+        .radiator
+        .expect("start car radiator");
+    let old_fan = old;
+    // The radiator item can sit below its part: climb to the item in the part slot.
+    let mut old = old;
+    let slot = loop {
+        match run.area.items.get(old).unwrap().location {
+            ItemLocation::PartSlot(slot) => break slot,
+            location => {
+                old = run
+                    .area
+                    .items
+                    .parent(old)
+                    .unwrap_or_else(|| panic!("the radiator part is in a slot: {location:?}"))
+            }
+        }
+    };
+    let before: Vec<_> = run.powertrain.radiators().map(|r| r.item).collect();
+    super::weapons::spawn(&mut run, &reference, "Car02Coolant");
+    let loot = run
+        .powertrain
+        .radiators()
+        .map(|r| r.item)
+        .find(|item| !before.contains(item))
+        .expect("the loot radiator binds as a radiator");
+    let fan = loot;
+    let mut loot = loot;
+    while let Some(parent) = run.area.items.parent(loot) {
+        loot = parent;
+    }
+    // Take the start radiator out and fit the loot one.
+    let i = &mut run.area.interaction;
+    i.parts
+        .remove(old, &mut run.area.items, &mut run.physics)
+        .expect("the start radiator comes off");
+    i.parts
+        .detach_mechanism(old, &mut i.mechanisms, &mut run.physics);
+    i.sync_parts(&mut run.area.items, &mut run.physics).unwrap();
+    seconds(&mut run, &reference, 0.5);
+    let i = &mut run.area.interaction;
+    i.parts
+        .install(loot, slot, &mut run.area.items, &mut run.physics)
+        .expect("the loot radiator fits the Lada slot");
+    i.parts.mount_mechanism(loot, &mut i.mechanisms);
+    i.sync_parts(&mut run.area.items, &mut run.physics).unwrap();
+    seconds(&mut run, &reference, 0.5);
+    let mounted = run.powertrain.mounted_on(&run.area.items, &key);
+    assert_eq!(
+        mounted.radiator,
+        Some(fan),
+        "the Lada uses the loot radiator"
+    );
+    start_engine(&mut run, &reference);
+    // A hot engine turns the fan on.
+    let engine = mounted.engine.unwrap();
+    let hot = run
+        .powertrain
+        .radiator(fan)
+        .unwrap()
+        .record
+        .fan_temperature_on
+        + 5.;
+    run.powertrain.engine_mut(engine).unwrap().state.temperature = hot;
+    let angle = |run: &GarageRuntime| run.powertrain.radiator(fan).unwrap().fan_angle;
+    let still = angle(&run);
+    seconds(&mut run, &reference, 1.);
+    assert_ne!(
+        angle(&run),
+        still,
+        "the loot fan spins while the engine runs"
+    );
+    let old_angle = run.powertrain.radiator(old_fan).unwrap().fan_angle;
+    seconds(&mut run, &reference, 1.);
+    assert_eq!(
+        run.powertrain.radiator(old_fan).unwrap().fan_angle,
+        old_angle,
+        "the removed radiator fan stays still"
+    );
+}
+
 /// CP7: source `carscript.steer` saves with the car (`savedata.steer`) and the wheels keep
 /// their angle when nobody drives.
 #[test]
@@ -602,6 +694,519 @@ fn tp_cp13_cp16_loot_tools_work_from_the_hand() {
         assert!(sound > 0, "{name} plays its sound");
         // Drop the tool.
         super::weapons::drop_hand(&mut run);
+        seconds(&mut run, &reference, 0.5);
+    }
+}
+
+/// The bound volume of `owner` from its prototype record of `storage_type` with the largest box.
+fn storage_volume(
+    run: &GarageRuntime,
+    reference: &ReferenceManifest,
+    owner: crate::reference::ItemId,
+    prototype: &crate::reference::SourceId,
+    storage_type: u8,
+) -> u16 {
+    let record = reference
+        .storage
+        .prototype_volumes
+        .iter()
+        .filter(|v| &v.prototype == prototype && v.storage_type == storage_type)
+        .max_by(|a, b| {
+            let size = |v: &crate::reference::storage::PrototypeVolumeReference| {
+                v.half_extents.iter().product::<f32>()
+            };
+            size(a).total_cmp(&size(b))
+        })
+        .unwrap_or_else(|| panic!("storage type {storage_type} volume"));
+    run.area
+        .interaction
+        .storage
+        .owner_volume(owner, &record.source)
+        .unwrap_or_else(|| panic!("bound storage type {storage_type} volume"))
+}
+
+/// Moves loose `item` to the box centre of bound volume `volume`, at rest.
+fn put_in(run: &mut GarageRuntime, item: crate::reference::ItemId, volume: u16) {
+    use rapier3d::math::Vector;
+    let pose = run
+        .area
+        .interaction
+        .storage
+        .volume_pose(volume, &run.area.items, &run.physics)
+        .expect("volume pose");
+    let body = run.area.items.get(item).unwrap().body.unwrap();
+    run.physics.edit_body(body, |b| {
+        b.set_position(pose, true);
+        b.set_linvel(Vector::ZERO, true);
+        b.set_angvel(Vector::ZERO, true);
+    });
+    run.area.items.get_mut(item).unwrap().pose.position = pose.translation.to_array();
+    run.physics.refresh_queries();
+}
+
+/// The owner that `item` is locked to.
+fn locked_in(
+    run: &GarageRuntime,
+    item: crate::reference::ItemId,
+) -> Option<crate::reference::ItemId> {
+    match run.area.items.get(item).unwrap().location {
+        crate::interaction::items::ItemLocation::Locked { owner, .. } => Some(owner),
+        _ => None,
+    }
+}
+
+/// Frames until `item` locks to `owner`, at most `limit` seconds. Returns the seconds taken.
+/// Volumes of one owner can overlap: any of them counts.
+fn lock_time(
+    run: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    item: crate::reference::ItemId,
+    owner: crate::reference::ItemId,
+    limit: f32,
+) -> Option<f32> {
+    let frames = (limit / crate::simulation::FIXED_DT) as usize;
+    for i in 0..frames {
+        if locked_in(run, item) == Some(owner) {
+            return Some(i as f32 * crate::simulation::FIXED_DT);
+        }
+        frame(run, reference);
+    }
+    (locked_in(run, item) == Some(owner)).then_some(limit)
+}
+
+/// Holds E and drags the mouse on usable `item` until it opens. Returns its closed snapshot.
+fn open_usable(
+    run: &mut GarageRuntime,
+    item: crate::reference::ItemId,
+) -> crate::world::MechanismSnapshot {
+    use crate::simulation::{FrameInput, keys};
+    let m = &mut run.area.interaction.mechanisms;
+    let closed = m.snapshot(item).expect("usable mechanism");
+    for mouse in [[0., 1e4], [0., -1e4], [1e4, 0.], [-1e4, 0.]] {
+        for _ in 0..5 {
+            m.step(
+                item,
+                FrameInput {
+                    held: keys::USE,
+                    mouse,
+                    ..FrameInput::default()
+                },
+                crate::vehicle::VehiclePose {
+                    position: [0.; 3],
+                    rotation: [0., 0., 0., 1.],
+                },
+                crate::simulation::FIXED_DT,
+            );
+        }
+        if m.value(item, false).unwrap() > 0.1 {
+            m.sync(&mut run.physics);
+            return closed;
+        }
+    }
+    panic!("usable {item:?} does not open");
+}
+
+fn close_usable(
+    run: &mut GarageRuntime,
+    item: crate::reference::ItemId,
+    closed: crate::world::MechanismSnapshot,
+) {
+    let m = &mut run.area.interaction.mechanisms;
+    m.restore(item, closed).unwrap();
+    m.sync(&mut run.physics);
+}
+
+/// Spawns world prototype `name` on open ground ahead of the player. Returns the volume owner,
+/// right after its area loads.
+fn spawn_storage(
+    run: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    name: &str,
+) -> (crate::reference::ItemId, crate::reference::SourceId) {
+    let prototype = reference
+        .world
+        .prototypes
+        .iter()
+        .find(|p| {
+            p.nodes
+                .iter()
+                .find(|n| n.parent.is_none())
+                .is_some_and(|n| n.name == name)
+                && reference
+                    .storage
+                    .prototype_volumes
+                    .iter()
+                    .any(|v| v.prototype == p.source)
+        })
+        .unwrap_or_else(|| panic!("{name} storage prototype"))
+        .source
+        .clone();
+    let record = reference
+        .storage
+        .prototype_volumes
+        .iter()
+        .find(|v| v.prototype == prototype)
+        .unwrap();
+    let before: Vec<_> = run.area.items.iter().map(|i| i.id).collect();
+    act(
+        run,
+        reference,
+        &format!(r#"{{"action":"spawn","name":"{name}","forward":3}}"#),
+    );
+    load_placements(run, reference);
+    let owner = run
+        .area
+        .items
+        .iter()
+        .map(|i| i.id)
+        .filter(|id| !before.contains(id))
+        .find(|id| {
+            run.area
+                .interaction
+                .storage
+                .owner_volume(*id, &record.source)
+                .is_some()
+        })
+        .unwrap_or_else(|| {
+            let new: Vec<_> = run
+                .area
+                .items
+                .iter()
+                .filter(|i| !before.contains(&i.id))
+                .map(|i| (i.id, run.area.items.name(i.id), i.location))
+                .collect();
+            panic!("{name} volumes bind: {new:?}")
+        });
+    (owner, prototype)
+}
+
+/// CP5, CP6. Source `mountStuff` at physics lock setting 2: an item that two 1.5 s scans see in
+/// a closed volume locks to the owner. An open gate (`usablescript`, or a `partslotscript` part
+/// with an open usable) unlocks it. `StartFreeze` runs `QuickFreeze` in the first frames after
+/// the owner loads, also for an `onlyManual` volume, whose `Upd` scan never runs. Locks save
+/// with the owner (`physLockParentID`). Source `tubescript` has no save: a loaded hose lies
+/// loose.
+#[test]
+#[ignore = "requires the installed source export"]
+fn tp_cp5_cp6_cargo_locks_opens_and_saves() {
+    use crate::interaction::items::ItemLocation;
+    use crate::simulation::{FrameInput, keys};
+    let (reference, mut run) = load_garage();
+    seconds(&mut run, &reference, 1.);
+    let key = run.vehicle.clone().unwrap();
+    let car = run.area.items.resolve_key(&key).unwrap();
+    let lada = reference
+        .world
+        .startup
+        .iter()
+        .find_map(|s| s.prototype.clone().filter(|_| s.group == "StartCar02"))
+        .expect("start Lada prototype");
+    // Glove box (0), trunk (3) and engine bay (4).
+    let mut cargo = Vec::new();
+    for storage_type in [0, 3, 4] {
+        let volume = storage_volume(&run, &reference, car, &lada, storage_type);
+        let item = super::weapons::spawn(&mut run, &reference, "cigi");
+        put_in(&mut run, item, volume);
+        cargo.push((storage_type, item, volume));
+    }
+    for &(storage_type, item, volume) in &cargo {
+        let time = lock_time(&mut run, &reference, item, car, 4.);
+        assert!(
+            time.is_some(),
+            "type {storage_type}: the item locks in the Lada"
+        );
+        assert_eq!(
+            run.area.items.get(item).unwrap().location,
+            ItemLocation::Locked { owner: car, volume },
+            "type {storage_type}: in its own volume"
+        );
+    }
+    // The trunk lid and the hood gate the trunk and the engine bay. Opening each lid
+    // releases its own volume only.
+    for gated in [3, 4] {
+        let &(_, _, volume) = cargo.iter().find(|c| c.0 == gated).unwrap();
+        let slots = run.area.interaction.storage.gate_slots(volume).to_vec();
+        assert_eq!(slots.len(), 1, "type {gated}: one gate slot");
+        let lid = run
+            .area
+            .interaction
+            .parts
+            .slot_item(slots[0])
+            .expect("lid on");
+        let usable = run
+            .area
+            .interaction
+            .mechanisms
+            .part_usable(lid)
+            .expect("the lid has a usable");
+        let closed = open_usable(&mut run, usable);
+        seconds(&mut run, &reference, 2.);
+        let loose: Vec<_> = cargo
+            .iter()
+            .filter(|(_, item, _)| locked_in(&run, *item).is_none())
+            .map(|(storage_type, ..)| *storage_type)
+            .collect();
+        assert_eq!(loose, [gated], "an open lid releases its own volume");
+        close_usable(&mut run, usable, closed);
+        // Back in the closed volume, it locks again.
+        let &(_, item, volume) = cargo.iter().find(|c| c.0 == gated).unwrap();
+        put_in(&mut run, item, volume);
+        assert!(
+            lock_time(&mut run, &reference, item, car, 4.).is_some(),
+            "type {gated}: locks again after the lid closes"
+        );
+    }
+
+    // CP6: the hose on the Lada fuel cap.
+    let hose = reference
+        .item_prototypes
+        .iter()
+        .position(|p| p.hose.is_some())
+        .expect("hose prototype");
+    let car_pose = run.physics.snapshot(&key).pose.position;
+    let fuel_cap = run
+        .area
+        .items
+        .iter()
+        .filter(|i| !i.removed && run.area.interaction.generated_opening(i.id).is_some())
+        .filter(|i| {
+            let p = i.pose.position;
+            (p[0] - car_pose[0]).hypot(p[2] - car_pose[2]) < 4.
+        })
+        .map(|i| i.id)
+        .max_by(|&a, &b| {
+            let capacity = |cap| {
+                let aim = aim_on(&run, cap);
+                let available = run.area.interaction.available_actions(
+                    &aim,
+                    &run.area.player,
+                    &run.area.items,
+                    &run.physics,
+                    run.survival.output(),
+                );
+                run.area
+                    .interaction
+                    .feedback(&available, &run.area.items, &reference)
+                    .fluid
+                    .map_or(0., |f| f.capacity)
+            };
+            capacity(a).total_cmp(&capacity(b))
+        })
+        .expect("Lada fuel cap");
+    let cap_aim = aim_on(&run, fuel_cap);
+    let tap = |run: &mut GarageRuntime, aim, key: u32| {
+        interact(
+            run,
+            aim,
+            FrameInput {
+                pressed: key,
+                held: key,
+                ..FrameInput::default()
+            },
+        );
+        interact(
+            run,
+            aim,
+            FrameInput {
+                released: key,
+                ..FrameInput::default()
+            },
+        );
+    };
+    tap(&mut run, cap_aim, keys::USE);
+    assert_eq!(
+        run.area.interaction.generated_valve(fuel_cap),
+        Some(1.),
+        "the fuel cap opens"
+    );
+    // Lay the hose on the floor beside the cap, as a player drags it there.
+    let record = &reference.item_prototypes[hose];
+    let end_body = record.hose.as_ref().unwrap().ends[0].body;
+    let end_pickup = record
+        .pickups
+        .iter()
+        .position(|p| p.body == end_body)
+        .unwrap();
+    let segments: Vec<_> = run
+        .area
+        .spawned
+        .iter()
+        .filter(|s| s.prototype == hose)
+        .map(|s| (s.id, s.pickup))
+        .collect();
+    let segment = segments.iter().find(|s| s.1 == end_pickup).unwrap().0;
+    {
+        use rapier3d::math::Vector;
+        let cap = Vector::from_array(run.area.items.get(fuel_cap).unwrap().pose.position);
+        let center = Vector::from_array(car_pose);
+        let out = (cap - center).with_y(0.).normalize();
+        // Turn the hose about its end so it points straight out from the car side.
+        let at = |run: &GarageRuntime, id| {
+            Vector::from_array(run.area.items.get(id).unwrap().pose.position)
+        };
+        let end = at(&run, segment);
+        let far = segments
+            .iter()
+            .map(|s| at(&run, s.0))
+            .max_by(|a, b| (*a - end).length().total_cmp(&(*b - end).length()))
+            .unwrap();
+        let turn =
+            rapier3d::math::Rotation::from_rotation_arc((far - end).with_y(0.).normalize(), out);
+        let target = (cap + out * 0.5).with_y(end.y);
+        for &(id, _) in &segments {
+            let body = run.area.items.get(id).unwrap().body.unwrap();
+            run.physics.edit_body(body, |b| {
+                let pose = *b.position();
+                let pose = rapier3d::math::Pose::from_parts(
+                    target + turn * (pose.translation - end),
+                    turn * pose.rotation,
+                );
+                b.set_position(pose, true);
+                b.set_linvel(Vector::ZERO, true);
+                b.set_angvel(Vector::ZERO, true);
+            });
+        }
+        run.physics.refresh_queries();
+        seconds(&mut run, &reference, 1.);
+        stand_near(&mut run, &reference, cap.to_array(), 1.);
+    }
+    take(&mut run, &reference, segment);
+    let fill_aim = crate::interaction::ResolvedAim {
+        filling_target: cap_aim.use_target,
+        ..Default::default()
+    };
+    tap(&mut run, fill_aim, keys::GRAB);
+    assert_ne!(
+        run.area.interaction.held(),
+        Some(segment),
+        "F attaches the hose to the open cap"
+    );
+    let near_cap = |run: &GarageRuntime| {
+        let cap_at =
+            rapier3d::math::Vector::from_array(run.area.items.get(fuel_cap).unwrap().pose.position);
+        run.area
+            .spawned
+            .iter()
+            .filter(|s| s.prototype == hose)
+            .map(|s| {
+                (rapier3d::math::Vector::from_array(
+                    run.area.items.get(s.id).unwrap().pose.position,
+                ) - cap_at)
+                    .length()
+            })
+            .fold(f32::INFINITY, f32::min)
+    };
+    // The joint holding the end on the cap is CP4. Here the save runs while it is on.
+    let near = near_cap(&run);
+    assert!(near < 0.05, "a hose end sits on the cap: {near} m");
+
+    // Save and load: the cargo stays locked in its volume. The hose comes back whole.
+    let saved: Vec<_> = cargo
+        .iter()
+        .map(|&(storage_type, item, volume)| {
+            let source = run
+                .area
+                .interaction
+                .storage
+                .volume_source(volume)
+                .unwrap()
+                .clone();
+            let serial = run
+                .area
+                .spawned
+                .iter()
+                .find(|s| s.id == item)
+                .unwrap()
+                .serial;
+            (storage_type, serial, source)
+        })
+        .collect();
+    let mut loaded = save_load(&run, &reference);
+    seconds(&mut loaded, &reference, 2.);
+    let car = loaded
+        .area
+        .items
+        .resolve_key(&key)
+        .expect("Lada after load");
+    for (storage_type, serial, source) in &saved {
+        let item = loaded
+            .area
+            .spawned
+            .iter()
+            .find(|s| s.serial == *serial)
+            .unwrap_or_else(|| panic!("type {storage_type}: cargo after load"))
+            .id;
+        let volume = loaded
+            .area
+            .interaction
+            .storage
+            .owner_volume(car, source)
+            .unwrap();
+        assert_eq!(
+            loaded.area.items.get(item).unwrap().location,
+            ItemLocation::Locked { owner: car, volume },
+            "type {storage_type}: cargo stays locked after load"
+        );
+    }
+    let segments = loaded
+        .area
+        .spawned
+        .iter()
+        .filter(|s| s.prototype == hose)
+        .count();
+    assert_eq!(
+        segments,
+        crate::reference::HOSE_SEGMENTS,
+        "the hose loads whole"
+    );
+
+    // A fridge and a coffin on open ground. Items in them when their area loads lock at once.
+    // The manual box locks only those: an item put in later stays loose. The pallet (`raklap`)
+    // is outside the exported spawn pools, so no pallet appears in the game.
+    let spawn = reference.area.player_spawn.translation.map(f64::from);
+    super::blocked::teleport(&mut loaded, &reference, spawn[0] + 80., spawn[2] + 80.);
+    let mut run = loaded;
+    for (name, storage_type) in [("Fridge", 0), ("Coffin", 0), ("Box", 9)] {
+        let item = super::weapons::spawn(&mut run, &reference, "cigi");
+        let (owner, prototype) = spawn_storage(&mut run, &reference, name);
+        let volume = storage_volume(&run, &reference, owner, &prototype, storage_type);
+        put_in(&mut run, item, volume);
+        let time = lock_time(&mut run, &reference, item, owner, 4.);
+        eprintln!("{name}: locked after {time:?} s");
+        assert!(
+            time.is_some_and(|t| t < 0.2),
+            "{name}: an item inside at load locks at once: {time:?}"
+        );
+        // Past the load passes.
+        seconds(&mut run, &reference, 1.);
+        let later = super::weapons::spawn(&mut run, &reference, "cigi");
+        put_in(&mut run, later, volume);
+        let time = lock_time(&mut run, &reference, later, owner, 4.);
+        if name == "Box" {
+            assert_eq!(time, None, "Box: an item put in later stays loose");
+        } else {
+            assert!(time.is_some(), "{name}: an item put in later locks");
+        }
+        if name == "Coffin" {
+            let usable = run
+                .area
+                .items
+                .iter()
+                .map(|i| i.id)
+                .find(|&id| {
+                    run.area.interaction.mechanisms.contains(id)
+                        && run.area.items.descends(id, owner)
+                })
+                .expect("coffin lid");
+            open_usable(&mut run, usable);
+            seconds(&mut run, &reference, 2.);
+            assert_eq!(locked_in(&run, item), None, "Coffin: the open lid releases");
+        }
+        // Clear the spot for the next one.
+        let player = run.area.player.body_pose(&run.physics);
+        let mut pose = player;
+        pose.position[0] += 6.;
+        run.area.player.recover(pose, &mut run.physics);
         seconds(&mut run, &reference, 0.5);
     }
 }

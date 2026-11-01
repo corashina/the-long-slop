@@ -58,22 +58,19 @@ Known failures on master e927770 (2026-10-31 headless run, export ee6554d), fix 
 - MC2 on the road: `tp_sa1_fill_start_drive_return_save_reload`. The Lada on the road, engine running in gear 2 at 2427 rpm, moved 0 m. The test did not release the handbrake. Fixed in code (#MC2): the test releases it. Not run yet: run it after the next export.
 - W15: `w02_long_trip_keeps_far_edits` is flaky. In 2 of 3 runs, 1 or 2 of 52 revisited building items moved.
 - WD19: `tp_wd19_cactus_breaks_once_and_stays`. A car hit, a shot and a blast break cacti once, with one gib each, and they stay. After an 8 km move the broken cactus stayed bound, because a structure unload did not rescan the breakables. Fixed in code (#WD): the rescan now follows structure changes. Not run yet: run it after the next export.
-- CP15: `tp_cp13_cp16_loot_tools_work_from_the_hand`. The loot spray played no sound: its signal waited for a fixed-tool `voice`, which a prototype tool does not have. Fixed in code (#WD): an emitting spray plays its prototype `sound` loop. Not run yet: run it after the next export.
 - WD2: `tp_wd2_shovel_breaks_a_building_lamp`. The shovel breaks the lamps and they stay dark. Save and load at the Mansion: the restore stays pending.
-- CP5, CP6: `r05_cargo_locks_in_trunk`. The driver cannot exit the Lada in the garage (BL), so the cargo checks do not run.
-- CP7: `tp_cp7_turned_wheels_stay_after_save_and_load`. The steer was 0 because the test waited 1 s with the driver seated, and a seated driver without steer keys centers the wheels. Fixed in code (#MC2): the player leaves the seat before the wait. Not run yet: run it after the next export.
 - WD3: `tp_wd3_each_melee_weapon_swings_with_each_key_and_breaks_a_bottle`. The export has melee weapon records only for the crowbar and the shovel. The katana, fly swatter and leg have none. The exporter skips a `meleeweaponscript` without a pickupable (the leg kick), and finds weapons only in selected world prototypes. Check the katana and fly swatter exclusion reasons in the export catalog.
 - WD20: `tp_wd20_a_hard_hit_breaks_a_tumbleweed_with_its_gib_and_it_stays_gone`. The tumbleweed gib prototype holds only a particle system: no body, pickup or renderer. So the gib spawns no item, and the test finds none. The export has no gib particle data. `tumbleweed_breaks_on_a_hard_drop_and_leaves_the_spawned_list` fails the same way.
-- No test yet (needs an export to write and run): CP2 loot radiator fan, PB6 doors and push from a seat, PB8 rub and wash, WD8 reload from carried ammo.
+- No test yet (needs an export to write and run): PB6 doors and push from a seat, PB8 rub and wash, WD8 reload from carried ammo.
 - MC2, older tests: `garage_start_car_drives_in_automatic`, `car07_drives_in_forced_automatic` and `start_cars_drive_save_and_load` now release the handbrake (#MC2). Not run yet. `two_ladas_drive_save_and_load` and `lada_tows_the_trailer_and_the_hitch_saves` apply torque with no handbrake, so the handbrake does not explain them. If they still fail, read the chassis collider names from `garage_start_car_drives_in_automatic`.
-- BL, older test: `start_car_driver_exits_in_garage` finds no clear exit.
+- BL, older tests: `start_car_driver_exits_in_garage` finds no clear exit. `r05_cargo_locks_in_trunk` drives with cargo in the trunk and cannot exit the Lada.
 - Changed without a run, because the cloud has no export. Run them in the next test pass:
   - `bike01_kick_starts_and_rides_upright`: automatic gears in a gearbox without neutral now keep the gear. Before: panic "validated neutral".
   - `bike03_pedals_then_kick_starts`: it now takes any vehicle with pedals. Before: no bike prototype.
   - `tp_w12_a_crowbar_hit_does_not_dig_up_a_buried_item`: it replaces `crowbar_hit_does_not_lift_a_buried_item` and uses the world prototype crowbar.
   - `fixed_decorations_preserve_collision_without_item_bindings`: the wrong-file prototype is gone. It had no source rule.
 - Stale test data: `roadside_possession_survives_owner_retirement_without_duplicate_spawn` finds no natural right-hand item at the building.
-- `fixed_decoration_possessions_restore_on_item_path`: the restored item is not an interaction part.
+- `fixed_decoration_possessions_restore_on_item_path`: the part check passes now (#CP: every part registers). The last step fails the same way with or without that change: the dropped, retired possession published again fails sync with "Source snapshot has no container".
 - `road_building_cable_is_in_building_appearance`: no building cables.
 - `required_publication_reaches_ready_and_withholds_dependencies`: the world is not supported.
 
@@ -93,14 +90,6 @@ Prepare once:
 3. Run all ignored tests: `cargo test --release --lib -- --ignored --nocapture`.
 4. In that output, note the `w02_` bytes per km and the 5,000 km estimate. Above 200 MB, compact spawn boundaries.
 5. Claude runs the steps in Chrome with the test sandbox: see `tests/sandbox/README.md`. First check the sandbox itself: `spawn('Bus02Full', 10)` places a bus, and `teleport`, `building`, `spawn`, `hand`, `fill` and `cycle` work. Use `tests/sandbox/buses.js` for More cars steps 16-20.
-
-### Car parts and repair
-
-2. Swap a loot radiator into the Lada: its fan spins while the engine runs.
-5. Cargo storage: lock items in the Lada trunk, glove box, and engine bay, and in a fridge, a pallet, and a coffin. Open the lid to release them. The source box is manual only: items in it when its area loads lock, items put in it later stay loose. Items in a fridge, pallet or coffin when its area loads lock at once, not after 3 s.
-6. Save and load with the hose attached and with cargo locked.
-7. Park the Lada with the wheels turned. Save and load: the wheels stay turned.
-15. Paint a car part with loot spray paint. The can shows its color, sprays particles with sound, and runs out.
 
 ### Player body and outfit
 
