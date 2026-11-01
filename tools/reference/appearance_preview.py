@@ -17,6 +17,27 @@ def preview_script(source):
     return scene_component(source, source.library, SCRIPT, 'level1')
 
 
+def rect(source, reader):
+    """Unity `RectTransform.rect` of `reader` as min x, min y, width and height. A plain Transform has a zero rect."""
+    d = None if reader is None else source.read(reader)
+    if d is None or 'm_AnchorMin' not in d:
+        return (0., 0., 0., 0.)
+    p = rect(source, source.resolve(reader, d['m_Father']))
+    size = [(d['m_AnchorMax'][a] - d['m_AnchorMin'][a]) * p[2 + i] + d['m_SizeDelta'][a] for i, a in enumerate('xy')]
+    return (-d['m_Pivot']['x'] * size[0], -d['m_Pivot']['y'] * size[1], *size)
+
+
+def local_position(source, reader, d):
+    """Unity local position. A RectTransform takes x and y from its anchors and `m_AnchoredPosition`.
+    Its serialized `m_LocalPosition` x and y can be stale."""
+    if 'm_AnchorMin' not in d:
+        return vector(d['m_LocalPosition'])
+    p = rect(source, source.resolve(reader, d['m_Father']))
+    xy = [p[i] + p[2 + i] * (d['m_AnchorMin'][a] + (d['m_AnchorMax'][a] - d['m_AnchorMin'][a]) * d['m_Pivot'][a])
+          + d['m_AnchoredPosition'][a] for i, a in enumerate('xy')]
+    return (*xy, d['m_LocalPosition']['z'])
+
+
 def stage_pose(source, reader, stage):
     """Pose of Transform `reader` in the space of its ancestor `stage`."""
     position, rotation, scale = (0., 0., 0.), (0., 0., 0., 1.), (1., 1., 1.)
@@ -27,7 +48,7 @@ def stage_pose(source, reader, stage):
         seen.add(key(reader))
         d = source.read(reader)
         local = vector(d['m_LocalScale'])
-        position = transform_point(position, vector(d['m_LocalPosition']), vector(d['m_LocalRotation'], 4), local)
+        position = transform_point(position, local_position(source, reader, d), vector(d['m_LocalRotation'], 4), local)
         rotation = quaternion_product(vector(d['m_LocalRotation'], 4), rotation)
         scale = tuple(scale[i] * local[i] for i in range(3))
         reader = source.resolve(reader, d['m_Father'])
@@ -124,6 +145,22 @@ def validate_preview(preview, clothing, manifest):
         if l['kind'] not in LIGHT_KINDS.values() or len(l['color']) != 4 or l['intensity'] < 0 or l['range'] <= 0 or not valid_pose(l['pose']):
             raise ValueError('Preview light')
     validate_figure(figure, clothing, manifest)
+    if not frames_figure(camera, figure):
+        raise ValueError('Preview camera does not frame the figure joints')
+
+
+def frames_figure(camera, figure):
+    """Each figure joint is in front of the camera and inside its vertical field of view."""
+    t, (x, y, z, w) = camera['pose']['translation'], camera['pose']['rotation']
+    half = math.tan(math.radians(camera['fov']) / 2)
+    for joint in figure['joints']:
+        offset = [joint['pose']['translation'][i] - t[i] for i in range(3)]
+        local = transform_point(offset, (0., 0., 0.), (-x, -y, -z, w), (1., 1., 1.))
+        # Glb cameras look along -z.
+        depth = -local[2]
+        if depth <= camera['near'] or abs(local[1]) > depth * half:
+            return False
+    return True
 
 
 def validate_figure(figure, clothing, manifest):
