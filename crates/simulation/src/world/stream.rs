@@ -4804,7 +4804,10 @@ impl WorldStream {
                     .iter()
                     .filter(|c| &c.content.placement.id == id)
                     .any(|c| c.has_external_dependents(items, &interaction.parts, wheels))
-                || (!id.children.is_empty() && self.wanted_structures.iter().any(|p| &p.id == id))
+                // A startup structure stays while it is wanted, as `refresh_startup_placements`
+                // selects it, also before its contents bind.
+                || ((!id.children.is_empty() || id.layer == WorldLayer::Startup)
+                    && self.wanted_structures.iter().any(|p| &p.id == id))
                 || (id.children.is_empty()
                     && id.layer != WorldLayer::Building
                     && self.props.contains(id))

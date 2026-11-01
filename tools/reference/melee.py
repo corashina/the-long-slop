@@ -29,13 +29,15 @@ def _order(identity):
     return identity['file'],identity['path_id']
 
 
-def _weapon(source, prototype, c) -> dict:
+def _weapon(source, prototype, c, pickup) -> dict:
     d=source.read(c)
     def link(pointer, kind, cls=None):
         target=source.resolve(c,pointer)
         if target is None or target.type.name!=kind or (cls and source.class_name(target)!=cls):raise ValueError(f'link is not {cls or kind}')
         return target
-    weapon={'prototype':prototype,'source':source_id(c),'pickup':source_id(link(d['p'],'MonoBehaviour','pickupable')),
+    # meleeweaponscript.p only moves the hands to RHs and LHs. pickupable.melee links the held weapon.
+    if d['p']['m_PathID'] and key(link(d['p'],'MonoBehaviour','pickupable'))!=key(pickup):raise ValueError('p is not the pickupable that holds it')
+    weapon={'prototype':prototype,'source':source_id(c),'pickup':source_id(pickup),
         'target':source_id(link(d['T'],'Transform')),'trigger':source_id(link(d['Trigger'],'Transform')),
         'contact_mask':d['mask']['m_Bits'],'speed':d['speed'],'shovel_speed':d['shovelSpeed'],'attack_volume':d['attackVolume'],
         'attack_clips':[source_id(link(p,'AudioClip')) for p in d['attackClips']],
@@ -64,16 +66,23 @@ def recover_melee(source, manifest, output) -> dict:
         if any(c is None or c.type.name!='AudioClip' for c in clips):raise ValueError('mainscript meleeHitSounds clip is not AudioClip')
         source.item_clips.update(key(c) for c in clips)
         hit_clips.append([source_id(c) for c in clips])
-    # Every world prototype node with a meleeweaponscript is a weapon.
+    # A world prototype meleeweaponscript that a pickupable.melee links is a weapon.
+    # A body-part weapon (the leg kick) has no pickupable. Melee items are pickups only.
     weapons=[]
     for p in manifest['world']['prototypes']:
+        scripts,pickups=[],{}
         for n in p['nodes']:
             for c in source.components(source.get(n['source']['file'],n['source']['path_id']))[1]:
-                if c.type.name!='MonoBehaviour' or source.class_name(c)!='meleeweaponscript':continue
-                # A body-part weapon (the leg kick) has no pickupable. Melee items are pickups only.
-                if not source.read(c)['p']['m_PathID']:continue
-                try:weapons.append(_weapon(source,p['source'],c))
-                except (ValueError,KeyError) as error:raise ValueError(f'Melee weapon {key(c)}: {error}') from error
+                if c.type.name!='MonoBehaviour':continue
+                name=source.class_name(c)
+                if name=='meleeweaponscript':scripts.append(c)
+                elif name=='pickupable':
+                    melee=source.resolve(c,source.read(c)['melee'])
+                    if melee is not None:pickups[key(melee)]=c
+        for c in scripts:
+            if key(c) not in pickups:continue
+            try:weapons.append(_weapon(source,p['source'],c,pickups[key(c)]))
+            except (ValueError,KeyError) as error:raise ValueError(f'Melee weapon {key(c)}: {error}') from error
     weapons.sort(key=lambda w:(_order(w['prototype']),_order(w['source'])))
     motions=[]
     for identity in sorted({_order(w['controller']) for w in weapons}):

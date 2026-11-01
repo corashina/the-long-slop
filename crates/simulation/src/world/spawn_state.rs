@@ -391,11 +391,23 @@ impl SourceSpawnState {
                     "Spawn replay pool clone exceeds staging".into(),
                 ));
             }
+            // Broken lamps are runtime state that the boundary does not keep: the live inputs
+            // carry them on.
+            let restored;
+            let inputs = if initialization.broken_lamps.is_empty() {
+                &boundary.initialization
+            } else {
+                restored = SpawnInitialization {
+                    broken_lamps: initialization.broken_lamps.clone(),
+                    ..boundary.initialization.clone()
+                };
+                &restored
+            };
             return call(
                 &mut UnityRandom::restore(boundary.random),
                 boundary.context,
                 &mut boundary.painting_pools.clone(),
-                &boundary.initialization,
+                inputs,
                 staging - overlap,
             );
         }

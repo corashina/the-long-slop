@@ -342,6 +342,12 @@ fn tp_wd3_each_melee_weapon_swings_with_each_key_and_breaks_a_bottle() {
         let bottle = spawn(&mut run, &reference, "beer");
         seconds(&mut run, &reference, 0.5);
         let t = target(&run, bottle);
+        // Source `TryBreak(damage)`: the bottle has no `decreaseAfterAttack`, so only a hit
+        // of at least its health breaks it. The fly swatter (damage 1) does not.
+        let record = &reference.breakables[run.stream.breakables.targets()[t].record];
+        assert!(!record.decrease_after_attack);
+        let damage = bound_weapon(&run, &reference, weapon).contact.damage;
+        let breaks = damage >= record.health;
         for i in 0..10 * PRESS_FRAMES {
             if run.stream.breakables.targets()[t].destroyed {
                 break;
@@ -350,14 +356,34 @@ fn tp_wd3_each_melee_weapon_swings_with_each_key_and_breaks_a_bottle() {
             place(&mut run, bottle, at);
             press_frame(&mut run, &reference, i, keys::PRIMARY, 0);
         }
-        assert!(
+        assert_eq!(
             run.stream.breakables.targets()[t].destroyed,
-            "the {name} breaks a bottle"
+            breaks,
+            "the {name} (damage {damage}) breaks a bottle (health {}) only when the damage reaches its health",
+            record.health
         );
         // The next weapon replaces it in the hand.
         drop_hand(&mut run);
         seconds(&mut run, &reference, 0.2);
     }
+}
+
+/// The melee weapon record of held `item`.
+fn bound_weapon<'a>(
+    run: &GarageRuntime,
+    reference: &'a ReferenceManifest,
+    item: ItemId,
+) -> &'a crate::reference::MeleeWeaponReference {
+    let rule = run
+        .area
+        .interaction
+        .carry
+        .rule(item)
+        .unwrap()
+        .source
+        .clone();
+    let index = run.area.interaction.melee.weapon_for(&rule).unwrap();
+    &reference.melee.weapons[index]
 }
 
 /// Drops the item in the hand.
@@ -369,47 +395,29 @@ pub(super) fn drop_hand(run: &mut GarageRuntime) {
     area.sync_inventory();
 }
 
-/// Spawns melee weapon `name` (its world prototype root name) at the player, as `melee.rs`
-/// does, and puts its pickup item in the hand.
+/// Places melee weapon `name` (its world prototype root name) with the sandbox and puts it in
+/// the hand. Melee weapons are world prototypes.
 fn melee(run: &mut GarageRuntime, reference: &ReferenceManifest, name: &str) -> ItemId {
-    let root = |w: &&crate::reference::MeleeWeaponReference| {
-        reference
-            .world
-            .prototypes
-            .iter()
-            .find(|p| p.source == w.prototype.0)
-            .and_then(|p| p.nodes.iter().find(|n| n.parent.is_none()))
-            .map(|n| n.name.to_lowercase())
-    };
-    let weapons = &reference.melee.weapons;
-    let w = weapons
+    let roots: Vec<String> = reference
+        .melee
+        .weapons
         .iter()
-        .find(|w| root(w).is_some_and(|n| n == name))
-        .or_else(|| {
-            weapons
+        .filter_map(|w| {
+            reference
+                .world
+                .prototypes
                 .iter()
-                .find(|w| root(w).is_some_and(|n| n.contains(name)))
+                .find(|p| p.source == w.prototype.0)
+                .and_then(|p| p.nodes.iter().find(|n| n.parent.is_none()))
+                .map(|n| n.name.clone())
         })
+        .collect();
+    let root = roots
+        .iter()
+        .find(|r| r.to_lowercase() == name)
+        .or_else(|| roots.iter().find(|r| r.to_lowercase().contains(name)))
         .unwrap_or_else(|| panic!("melee weapon {name}"));
-    let prototype = reference
-        .item_prototypes
-        .iter()
-        .position(|p| p.id == w.prototype)
-        .unwrap();
-    let pickup = reference.item_prototypes[prototype]
-        .pickups
-        .iter()
-        .position(|p| p.pickup.source == w.pickup)
-        .unwrap();
-    let pose = run.area.player.body_pose(&run.physics);
-    let weapon = crate::starting_area::spawned::spawn_prototype(
-        reference,
-        &mut run.area,
-        &mut run.physics,
-        prototype,
-        pose,
-    )
-    .unwrap()[pickup];
+    let weapon = spawn(run, reference, root);
     hold(run, reference, weapon);
     weapon
 }

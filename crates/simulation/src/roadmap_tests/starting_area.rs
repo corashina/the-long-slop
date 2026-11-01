@@ -880,8 +880,8 @@ fn tp_sa12_hurt_food_weapons_cut_food() {
             Some(p.nodes[0].name.to_lowercase())
         })
         .collect();
-    // The source has no knife. The crowbar and the shovel cut food.
-    assert_eq!(cutters, ["crowbar", "shovel"]);
+    // The source has no knife. The crowbar, the katana and the shovel cut food.
+    assert_eq!(cutters, ["crowbar", "katana", "shovel"]);
 }
 
 /// SA7: source `mainscript.CrossHairStuff` layers for the targets the use ray finds in the
