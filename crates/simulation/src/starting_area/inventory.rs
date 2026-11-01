@@ -508,9 +508,14 @@ impl GarageRuntime {
         }
         let point = input.player_held & crate::simulation::player_keys::POINT != 0;
         self.area.player.step_point(point, &self.physics, dt);
+        // Source `pointKefe` sits on `pointAt`, so the rub follows the pointing hand.
+        let point_at = crate::vehicle::from_rapier(
+            &(crate::vehicle::to_rapier(self.area.player.body_pose(&self.physics))
+                * self.area.player.point().at),
+        );
         self.area.interaction.cleaning.advance_player(
             point,
-            self.area.player.body_pose(&self.physics),
+            point_at,
             frame,
             reference,
             &mut self.area.interaction.conditions,

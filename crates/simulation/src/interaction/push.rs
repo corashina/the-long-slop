@@ -1,5 +1,6 @@
 //! Source push force and a reusable steering grip.
 use super::AimTarget;
+use super::items::ItemStore;
 use crate::player::PlayerState;
 use crate::player::body::{BodyState, ReachFrame, ReachTarget};
 use crate::reference::{
@@ -8,7 +9,9 @@ use crate::reference::{
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose, from_rapier, to_rapier};
 use rapier3d::math::{Pose, Rotation, Vector};
-use rapier3d::prelude::{GenericJointBuilder, ImpulseJointHandle, JointAxesMask, RigidBodyHandle};
+use rapier3d::prelude::{
+    GenericJointBuilder, ImpulseJointHandle, JointAxesMask, QueryFilter, Ray, RigidBodyHandle,
+};
 use std::collections::HashMap;
 
 /// Push values of one item. `body` keys the interaction body map.
@@ -42,6 +45,22 @@ fn pose(t: &Transform) -> Pose {
 pub fn grip_hand(local: &Transform, grip: &Transform, hand: Option<&Transform>) -> VehiclePose {
     let local = pose(local);
     from_rapier(&hand.map_or(local, |hand| local * pose(grip).inverse() * pose(hand)))
+}
+/// The root body of `body`: the body of its root item, else `body` itself.
+/// Source `transform.root`: car parts share the root of their car.
+fn root_body(items: &ItemStore, body: RigidBodyHandle) -> RigidBodyHandle {
+    let Some(mut id) = items.iter().find(|i| i.body == Some(body)).map(|i| i.id) else {
+        return body;
+    };
+    while let Some(parent) = items.parent(id) {
+        id = parent;
+    }
+    items.get(id).and_then(|i| i.body).unwrap_or(body)
+}
+/// A seat push hit: the hit point and the root body of the hit collider.
+pub struct SeatPushHit {
+    point: Vector,
+    root: Option<RigidBodyHandle>,
 }
 struct Grip {
     owner: ItemId,
@@ -220,6 +239,93 @@ impl PushState {
         if self.cancelled {
             self.stop(player, physics);
         }
+    }
+    /// Source `fpscontroller` seat push ray: `pushLayer` from the camera within `FrayRange`. It
+    /// takes no hit on the root of the seat.
+    pub fn seat_push_hit(
+        &self,
+        player: &PlayerState,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+    ) -> Option<SeatPushHit> {
+        player.seat_push_modifier()?;
+        let seat = root_body(items, player.seat_body()?);
+        let view = to_rapier(player.view(physics).camera_pose);
+        let ray = Ray::new(view.translation, view.rotation * -Vector::Z);
+        let mask = self.player.action_masks.push_mask;
+        let own = player.body_handle();
+        let filter = |_, c: &rapier3d::prelude::Collider| {
+            c.is_enabled()
+                && !c.is_sensor()
+                && c.parent() != Some(own)
+                && c.collision_groups().memberships.bits() & mask != 0
+                && !c.shape().contains_point(c.position(), ray.origin)
+        };
+        let (handle, toi) = physics
+            .queries(QueryFilter::default().predicate(&filter))
+            .cast_ray(&ray, self.player.aim_reach, true)?;
+        let root = physics.rapier().colliders[handle]
+            .parent()
+            .map(|b| root_body(items, b));
+        (root != Some(seat)).then(|| SeatPushHit {
+            point: ray.point_at(toi),
+            root,
+        })
+    }
+    /// Source `fpscontroller` push from a seat: held F pushes the aimed root body and pushes the
+    /// seat body back. A static root pushes only the seat body, with the full force.
+    pub fn step_seated(
+        &mut self,
+        input: FrameInput,
+        player: &PlayerState,
+        body: &mut BodyState,
+        items: &ItemStore,
+        physics: &mut PhysicsWorld,
+        dt: f32,
+    ) -> bool {
+        if input.held & keys::GRAB == 0 {
+            return false;
+        }
+        let (Some(hit), Some(modifier), Some(seat)) = (
+            self.seat_push_hit(player, items, physics),
+            player.seat_push_modifier(),
+            player.seat_body(),
+        ) else {
+            return false;
+        };
+        let view = to_rapier(player.view(physics).camera_pose);
+        let forward = view.rotation * -Vector::Z;
+        body.move_nearest_leg_hand(ReachTarget {
+            frame: ReachFrame::World,
+            pose: VehiclePose {
+                position: hit.point.to_array(),
+                rotation: view.rotation.to_array(),
+            },
+        });
+        let force = forward
+            * dt
+            * self.player.seat_push_force
+            * modifier
+            * self.player.source_force_interval;
+        let pushed = hit.root.filter(|b| {
+            physics
+                .rapier()
+                .bodies
+                .get(*b)
+                .is_some_and(|b| b.is_dynamic() && b.is_enabled())
+        });
+        let own = if let Some(pushed) = pushed {
+            physics.edit_body(pushed, |b| {
+                b.apply_impulse_at_point(force * 0.5, hit.point, true)
+            });
+            -force * 0.5
+        } else {
+            -force
+        };
+        physics.edit_body(seat, |b| {
+            b.apply_impulse_at_point(own, view.translation, true)
+        });
+        true
     }
     pub fn step(
         &mut self,

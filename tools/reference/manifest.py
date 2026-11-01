@@ -276,7 +276,7 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
     if time_reader.type.name != 'TimeManager':raise ValueError('Source TimeManager differs')
     player_record.update(source_force_interval=source.read(time_reader)['Fixed Timestep'],
         throw_minimum=player['minThrowForce'],throw_gain=player['throwForceGain'],throw_multiplier=1000.,
-        push_force=main['pushForce'],airborne_push_force=main['selfNotGroundedPushForce'],
+        push_force=main['pushForce'],airborne_push_force=main['selfNotGroundedPushForce'],seat_push_force=player['seatPushForce'],
         grip_force=player['pushgripForce'],grip_speed=player['FspeedM'],grip_distance=player['pushGripDistance'],
         pedaling_nm=player['PedalingNm'],pedaling_rpm=player['PedalingRpm'])
     player_record['get_out_layer_mask']=player['getOutLayer']['m_Bits']

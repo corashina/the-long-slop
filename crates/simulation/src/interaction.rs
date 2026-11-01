@@ -1999,22 +1999,36 @@ impl InteractionState {
             self.f_gesture_consumed = true;
         }
         let push_target = aim.push_target.filter(|target| valid(*target));
-        let pushing =
-            if (action.is_none() || self.push.gripping()) && self.held().is_none() && !grip_release
+        let pushing = if player.seated() {
+            // Source: the seat push runs without any use, pickup or fill target.
+            if action.is_none()
+                && self.held().is_none()
+                && aim.use_target.is_none()
+                && aim.grab_target.is_none()
+                && aim.filling_target.is_none()
+                && aim.installation_target.is_none()
             {
-                self.push.step(
-                    resolved.push_input,
-                    push_target,
-                    &self.bodies,
-                    player,
-                    body,
-                    physics,
-                    dt,
-                )
-            } else {
-                self.push.stop(player, physics);
-                None
-            };
+                self.push
+                    .step_seated(resolved.push_input, player, body, items, physics, dt);
+            }
+            None
+        } else if (action.is_none() || self.push.gripping())
+            && self.held().is_none()
+            && !grip_release
+        {
+            self.push.step(
+                resolved.push_input,
+                push_target,
+                &self.bodies,
+                player,
+                body,
+                physics,
+                dt,
+            )
+        } else {
+            self.push.stop(player, physics);
+            None
+        };
         if action.is_none()
             && let Some(item) = pushing
         {

@@ -738,6 +738,8 @@ pub struct PlayerReference {
     pub throw_multiplier: f32,
     pub push_force: f32,
     pub airborne_push_force: f32,
+    /// Source `fpscontroller.seatPushForce`: the push force of F from a seat.
+    pub seat_push_force: f32,
     pub grip_force: f32,
     pub grip_speed: f32,
     pub grip_distance: f32,
@@ -1855,6 +1857,7 @@ impl ReferenceManifest {
                 p.throw_multiplier,
                 p.push_force,
                 p.airborne_push_force,
+                p.seat_push_force,
                 p.grip_force,
                 p.grip_speed,
                 p.grip_distance,
@@ -1865,6 +1868,7 @@ impl ReferenceManifest {
                 && p.throw_multiplier > 0.0
                 && p.push_force > 0.0
                 && p.airborne_push_force > 0.0
+                && p.seat_push_force > 0.0
                 && p.grip_force > 0.0
                 && p.grip_speed > 0.0
                 && p.grip_distance > 0.0,

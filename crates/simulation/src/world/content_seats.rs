@@ -44,6 +44,10 @@ pub struct WorldSeatReference {
     pub min_exit_angle_degrees: f32,
     pub exit_height: f32,
     pub show_sleep_text: bool,
+    /// `cantPushFromSeat`.
+    pub cant_push_from_seat: bool,
+    /// `pushForce` when `usePushForceModifier` is set, else 1.
+    pub push_force_modifier: f32,
     /// `driverSeat0` and `driverSeat1` of a car seat, from the prototype vehicle record.
     pub driver: bool,
     pub driving2: bool,
@@ -156,6 +160,12 @@ fn main_seat(
         min_exit_angle_degrees: number(f, "minGetUpAnlge")?,
         exit_height: number(f, "getOutHeight")?,
         show_sleep_text: flag(f, "showSleepText")?,
+        cant_push_from_seat: flag(f, "cantPushFromSeat")?,
+        push_force_modifier: if flag(f, "usePushForceModifier")? {
+            number(f, "pushForce")?
+        } else {
+            1.
+        },
         driver: false,
         driving2: false,
         body_pose: WorldSeatBodyPose {
@@ -172,6 +182,7 @@ fn main_seat(
         seat.min_exit_angle_degrees,
         seat.exit_height,
         seat.cant_sit_angle_degrees.unwrap_or(0.),
+        seat.push_force_modifier,
     ];
     if values.iter().any(|v| !v.is_finite())
         || rot_limit < 0.
@@ -517,6 +528,8 @@ mod tests {
                 ("minGetUpAnlge", WorldValue::Number(65.)),
                 ("getOutHeight", WorldValue::Number(1.)),
                 ("showSleepText", WorldValue::Integer(0)),
+                ("cantPushFromSeat", WorldValue::Integer(0)),
+                ("usePushForceModifier", WorldValue::Integer(0)),
             ]
             .into_iter()
             .map(|(name, value)| WorldInitField {
