@@ -26,9 +26,9 @@ const START_CARS: [&str; 15] = [
     "StartCar10k",
 ];
 /// Height of the test deck above the start pose. No start area object reaches it.
-const DECK_HEIGHT: f32 = 30.;
+pub(crate) const DECK_HEIGHT: f32 = 30.;
 /// Half size of the test deck.
-const DECK: [f32; 3] = [40., 0.5, 40.];
+pub(crate) const DECK: [f32; 3] = [40., 0.5, 40.];
 /// Source water. The coolant rule reads water or blood.
 const WATER: usize = 3;
 
@@ -159,9 +159,29 @@ pub(crate) fn release_handbrake(
     assert!(!run.vehicles[key].handbrake, "the handbrake is off");
 }
 
+/// Gear, engine rpm, speed and each wheel's (rpm, radius, grounded).
+pub(crate) fn drive_state(run: &GarageRuntime, key: &ObjectKey) -> String {
+    let wheels: Vec<_> = (0..run.physics.wheel_contacts(key).count())
+        .map(|i| run.physics.wheel_motion(key, i))
+        .collect();
+    let engine = run.engine_output(key);
+    format!(
+        "gear {} rpm {:.0} target {:.0} torque {:.0} Nm fuel {:.2} oil {:.2} heat {:.2} speed {:.2} handbrake {} wheels {wheels:?}",
+        run.vehicles[key].drivetrain.gear(),
+        engine.rpm,
+        engine.target_rpm,
+        engine.torque_nm,
+        engine.fuel_suitability,
+        engine.oil_penalty,
+        engine.heat_penalty,
+        run.physics.snapshot(key).speed_mps,
+        run.vehicles[key].handbrake,
+    )
+}
+
 /// Moves the start car onto a deck `DECK_HEIGHT` above its start pose.
 /// Returns the absolute deck center.
-fn insert_deck(run: &mut GarageRuntime, key: &ObjectKey) -> [f64; 3] {
+pub(crate) fn insert_deck(run: &mut GarageRuntime, key: &ObjectKey) -> [f64; 3] {
     let mut pose = run.physics.snapshot(key).pose;
     let clearance = pose.position[1] - ground(run, pose.position).expect("ground under the car");
     pose.position[1] += DECK_HEIGHT;
@@ -256,7 +276,12 @@ fn start_car_drives_saves_and_loads(reference: &ReferenceManifest, field: &str) 
     let moved = hold(&mut run, reference, 0, player_keys::GAS, 0, 30., |run| {
         horizontal(absolute(run, &key).0, start) > 10.
     });
-    assert!(moved, "{field}: drives 10 m");
+    assert!(
+        moved,
+        "{field}: drives 10 m: moved {:.2} m, {}",
+        horizontal(absolute(&run, &key).0, start),
+        drive_state(&run, &key)
+    );
     assert_eq!(run.vehicles[&key].drivetrain.gear(), first, "{field}");
     hold(&mut run, reference, 0, player_keys::BRAKE, 0, 4., |_| false);
     assert!(running(&run, &key), "{field}: engine runs after the drive");
@@ -438,7 +463,7 @@ fn car07_drives_in_forced_automatic() {
     assert!(running(&run, &key), "Car07 engine runs after the drive");
 }
 
-/// MC2: the garage start car with automatic gears starts in first and drives out of its spot.
+/// MC2: the garage start car with automatic gears starts in first and drives up to the workbench.
 #[test]
 #[ignore = "requires the installed source export"]
 fn garage_start_car_drives_in_automatic() {
@@ -477,17 +502,7 @@ fn garage_start_car_drives_in_automatic() {
     frame_with(&mut run, &reference, released);
     seconds(&mut run, &reference, 1.);
     release_handbrake(&mut run, &reference, &key);
-    let state = |run: &GarageRuntime| {
-        let wheels: Vec<_> = (0..run.physics.wheel_contacts(&key).count())
-            .map(|i| run.physics.wheel_motion(&key, i))
-            .collect();
-        format!(
-            "gear {} rpm {:.0} speed {:.2} wheels {wheels:?}",
-            run.vehicles[&key].drivetrain.gear(),
-            run.engine_output(&key).rpm,
-            run.physics.snapshot(&key).speed_mps,
-        )
-    };
+    let state = |run: &GarageRuntime| drive_state(run, &key);
     eprintln!("idle: {}", state(&run));
     let neutral = crate::starting_area::world_vehicle(&reference, run.vehicles[&key].prototype)
         .gear_ratios
@@ -502,10 +517,15 @@ fn garage_start_car_drives_in_automatic() {
         "first gear at standstill: {}",
         state(&run)
     );
+    // The Lada parks nose in at the workbench, with the closed garage door behind it.
+    // Drive up to the workbench.
     let start = absolute(&run, &key).0;
-    let moved = hold(&mut run, &reference, 0, player_keys::GAS, 0, 10., |run| {
+    hold(&mut run, &reference, 0, player_keys::GAS, 0, 5., |run| {
         horizontal(absolute(run, &key).0, start) > 5.
     });
+    let distance = horizontal(absolute(&run, &key).0, start);
+    eprintln!("forward {distance:.2} m: {}", state(&run));
+    let moved = distance > 0.5;
     if !moved {
         let world = run.physics.rapier();
         let chassis = run.physics.chassis_handle(&key);
@@ -685,5 +705,9 @@ fn garage_start_car_drives_in_automatic() {
             eprintln!("wheel {i} center (body space) {center:?}");
         }
     }
-    assert!(moved, "drives 5 m: {}", state(&run));
+    assert!(
+        moved,
+        "drives up to the workbench: {distance:.2} m, {}",
+        state(&run)
+    );
 }

@@ -119,6 +119,10 @@ fn r05_cargo_locks_in_trunk() {
     );
 
     // Pick the can up from the trunk.
+    assert!(
+        super::garage_exit::open_door_and_look_out(&mut run, &reference).is_some(),
+        "clear exit"
+    );
     assert!(run.area.player.try_exit(&mut run.physics));
     let point = run.area.items.get(can).unwrap().pose.position;
     run.area

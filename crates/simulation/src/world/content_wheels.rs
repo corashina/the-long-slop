@@ -138,7 +138,7 @@ pub(super) fn bind(
                 })?;
             (
                 number(rim.fields, "felniRadius")?,
-                Some(super::placement::node_pose(prototype, index)),
+                Some(rim_local(prototype, node_index, index)),
                 strings(slot.fields, "maintipus")?,
                 strings(slot.fields, "tipus")?,
             )
@@ -211,4 +211,22 @@ pub(super) fn bind(
         content.bindings[index].baseline = items.generated_snapshot(tire, None).unwrap();
     }
     Ok(())
+}
+
+/// The pose of prototype node `index` in the frame of wheel node `wheel`.
+fn rim_local(prototype: &WorldPrototypeReference, wheel: usize, index: usize) -> Transform {
+    use crate::vehicle::{VehiclePose, from_rapier, to_rapier};
+    let pose = |i| {
+        let t = super::placement::node_pose(prototype, i);
+        to_rapier(VehiclePose {
+            position: t.translation,
+            rotation: t.rotation,
+        })
+    };
+    let local = from_rapier(&(pose(wheel).inverse() * pose(index)));
+    Transform {
+        translation: local.position,
+        rotation: local.rotation,
+        scale: [1.; 3],
+    }
 }
