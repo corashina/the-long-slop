@@ -1038,6 +1038,15 @@ impl WheelAssemblies {
         Ok(!self.installed.is_empty())
     }
 
+    /// The collider is a shape of a rim or tire mounted on a car. Mounted wheel shapes stay off.
+    pub fn mounted_collider(&self, handle: ColliderHandle) -> bool {
+        let owns = |part: usize| self.parts[part].colliders.iter().any(|(h, _)| *h == handle);
+        self.slots
+            .iter()
+            .filter_map(|slot| slot.rim)
+            .any(|rim| owns(rim) || self.parts[rim].tire.is_some_and(owns))
+    }
+
     /// Rims that the last `install_pending` call mounted.
     pub fn last_installed(&self) -> &[ItemId] {
         &self.installed

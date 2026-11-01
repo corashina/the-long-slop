@@ -163,6 +163,30 @@ fn lada_tows_the_trailer_and_the_hitch_saves() {
     let (car_key, car_item) = startup_item(&run, car).unwrap();
     let (trailer_key, trailer_item) = startup_item(&run, trailer).unwrap();
     let (grip_key, grip) = grip_item(&run, &trailer_key);
+    // The Lada parks nose in at the garage workbench. Lift the car and the trailer onto an
+    // open deck.
+    let deck = super::car_types::insert_deck(&mut run, &car_key);
+    let ObjectKey::Generated(id) = &trailer_key else {
+        unreachable!("startup trailer")
+    };
+    let bodies = run
+        .stream
+        .structures
+        .iter()
+        .find(|s| &s.placement.id == id)
+        .expect("trailer structure")
+        .bodies
+        .clone();
+    for body in bodies {
+        run.physics.edit_body(body, |b| {
+            b.set_translation(
+                b.translation() + Vector::Y * super::car_types::DECK_HEIGHT,
+                true,
+            )
+        });
+    }
+    run.physics.refresh_queries();
+    tow(&mut run, &car_key, 1., DriveInput::default(), 0.);
     let lada = &reference.world.prototypes[run.vehicles[&car_key].prototype];
     let hitch = run
         .area
@@ -228,6 +252,8 @@ fn lada_tows_the_trailer_and_the_hitch_saves() {
     // Save and load: the grip returns to the car hitch.
     let snapshot = save(&run, &reference);
     let mut loaded = open(&reference, &snapshot);
+    let deck = loaded.stream.origin.local(deck);
+    loaded.physics.insert_box(deck, super::car_types::DECK);
     restore(&mut loaded, &reference, |l| {
         l.area
             .items

@@ -1013,17 +1013,16 @@ impl WorldStream {
                         .iter()
                         .find(|c| &c.source == source)
                         .unwrap();
-                    physics.edit_collider(*handle, |state| {
-                        state.set_enabled(
-                            complete
-                                && collider.enabled
-                                && crate::world::spawn_appearance::node_active(
-                                    prototype,
-                                    collider.node as usize,
-                                    &content.content.appearance,
-                                ),
-                        )
-                    });
+                    // The wheel slots keep mounted wheel shapes off.
+                    let enabled = complete
+                        && collider.enabled
+                        && !wheels.mounted_collider(*handle)
+                        && crate::world::spawn_appearance::node_active(
+                            prototype,
+                            collider.node as usize,
+                            &content.content.appearance,
+                        );
+                    physics.edit_collider(*handle, |state| state.set_enabled(enabled));
                 }
                 if !complete {
                     for body in &instance.bodies {

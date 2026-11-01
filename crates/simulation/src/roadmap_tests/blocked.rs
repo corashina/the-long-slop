@@ -9,6 +9,7 @@ use crate::world::stream::tests::car_types::{
     absolute, fill_fluids, hold, release_handbrake, running,
 };
 use crate::world::stream::tests::drive_out::{enter, park, place_car, road_points};
+use crate::world::stream::tests::garage_exit::open_door_and_look_out;
 use crate::world::stream::tests::kit::*;
 use rapier3d::math::Vector;
 
@@ -96,6 +97,16 @@ fn tp_sa1_fill_start_drive_return_save_reload() {
     run.physics.reset_preserving_wheels(&key, pose);
     run.physics.refresh_queries();
     park(&mut run, &reference, home_absolute);
+    // The driver parks on the handbrake.
+    frame_with(
+        &mut run,
+        &reference,
+        FrameInput {
+            player_pressed: player_keys::HANDBRAKE,
+            ..FrameInput::default()
+        },
+    );
+    assert!(run.vehicles[&key].handbrake, "the handbrake is on");
     seconds(&mut run, &reference, 3.);
     let (position, _) = absolute(&run, &key);
     assert!(
@@ -115,11 +126,113 @@ fn tp_sa1_fill_start_drive_return_save_reload() {
     };
     let before = fuel(&run);
     assert!(before > 1., "fuel left: {before}");
+    let speed = run.physics.snapshot(&key).speed_mps;
     let mut loaded = save_load(&run, &reference);
+    let (first, _) = absolute(&loaded, &key);
     seconds(&mut loaded, &reference, 2.);
     let (now, _) = absolute(&loaded, &key);
-    assert!(horizontal(now, position) < 0.1, "the car pose reloads");
+    assert!(
+        horizontal(now, position) < 0.1,
+        "the car pose reloads: moved {:.2} m, {:.2} m at load, speed at save {speed:.3} m/s, now {:.3} m/s",
+        horizontal(now, position),
+        horizontal(first, position),
+        loaded.physics.snapshot(&key).speed_mps
+    );
     assert!((fuel(&loaded) - before).abs() < 0.01, "the fuel reloads");
+}
+
+/// SA10. Source rigidbody sleep. The Lada drives on the road and parks: engine off, handbrake
+/// on. The driver gets out and drops the petrol can. The car and the can settle and sleep.
+#[test]
+#[ignore = "requires the installed source export"]
+fn tp_sa10_driven_lada_and_a_dropped_can_settle_and_sleep() {
+    let (reference, mut run) = load_garage();
+    let key = road_lada(&mut run, &reference);
+    drive(&mut run, &reference, &key, 20.);
+    // Short key taps until the engine stops. The first tap after the drive does not always turn
+    // the ignition off.
+    for _ in 0..5 {
+        frame_with(
+            &mut run,
+            &reference,
+            FrameInput {
+                held: keys::IGNITION,
+                pressed: keys::IGNITION,
+                ..FrameInput::default()
+            },
+        );
+        frame_with(
+            &mut run,
+            &reference,
+            FrameInput {
+                released: keys::IGNITION,
+                ..FrameInput::default()
+            },
+        );
+        if hold(&mut run, &reference, 0, 0, 0, 1., |run| !running(run, &key)) {
+            break;
+        }
+    }
+    assert!(!running(&run, &key), "the engine stops");
+    frame_with(
+        &mut run,
+        &reference,
+        FrameInput {
+            player_pressed: player_keys::HANDBRAKE,
+            ..FrameInput::default()
+        },
+    );
+    assert!(run.vehicles[&key].handbrake, "the handbrake is on");
+    assert!(
+        open_door_and_look_out(&mut run, &reference).is_some(),
+        "clear exit"
+    );
+    assert!(
+        run.area.player.try_exit(&mut run.physics),
+        "the driver gets out"
+    );
+    seconds(&mut run, &reference, 1.);
+    let can = reference
+        .tanks
+        .iter()
+        .find(|t| {
+            t.role == crate::reference::TankRole::Portable
+                && t.fluids.iter().any(|f| f.fluid_type == 0)
+        })
+        .expect("petrol can")
+        .item;
+    take(&mut run, &reference, can);
+    assert_eq!(
+        run.area
+            .interaction
+            .drop_held(&mut run.area.items, &mut run.physics),
+        Some(can),
+        "the can drops"
+    );
+    // The player walks away. A kinematic player body that touches the car keeps it awake.
+    let mut pose = run.area.player.body_pose(&run.physics);
+    let car = run.physics.snapshot(&key).pose.position;
+    let away = (Vector::from_array(pose.position) - Vector::from_array(car))
+        .with_y(0.)
+        .normalize_or_zero();
+    let at = Vector::from_array(car) + away * 6.;
+    pose.position = [at.x, pose.position[1] + 0.5, at.z];
+    run.area.player.recover(pose, &mut run.physics);
+    seconds(&mut run, &reference, 10.);
+    let bodies = &run.physics.rapier().bodies;
+    let chassis = &bodies[run.physics.chassis_handle(&key)];
+    assert!(
+        chassis.is_sleeping(),
+        "the parked Lada sleeps: velocity {:?} {:?}",
+        chassis.linvel(),
+        chassis.activation()
+    );
+    let body = &bodies[run.area.items.get(can).unwrap().body.unwrap()];
+    assert!(
+        body.is_sleeping(),
+        "the dropped can sleeps: speed {:.3} m/s",
+        body.linvel().length()
+    );
 }
 
 /// Positions of the limb targets that the body sends, relative to the player.
