@@ -598,7 +598,6 @@ fn tp_cp13_cp16_loot_tools_work_from_the_hand() {
                 assert_eq!(work, 0, "a worn brush stops working");
             }
         }
-        // Last, so the other checks run: the loot spray has no voice (FAIL in ROADMAP).
         assert!(sound > 0, "{name} plays its sound");
         // Drop the tool.
         super::weapons::drop_hand(&mut run);

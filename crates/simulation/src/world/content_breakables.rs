@@ -175,6 +175,7 @@ impl WorldStream {
             self.contents.active_revision(),
             items.membership_revision(),
             self.lamp_binding_revision,
+            self.structure_revision,
         ];
         if !self.breakables.rescan(scan) {
             return;
