@@ -291,6 +291,8 @@ enum Owner {
     HeatHaze,
     /// A washtriggerscript `particleOnDestroy`; the wash effect.
     Cobweb(usize),
+    /// A gib ParticleSystem of this item prototype; `Group::source` is its gib particle.
+    Gib(usize),
 }
 /// The particle record of one car group.
 fn car_particle(
@@ -689,6 +691,19 @@ fn sync_particles(
                 &mut materials,
             );
         }
+        for (prototype, item) in reference.0.item_prototypes.iter().enumerate() {
+            for (system, p) in item.behavior.gib_particles.iter().enumerate() {
+                add_group(
+                    &mut state,
+                    Owner::Gib(prototype),
+                    system,
+                    p,
+                    &lighting,
+                    &mut commands,
+                    &mut materials,
+                );
+            }
+        }
         add_group(
             &mut state,
             Owner::Exhale,
@@ -915,6 +930,11 @@ fn sync_particles(
             Owner::Exhale => &reference.0.small_items.exhale.particle,
             Owner::HeatHaze => &reference.0.small_items.heat_haze,
             Owner::Cobweb(effect) => &reference.0.small_items.wash_effects[effect].particle,
+            Owner::Gib(prototype) => {
+                &reference.0.item_prototypes[prototype]
+                    .behavior
+                    .gib_particles[g.source]
+            }
         };
         let (fluid, particles) = sim
             .particle_group(key(g.owner, g.source))
@@ -998,6 +1018,7 @@ fn key(owner: Owner, source: usize) -> ParticleGroupKey {
         Owner::Exhale => (ParticleGroupRow::EXHALE, 0, 0, 0),
         Owner::HeatHaze => (ParticleGroupRow::HEAT_HAZE, 0, 0, 0),
         Owner::Cobweb(effect) => (ParticleGroupRow::COBWEB, effect as u32, 0, 0),
+        Owner::Gib(prototype) => (ParticleGroupRow::GIB, prototype as u32, 0, 0),
     };
     ParticleGroupKey {
         kind,

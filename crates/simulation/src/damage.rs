@@ -6,6 +6,7 @@ use crate::world::{GeneratedId, TriggerRoles, UnityRandom};
 use rapier3d::prelude::{QueryFilter, RigidBodyHandle};
 use std::collections::VecDeque;
 
+pub mod gib_particles;
 pub mod gibs;
 
 /// Source breakablescript.velocityToMass.

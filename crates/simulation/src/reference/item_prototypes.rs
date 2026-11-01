@@ -257,6 +257,8 @@ pub struct PrototypeBehavior {
     pub gib: Option<GibReference>,
     /// gibscripts of gib pieces below the root. Gibs only.
     pub gib_pieces: Vec<GibPieceReference>,
+    /// ParticleSystems that play on awake when Break instantiates the gib. Gibs only.
+    pub gib_particles: Vec<super::ParticleReference>,
     /// Gib nodes with scaleDestroyScript. Gibs only.
     pub scale_destroy: Vec<NodeId>,
     pub clips: Vec<SourceId>,
@@ -469,6 +471,18 @@ impl ItemPrototype {
             }),
             "gib pieces",
         )?;
+        // The tumbleweed gib is particles only.
+        require(
+            !self.bodies.is_empty() || !b.gib_particles.is_empty(),
+            "gib without bodies or particles",
+        )?;
+        for (i, p) in b.gib_particles.iter().enumerate() {
+            require(
+                p.role == format!("gib_{}_{i}", self.id.0.path_id),
+                "gib particle role",
+            )?;
+            super::conditions::validate_particle(&self.source, p, m)?;
+        }
         let Some(gib) = &b.gib else {
             return require(generic, "box gib without gibscript");
         };
@@ -806,7 +820,10 @@ impl ItemPrototype {
                 && b.attack_target.is_some() == (item_id == Some(216))
                 && b.attack_trigger.is_some() == (item_id == Some(216))
                 && (item_id.is_none()
-                    || b.gib.is_none() && b.gib_pieces.is_empty() && b.scale_destroy.is_empty()),
+                    || b.gib.is_none()
+                        && b.gib_pieces.is_empty()
+                        && b.gib_particles.is_empty()
+                        && b.scale_destroy.is_empty()),
             "prototype behavior kinds",
         )?;
         match item_id {

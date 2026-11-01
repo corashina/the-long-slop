@@ -743,6 +743,7 @@ pub struct GarageRuntime {
     ambient: crate::audio::AmbientState,
     horror: crate::horror::HorrorSound,
     pub food_particles: crate::food_particles::FoodParticles,
+    pub gib_particles: crate::damage::gib_particles::GibParticles,
     pub weather: crate::weather::WeatherState,
     weather_bindings: weather::WeatherBindings,
     sky: crate::sky_traffic::SkyTraffic,
@@ -947,6 +948,10 @@ impl GarageRuntime {
             food_particles: crate::food_particles::FoodParticles::new(
                 &reference.survival.food_particles,
                 0x666f_6f64,
+            ),
+            gib_particles: crate::damage::gib_particles::GibParticles::new(
+                &reference.item_prototypes,
+                0x6769_6273,
             ),
             weather: crate::weather::WeatherState::new(&reference.weather, seed as u64),
             weather_bindings,
@@ -1793,6 +1798,8 @@ impl GarageRuntime {
         self.heat_haze
             .step(self.old_heat_haze, FIXED_DT, &self.physics);
         self.food_particles
+            .advance(FIXED_DT, self.stream.origin.offset, &self.physics);
+        self.gib_particles
             .advance(FIXED_DT, self.stream.origin.offset, &self.physics);
         self.advance_needs(reference, FIXED_DT, factors.need_scale);
         let was_sleeping = self.sleeping();
@@ -2697,6 +2704,12 @@ impl GarageRuntime {
             }
         }
         self.area.gibs.spawn(prototype, gibs, pose);
+        let origin = self.area.origin;
+        self.gib_particles.spawn(
+            prototype,
+            std::array::from_fn(|i| origin[i] + f64::from(pose.position[i])),
+            rapier3d::math::Rotation::from_array(pose.rotation),
+        );
     }
 
     /// Gib starts after the breaks of this step, then gib updates and removals.
