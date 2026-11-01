@@ -1052,7 +1052,7 @@ fn tp_cp5_cp6_cargo_locks_opens_and_saves() {
             .unwrap();
         let turn =
             rapier3d::math::Rotation::from_rotation_arc((far - end).with_y(0.).normalize(), out);
-        let target = (cap + out * 0.5).with_y(end.y);
+        let target = (cap + out * 1.5).with_y(end.y);
         for &(id, _) in &segments {
             let body = run.area.items.get(id).unwrap().body.unwrap();
             run.physics.edit_body(body, |b| {
@@ -1068,7 +1068,12 @@ fn tp_cp5_cp6_cargo_locks_opens_and_saves() {
         }
         run.physics.refresh_queries();
         seconds(&mut run, &reference, 1.);
-        stand_near(&mut run, &reference, cap.to_array(), 1.);
+        // Stand out beside the cap, clear of the car.
+        let mut pose = run.area.player.body_pose(&run.physics);
+        let at = cap + out * 1.;
+        pose.position = [at.x, pose.position[1], at.z];
+        run.area.player.recover(pose, &mut run.physics);
+        seconds(&mut run, &reference, 0.5);
     }
     take(&mut run, &reference, segment);
     let fill_aim = crate::interaction::ResolvedAim {
