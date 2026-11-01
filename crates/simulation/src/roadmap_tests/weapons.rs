@@ -410,21 +410,20 @@ fn melee(run: &mut GarageRuntime, reference: &ReferenceManifest, name: &str) -> 
         pose,
     )
     .unwrap()[pickup];
-    let point = run.area.items.get(weapon).unwrap().pose.position;
+    hold(run, reference, weapon);
+    weapon
+}
+
+/// Picks up `item` and puts it in the hand.
+pub(super) fn hold(run: &mut GarageRuntime, reference: &ReferenceManifest, item: ItemId) {
+    let point = run.area.items.get(item).unwrap().pose.position;
     let area = &mut run.area;
     area.interaction
-        .pickup_item(
-            weapon,
-            point,
-            &area.player,
-            &mut area.items,
-            &mut run.physics,
-        )
+        .pickup_item(item, point, &area.player, &mut area.items, &mut run.physics)
         .unwrap();
     area.sync_inventory();
     assert!(area.equip_carried(&mut run.physics).unwrap());
     seconds(run, reference, 0.5);
-    weapon
 }
 
 /// Gun root names of the export.
