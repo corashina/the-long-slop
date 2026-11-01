@@ -927,8 +927,58 @@ fn tp_wd17_a_hole_facing_down_leaks_a_tank_and_the_garage_water_tank() {
     }
 }
 
-/// Source `breakablescript.TryBreak` on the tumbleweed: a hard hit breaks it with its gib. Save
-/// and load: it stays gone.
+/// Live gib particles of item prototype `gib`.
+fn gib_particles(run: &GarageRuntime, gib: usize) -> usize {
+    run.gib_particles
+        .systems()
+        .filter(|(p, _, _)| *p == gib)
+        .map(|(_, _, particles)| particles.len())
+        .sum()
+}
+
+/// Spawns a tumbleweed 2 m above the player and waits until it binds its breakablescript.
+fn tumbleweed(run: &mut GarageRuntime, reference: &ReferenceManifest, prototype: usize) -> ItemId {
+    let mut pose = run.area.player.body_pose(&run.physics);
+    pose.position[1] += 2.;
+    pose.rotation = [0., 0., 0., 1.];
+    let weed = crate::starting_area::spawned::spawn_prototype(
+        reference,
+        &mut run.area,
+        &mut run.physics,
+        prototype,
+        pose,
+    )
+    .unwrap()[0];
+    seconds(run, reference, 2.);
+    weed
+}
+
+/// Runs `hit` each frame until `weed` breaks. The break plays a clip and its gib particles.
+fn break_weed(
+    run: &mut GarageRuntime,
+    weed: ItemId,
+    gib: usize,
+    how: &str,
+    mut hit: impl FnMut(&mut GarageRuntime, usize),
+) {
+    sounds(run, AudioKind::Break);
+    let (mut clips, mut emitted) = (0, false);
+    for i in 0..10 * PRESS_FRAMES {
+        if gone(run, weed) {
+            break;
+        }
+        let before = gib_particles(run, gib);
+        hit(run, i);
+        emitted |= gib_particles(run, gib) > before;
+        clips += sounds(run, AudioKind::Break);
+    }
+    assert!(gone(run, weed), "{how} breaks the tumbleweed");
+    assert!(clips >= 1, "{how}: the break plays a clip");
+    assert!(emitted, "{how}: the break plays the gib particles");
+}
+
+/// Source `breakablescript.Break` on the tumbleweed: a car hit, a shot and a melee swing break it.
+/// Its gib is a ParticleSystem only. Save and load: it stays gone.
 #[test]
 #[ignore = "requires the installed source export"]
 fn tp_wd20_a_hard_hit_breaks_a_tumbleweed_with_its_gib_and_it_stays_gone() {
@@ -939,18 +989,7 @@ fn tp_wd20_a_hard_hit_breaks_a_tumbleweed_with_its_gib_and_it_stays_gone() {
         .iter()
         .position(|p| p.item_id == Some(reference.weather.tumbleweeds.item_id))
         .expect("tumbleweed prototype");
-    let mut pose = run.area.player.body_pose(&run.physics);
-    pose.position[1] += 2.;
-    pose.rotation = [0., 0., 0., 1.];
-    let weed = crate::starting_area::spawned::spawn_prototype(
-        &reference,
-        &mut run.area,
-        &mut run.physics,
-        prototype,
-        pose,
-    )
-    .unwrap()[0];
-    seconds(&mut run, &reference, 2.);
+    let weed = tumbleweed(&mut run, &reference, prototype);
     let rules = &reference.breakables[run.stream.breakables.targets()[target(&run, weed)].record];
     let gib = rules.gib.as_ref().map(|g| {
         reference
@@ -960,17 +999,45 @@ fn tp_wd20_a_hard_hit_breaks_a_tumbleweed_with_its_gib_and_it_stays_gone() {
             .unwrap()
     });
     assert!(!rules.no_gib && gib.is_some(), "the tumbleweed has a gib");
-    let mut seen = Vec::new();
-    serials(&run, gib.unwrap(), &mut seen);
-    let before = seen.len();
-    drop_from(&mut run, weed, 10.);
-    for _ in 0..(3. / FIXED_DT) as usize {
-        frame(&mut run, &reference);
-        serials(&run, gib.unwrap(), &mut seen);
-    }
-    let most = seen.len();
-    assert!(!run.area.spawned.contains(weed), "the hit breaks it");
-    assert_eq!(most, before + 1, "the break spawns its gib once");
+    let gib = gib.unwrap();
+    assert!(
+        !reference.item_prototypes[gib]
+            .behavior
+            .gib_particles
+            .is_empty(),
+        "the export has the tumbleweed gib particles"
+    );
+    // The relative speed of a contact breaks it. A car hit is a contact with the chassis.
+    let key = run.vehicle.clone().expect("start car");
+    let chassis = *run.physics.rapier().bodies[run.physics.chassis_handle(&key)].position();
+    let side = chassis.rotation * Vector::X;
+    break_weed(&mut run, weed, gib, "a car hit", |run, i| {
+        if i == 0 {
+            place(run, weed, chassis.translation + side * 2.5);
+            let body = run.area.items.get(weed).unwrap().body.unwrap();
+            run.physics
+                .edit_body(body, |b| b.set_linvel(-side * 20., true));
+        }
+        frame(run, &reference);
+    });
+    let weed = tumbleweed(&mut run, &reference, prototype);
+    equip(&mut run, &reference, "Revolver");
+    break_weed(&mut run, weed, gib, "a revolver shot", |run, i| {
+        let at = view(run) * Vector::new(0., 0., -1.5);
+        place(run, weed, at);
+        press_frame(run, &reference, i, keys::PRIMARY, 0);
+    });
+    drop_hand(&mut run);
+    let weed = tumbleweed(&mut run, &reference, prototype);
+    let crowbar = melee(&mut run, &reference, "crowbar");
+    assert!(bound_weapon(&run, &reference, crowbar).contact.damage >= rules.health);
+    break_weed(&mut run, weed, gib, "a crowbar swing", |run, i| {
+        let at = melee_trigger(run, &reference, crowbar);
+        place(run, weed, at);
+        press_frame(run, &reference, i, keys::PRIMARY, 0);
+    });
+    // The weather spawns other tumbleweeds. A broken one does not come back.
+    let live = copies(&run, prototype);
     let loaded = save_load(&run, &reference);
-    assert_eq!(copies(&loaded, prototype), 0, "it stays gone");
+    assert_eq!(copies(&loaded, prototype), live, "it stays gone");
 }

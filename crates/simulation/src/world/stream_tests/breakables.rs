@@ -4,7 +4,6 @@ use super::kit::*;
 use super::*;
 use crate::damage::BreakKind;
 use crate::reference::ItemId;
-use crate::simulation::FIXED_DT;
 use rapier3d::math::Vector;
 
 /// Height above the rest pose. The drop speed adds to the fall from here.
@@ -21,15 +20,6 @@ fn drop_from(run: &mut GarageRuntime, item: ItemId, height: f32) {
         b.set_angvel(Vector::ZERO, true);
     });
     run.physics.refresh_queries();
-}
-
-/// Spawn serials of the gib prototype.
-fn gib_serials(run: &GarageRuntime, gib: usize, serials: &mut Vec<u32>) {
-    for spawned in run.area.spawned.iter() {
-        if spawned.prototype == gib && !serials.contains(&spawned.serial) {
-            serials.push(spawned.serial);
-        }
-    }
 }
 
 #[test]
@@ -100,44 +90,24 @@ fn tumbleweed_breaks_on_a_hard_drop_and_leaves_the_spawned_list() {
         .expect("tumbleweed prototype");
     let weed = spawn_near_player(&mut run, &reference, prototype);
     seconds(&mut run, &reference, 2.);
-    let record = run
-        .stream
-        .breakables
-        .targets()
-        .iter()
-        .find(|t| t.kind == BreakKind::Item(weed))
-        .expect("the spawned tumbleweed binds its breakablescript")
-        .record;
-    let gib = reference.breakables[record].gib.as_ref().map(|g| {
-        reference
-            .item_prototypes
+    assert!(
+        run.stream
+            .breakables
+            .targets()
             .iter()
-            .position(|p| &p.id == g)
-            .unwrap()
-    });
+            .any(|t| t.kind == BreakKind::Item(weed)),
+        "the spawned tumbleweed binds its breakablescript"
+    );
     assert!(
         run.area.spawned.contains(weed),
         "a soft landing keeps the weed"
     );
-    let mut serials = Vec::new();
-    if let Some(gib) = gib {
-        gib_serials(&run, gib, &mut serials);
-    }
-    let before = serials.len();
     drop_from(&mut run, weed, 10.);
-    for _ in 0..(3. / FIXED_DT) as usize {
-        frame(&mut run, &reference);
-        if let Some(gib) = gib {
-            gib_serials(&run, gib, &mut serials);
-        }
-    }
+    seconds(&mut run, &reference, 3.);
     assert!(
         !run.area.spawned.contains(weed),
         "the broken weed leaves the spawned list"
     );
-    if gib.is_some() {
-        assert_eq!(serials.len(), before + 1, "the break spawns its gib once");
-    }
 }
 
 #[test]

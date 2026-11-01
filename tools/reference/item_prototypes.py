@@ -72,6 +72,25 @@ def recover_gib(source, records, node_ids) -> tuple:
     return gib, pieces, scale_destroy
 
 
+def recover_gib_particles(source, root, records, output) -> list[dict]:
+    """ParticleSystems of a gib. Break instantiates the gib, and each system plays on awake once."""
+    from .particles import particle
+    result = []
+    for record in records:
+        for c in record['components']:
+            if c.type.name != 'ParticleSystem':
+                continue
+            d = source.read(c)
+            if not d['playOnAwake']:
+                continue
+            # A looping system plays until the gib goes. That is not audited.
+            if d['looping']:
+                raise ValueError(f'Gib particle loops: {key(c)}')
+            rate = d['EmissionModule']['rateOverTime']['scalar']
+            result.append(particle(source, c, f'gib_{root.path_id}_{len(result)}', rate, output, root))
+    return result
+
+
 def prepare_item_prototypes(source, roots):
     source.item_geometry_nodes = set()
     for root, _, name in selected(source):
@@ -156,7 +175,7 @@ def recover_item_prototypes(source, manifest, output) -> list[dict]:
             if target is None or target.type.name!=kind:raise ValueError(f'Invalid prototype {field}: {key(c)}')
             return target
         behavior={'pack':None,'ammo':None,'ammo_rules':None,'cigarette_prefab':None,'spawn':None,'breakable':None,'mount':None,
-            'melee':None,'attack_target':None,'attack_trigger':None,'gib':None,'gib_pieces':[],'scale_destroy':[],'clips':[],'contact_sound_source':None,'contact_clips':[]}
+            'melee':None,'attack_target':None,'attack_trigger':None,'gib':None,'gib_pieces':[],'gib_particles':[],'scale_destroy':[],'clips':[],'contact_sound_source':None,'contact_clips':[]}
         if item_id==74:
             c=component(source,root,'cigiscript');behavior.update(pack=source_id(c),ammo=source_id(component(source,root,'ammoscript')),
                 cigarette_prefab=source_id(link(c,'prefab','GameObject')))
@@ -179,6 +198,7 @@ def recover_item_prototypes(source, manifest, output) -> list[dict]:
             managed_evidence(source,['mainscript.PlayClipAtPoint(mainscript.M.meleeHitSounds[(int)hitType].a[num], V, mainscript.hitVolume[(int)hitType], mainscript.AudioPriorities[7]);'])
         elif item_id is None:
             behavior['gib'],behavior['gib_pieces'],behavior['scale_destroy']=recover_gib(source,records,{key(r['reader']):nodes[key(r['reader'])]['id'] for r in records})
+            behavior['gib_particles']=recover_gib_particles(source,root,records,output)
         for identity in [*behavior['clips'],*(c for group in behavior['contact_clips'] for c in group)]:
             c=source.get(identity['file'],identity['path_id'])
             if c.type.name!='AudioClip':raise ValueError('Invalid behavior clip')
@@ -212,8 +232,12 @@ def validate_gib(p, within) -> None:
     """gibscript and scaleDestroyScript links of a gib prototype. Other prototypes have none."""
     b=p['behavior'];gib=b['gib']
     if p['item_id'] is not None:
-        if gib is not None or b['gib_pieces'] or b['scale_destroy']:raise ValueError('Gib behavior outside gibs')
+        if gib is not None or b['gib_pieces'] or b['gib_particles'] or b['scale_destroy']:raise ValueError('Gib behavior outside gibs')
         return
+    # The tumbleweed gib is particles only.
+    if not p['bodies'] and not b['gib_particles']:raise ValueError('Gib without bodies or particles')
+    for i,particle in enumerate(b['gib_particles']):
+        if particle['role']!=f"gib_{p['id']['path_id']}_{i}":raise ValueError('Gib particle role')
     if len(set(b['scale_destroy']))!=len(b['scale_destroy']) or not all(within(n) for n in b['scale_destroy']):raise ValueError('Gib scaleDestroyScript owner')
     if any(g['life']<0 or not g['nodes'] or not all(within(n) and n!=p['root'] for n in [g['node'],*g['nodes']]) for g in b['gib_pieces']):raise ValueError('Gib piece owner or life')
     if gib is None:
@@ -314,6 +338,8 @@ def validate_item_prototypes(prototypes, manifest) -> None:
         if (p['consumable'] is not None)!=(p['item_id']==230):raise ValueError('Cigarette consumable owner')
         if p['consumable'] is not None:validate_cigarette(p['consumable'],p,manifest)
         validate_gib(p,within)
+        from .particles import validate_particle
+        for particle in p['behavior']['gib_particles']:validate_particle(particle,{t['id'] for t in manifest['lighting']['textures']})
         if (any(within(b['node']) for b in manifest['bodies']) or any(within(i['node']) for i in manifest['items'])
             or any(nodes.get(c['node'],{}).get('asset')==p['asset'] for c in manifest['colliders'])):
             raise ValueError('Prototype entered active tables')

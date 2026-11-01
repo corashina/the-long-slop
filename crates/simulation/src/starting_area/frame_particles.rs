@@ -100,6 +100,9 @@ impl GarageRuntime {
             let particles = self.food_particles.particles(source);
             out.owner(ParticleGroupRow::FOOD, 0, source, particles);
         }
+        for (prototype, source, particles) in self.gib_particles.systems() {
+            out.owner(ParticleGroupRow::GIB, prototype, source, particles);
+        }
         let cigarettes = &area.cigarettes;
         out.owner(
             ParticleGroupRow::EXHALE,

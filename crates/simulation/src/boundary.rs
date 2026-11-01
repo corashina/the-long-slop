@@ -847,6 +847,8 @@ impl ParticleGroupRow {
     pub const LOOT_TOOL: u32 = 16;
     /// fpscontroller `heatHaze`: the old particle heat haze.
     pub const HEAT_HAZE: u32 = 17;
+    /// A gib ParticleSystem: `a` is the item prototype, source is its gib particle.
+    pub const GIB: u32 = 18;
     /// Car systems in `a`.
     pub const CAR_EXHAUST: u32 = 0;
     /// Wheel effects: source is wheel * 8 + system (0 dust, 1.. grass).

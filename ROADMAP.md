@@ -54,7 +54,7 @@ Known failures on master e927770 (2026-10-31 headless run, export ee6554d), fix 
 - 32 of 169 ignored simulation tests failed in release. Debug overflows the stack. #KF removed 8 old tests that `roadmap_tests` covers, and changed 4 without a run. The lines below name each open one.
 - W15: `w02_long_trip_keeps_far_edits` is flaky. In 2 of 3 runs, 1 or 2 of 52 revisited building items moved.
 - WD3: `tp_wd3_each_melee_weapon_swings_with_each_key_and_breaks_a_bottle` needs the next export. The exporter now links melee weapons through `pickupable.melee` (#WD3), which adds the katana, fly swatter and leg. The test passes on ee6554d with those records added.
-- WD20: `tp_wd20_a_hard_hit_breaks_a_tumbleweed_with_its_gib_and_it_stays_gone`. The tumbleweed gib prototype holds only a particle system: no body, pickup or renderer. So the gib spawns no item, and the test finds none. The export has no gib particle data. `tumbleweed_breaks_on_a_hard_drop_and_leaves_the_spawned_list` fails the same way.
+- WD20: `tp_wd20_a_hard_hit_breaks_a_tumbleweed_with_its_gib_and_it_stays_gone` needs the next export. The exporter now exports gib ParticleSystems (`behavior.gib_particles`, #WD20). The tumbleweed gib is particles only. The test passes on ee6554d with a stand-in particle record.
 - Export field added (#PB): `player.seat_push_force` (source `fpscontroller.seatPushForce`). Export ee6554d lacks it, so re-export before the next run.
 - MC2, older tests: `garage_start_car_drives_in_automatic`, `car07_drives_in_forced_automatic` and `two_ladas_drive_save_and_load` pass (#MC2). `start_cars_drive_save_and_load`: StartCar01 (Car01Full) stalls in first gear with full gas: the rpm falls from 600 to 0 at torque 8 Nm. `lada_tows_the_trailer_and_the_hitch_saves`: the Lada now tows the trailer on a deck, but the load of the hitched trailer never gets ready (one structure replay stays pending).
 - Changed without a run, because the cloud has no export. Run them in the next test pass:
@@ -82,7 +82,3 @@ Prepare once:
 4. In that output, note the `w02_` bytes per km and the 5,000 km estimate. Above 200 MB, compact spawn boundaries.
 5. Claude runs the steps in Chrome with the test sandbox: see `tests/sandbox/README.md`. First check the sandbox itself: `spawn('Bus02Full', 10)` places a bus, and `teleport`, `building`, `spawn`, `hand`, `fill` and `cycle` work. Use `tests/sandbox/buses.js` for More cars steps 16-20.
 
-
-### Weapons and damage
-
-20. Hit a tumbleweed hard with the car, a shot and a melee swing. It breaks with its gib and sound. Save and load: it stays gone.
