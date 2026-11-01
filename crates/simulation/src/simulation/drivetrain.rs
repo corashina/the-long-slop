@@ -141,12 +141,12 @@ impl DrivetrainState {
                     self.auto_shift_to = gear;
                 }
                 self.gear = self.auto_shift_to;
-            } else if vehicle.gear_ratios[self.gear] != 0. && !pressed_forward {
-                self.gear = vehicle
-                    .gear_ratios
-                    .iter()
-                    .position(|ratio| *ratio == 0.)
-                    .expect("validated neutral");
+            } else if vehicle.gear_ratios[self.gear] != 0.
+                && !pressed_forward
+                // A gearbox without neutral, such as Bike01, keeps its gear.
+                && let Some(neutral) = vehicle.gear_ratios.iter().position(|ratio| *ratio == 0.)
+            {
+                self.gear = neutral;
             }
             if brake > 0. && throttle > 0. {
                 depression = depression.max(brake);

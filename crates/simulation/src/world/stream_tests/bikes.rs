@@ -1,5 +1,5 @@
-//! B12: the Bike01 copy kick starts at 10 m/s, then rides with balance on flat ground.
-//! The Bike03 copy pedals from rest, then kick starts its engine.
+//! B12: a balance bike without pedals (Bike01) kick starts at 10 m/s, then rides with balance on
+//! flat ground. A bike with pedals (Bike03) pedals from rest, then kick starts its engine.
 use super::kit::*;
 use super::*;
 use crate::player::SeatOwner;
@@ -9,27 +9,17 @@ use crate::world::ObjectKey;
 use crate::world::stream::content_seats::WorldSeatReference;
 use rapier3d::math::Vector;
 
-/// The reference with a `category` startup entry 30 m above `StartCar02`.
-/// The entry is the prototype that passes `pick` and has the most engines.
+/// The reference with a startup entry 30 m above `StartCar02`. The entry is the vehicle
+/// prototype that passes `pick` and has the most engines.
 /// Returns the startup ordinal and the vehicle record.
 fn bike_reference(
-    category: &str,
     pick: fn(&WorldVehicleReference) -> bool,
 ) -> (ReferenceManifest, u32, WorldVehicleReference) {
     let mut reference = reference();
     let world = std::sync::Arc::make_mut(&mut reference.world);
-    let category = world
-        .catalog
-        .categories
+    let prototype = world
+        .prototypes
         .iter()
-        .find(|c| c.name == category)
-        .expect("bike category");
-    let prototype = category
-        .items
-        .iter()
-        .flatten()
-        .filter_map(|&i| world.catalog.items[i as usize].prototype.as_ref())
-        .filter_map(|source| world.prototypes.iter().find(|p| &p.source == source))
         .filter(|p| p.vehicle.as_ref().is_some_and(pick))
         .max_by_key(|p| p.engines.len())
         .expect("bike prototype");
@@ -131,7 +121,8 @@ fn step(run: &mut GarageRuntime, reference: &ReferenceManifest, player_held: u16
 #[test]
 #[ignore = "requires the installed source export"]
 fn bike01_kick_starts_and_rides_upright() {
-    let (reference, ordinal, vehicle) = bike_reference("bike01", |v| v.balance.is_some());
+    let (reference, ordinal, vehicle) =
+        bike_reference(|v| v.balance.is_some() && v.pedals.is_none());
     let balance = vehicle.balance.unwrap();
     let (mut run, key) = seated_bike(&reference, ordinal, |s| s.driver);
 
@@ -173,7 +164,7 @@ fn bike01_kick_starts_and_rides_upright() {
 #[test]
 #[ignore = "requires the installed source export"]
 fn bike03_pedals_then_kick_starts() {
-    let (reference, ordinal, vehicle) = bike_reference("bike03", |v| v.pedals.is_some());
+    let (reference, ordinal, vehicle) = bike_reference(|v| v.pedals.is_some());
     let pedal_seat = vehicle.seats[vehicle.pedals.as_ref().unwrap().seat as usize]
         .source
         .clone();
