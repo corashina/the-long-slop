@@ -102,7 +102,6 @@ pub struct StorageLocks {
     prototype_flags: Vec<PrototypeStorageFlag>,
     /// Generated items that left the lock with their unbound owner. The stream unloads them.
     departing: Vec<ItemId>,
-    part_usables: Vec<(ItemId, ItemId)>,
     dont_mount: HashSet<ItemId>,
     /// Source `dontMountTillPickup`. A pick-up removes the item. Not saved.
     till_pickup: HashSet<ItemId>,
@@ -160,11 +159,6 @@ impl StorageLocks {
         );
         locks.prototype_volumes = prototype_volumes;
         locks.prototype_flags = reference.storage.prototype_flags.clone();
-        locks.part_usables = reference
-            .mechanisms
-            .iter()
-            .filter_map(|m| m.parent_item.map(|parent| (parent, m.item)))
-            .collect();
         locks
             .dont_mount
             .extend(flags.iter().filter(|f| f.dont_mount).map(|f| f.item));
@@ -188,7 +182,6 @@ impl StorageLocks {
             prototype_volumes: Vec::new(),
             prototype_flags: Vec::new(),
             departing: Vec::with_capacity(WORLD_CAPACITY),
-            part_usables: Vec::new(),
             dont_mount: HashSet::with_capacity(items + WORLD_CAPACITY),
             till_pickup: HashSet::with_capacity(items + WORLD_CAPACITY),
             drop_times: HashMap::with_capacity(items + WORLD_CAPACITY),
@@ -403,24 +396,20 @@ impl StorageLocks {
     pub fn picked_up(&mut self, item: ItemId) {
         self.till_pickup.remove(&item);
     }
-    fn gates_closed(
-        volume: &Volume,
-        parts: &PartAttachments,
-        mechanisms: &MechanismState,
-        part_usables: &[(ItemId, ItemId)],
-    ) -> bool {
+    /// The part slots that gate bound volume `volume`. Each must hold a closed part.
+    pub fn gate_slots(&self, volume: u16) -> &[PartSlotId] {
+        &self.volumes[volume as usize].slots
+    }
+    fn gates_closed(volume: &Volume, parts: &PartAttachments, mechanisms: &MechanismState) -> bool {
         let open = |usable: ItemId| {
             mechanisms
                 .value(usable, false)
                 .is_some_and(|value| value > 0.1)
         };
         volume.slots.iter().all(|slot| {
-            parts.slot_item(*slot).is_some_and(|item| {
-                part_usables
-                    .iter()
-                    .find(|(part, _)| *part == item)
-                    .is_none_or(|(_, usable)| !open(*usable))
-            })
+            parts
+                .slot_item(*slot)
+                .is_some_and(|item| mechanisms.part_usable(item).is_none_or(|u| !open(u)))
         }) && !volume.usables.iter().any(|usable| open(*usable))
     }
     /// Source `CanStore` at setting 2, with owner presence.
@@ -807,7 +796,7 @@ impl StorageLocks {
     }
     fn set_gates(&mut self, parts: &PartAttachments, mechanisms: &MechanismState) {
         for volume in &mut self.volumes {
-            volume.gates_closed = Self::gates_closed(volume, parts, mechanisms, &self.part_usables);
+            volume.gates_closed = Self::gates_closed(volume, parts, mechanisms);
         }
     }
     /// Source `StartFreeze` of volumes that bound after loading. `QuickFreeze` ignores `onlyManual`.
@@ -829,7 +818,7 @@ impl StorageLocks {
             if volume.startup >= START_PASSES {
                 continue;
             }
-            volume.gates_closed = Self::gates_closed(volume, parts, mechanisms, &self.part_usables);
+            volume.gates_closed = Self::gates_closed(volume, parts, mechanisms);
             // The first pass scans twice: QuickFreeze(_prescan: true).
             if volume.startup == START_PASSES - 1 {
                 Self::scan_volume(volume, items, physics, self.mount_mask);
