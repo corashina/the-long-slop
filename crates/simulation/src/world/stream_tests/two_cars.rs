@@ -146,7 +146,10 @@ fn two_ladas_drive_save_and_load() {
     seconds(&mut run, &reference, 1.);
 
     // Different gear and fuel per copy.
-    for (key, gear, spilled) in [(&a, 2, 5.), (&b, 3, 10.)] {
+    // The start Lada has only a few liters. Spill a different share per copy.
+    for (key, gear, share) in [(&a, 2, 0.25), (&b, 3, 0.5)] {
+        let spilled = fuel(&run, key) * share;
+        assert!(spilled > 0., "{key:?} has fuel");
         run.vehicles
             .get_mut(key)
             .unwrap()
