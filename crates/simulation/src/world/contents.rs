@@ -1114,6 +1114,10 @@ impl SourceContents {
             .map(|p| (p, false))
             .chain(replays.iter().map(|p| (p, true)))
         {
+            // As `advance`: a replay root discovers through its replay cursor only.
+            if !replay && replays.iter().any(|root| root.id == parent.id) {
+                continue;
+            }
             if !parent.id.children.is_empty()
                 && self
                     .rules
