@@ -1,17 +1,12 @@
-//! X02 part 2: every melee weapon swings. A katana breaks a bottle. Only a weapon with
-//! `shovel_speed` digs: the shovel lifts a buried item, the crowbar does not. A `hurt_food`
-//! weapon cuts food, and the pieces reload with their bites.
+//! X02 part 2: melee helpers. A `hurt_food` weapon cuts food, and the pieces reload with their
+//! bites. `roadmap_tests::weapons` swings each weapon, breaks a bottle and digs.
 use super::kit::*;
 use super::*;
-use crate::damage::BreakKind;
-use crate::interaction::items::ItemLocation;
 use crate::reference::{ItemId, MeleeWeaponReference};
 use crate::simulation::{FIXED_DT, FrameInput, keys};
 use crate::vehicle::to_rapier;
 use rapier3d::math::{Pose, Vector};
 
-/// Crowbar prefab name parts.
-pub(crate) const CROWBAR: &[&str] = &["crowbar", "feszito"];
 /// Frames from one swing press to the next.
 pub(crate) const SWING_FRAMES: usize = 50;
 
@@ -133,88 +128,6 @@ pub(crate) fn place(run: &mut GarageRuntime, item: ItemId, at: Vector) {
         b.set_angvel(Vector::ZERO, true);
     });
     run.physics.refresh_queries();
-}
-
-#[test]
-#[ignore = "requires the installed source export"]
-fn katana_swing_breaks_a_bottle() {
-    let (reference, mut run) = load_garage();
-    seconds(&mut run, &reference, 1.);
-    let records = &reference.breakables;
-    let (target, bottle) = run
-        .stream
-        .breakables
-        .targets()
-        .iter()
-        .enumerate()
-        .filter_map(|(i, t)| match t.kind {
-            BreakKind::Item(item) => Some((i, t.record, item)),
-            _ => None,
-        })
-        .filter(|(_, record, item)| {
-            let r = &records[*record];
-            r.source != reference.acquisition.r#box.breakable
-                && !(r.no_destroy || r.no_collider)
-                && r.health <= 6.
-                && run
-                    .area
-                    .items
-                    .get(*item)
-                    .is_some_and(|s| s.location == ItemLocation::World && !s.buried)
-        })
-        .map(|(i, _, item)| (i, item))
-        .next()
-        .expect("bottle near the start");
-    let katana = weapon(&reference, &["katana"]);
-    let item = equip(&mut run, &reference, katana);
-    let w = run.area.interaction.melee.weapon_for(&katana.pickup);
-    assert!(w.is_some() && reference.melee.weapons[w.unwrap()].pickup == katana.pickup);
-    for i in 0..10 * SWING_FRAMES {
-        if run.stream.breakables.targets()[target].destroyed {
-            break;
-        }
-        let at = trigger(&run, &reference, katana, item).translation;
-        place(&mut run, bottle, at);
-        swing_frame(&mut run, &reference, i);
-        frame(&mut run, &reference);
-    }
-    assert!(
-        run.stream.breakables.targets()[target].destroyed,
-        "the katana breaks the bottle"
-    );
-}
-
-/// Swings the shovel or the crowbar at a buried crowbar copy. True when the copy rises.
-fn digs(shovel: bool) -> bool {
-    let (reference, mut run) = load_garage();
-    seconds(&mut run, &reference, 1.);
-    let w = if shovel {
-        reference.melee.shovel(&reference).unwrap()
-    } else {
-        weapon(&reference, CROWBAR)
-    };
-    let item = equip(&mut run, &reference, w);
-    let target = spawn(&mut run, &reference, weapon(&reference, CROWBAR));
-    crate::interaction::buried::bury(target, &mut run.area.items, &mut run.physics);
-    for i in 0..4 * SWING_FRAMES {
-        let at = trigger(&run, &reference, w, item).translation;
-        place(&mut run, target, at);
-        swing_frame(&mut run, &reference, i);
-        let body = run.area.items.get(target).unwrap().body.unwrap();
-        if run.physics.rapier().bodies[body].position().translation.y > at.y + 1e-5 {
-            return true;
-        }
-        assert!(run.area.items.get(target).unwrap().buried);
-        frame(&mut run, &reference);
-    }
-    false
-}
-
-#[test]
-#[ignore = "requires the installed source export"]
-fn crowbar_hit_does_not_lift_a_buried_item() {
-    assert!(digs(true), "the shovel digs");
-    assert!(!digs(false), "the crowbar does not dig");
 }
 
 /// Remaining bites of each live food piece: the starter food and runtime copies.

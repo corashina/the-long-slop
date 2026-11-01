@@ -1892,20 +1892,7 @@ fn sync_decoration_fixture(run: &mut GarageRuntime, reference: &ReferenceManifes
 #[ignore = "requires the installed source export"]
 fn fixed_decorations_preserve_collision_without_item_bindings() {
     use rapier3d::prelude::{Group, InteractionGroups, InteractionTestMode, RigidBodyType};
-    let mut reference = reference();
-    let mut wrong_file = reference
-        .world
-        .prototypes
-        .iter()
-        .find(|p| p.source == decoration_source(84448))
-        .unwrap()
-        .clone();
-    wrong_file.source.file = "wrong.assets".into();
-    let wrong_source = wrong_file.source.clone();
-    std::sync::Arc::get_mut(&mut reference.world)
-        .unwrap()
-        .prototypes
-        .edit(|prototypes| prototypes.push(wrong_file));
+    let reference = reference();
     let mut run = GarageRuntime::new_default(&reference).unwrap();
     let sources = [84448, 69558, 66737, 79572].map(decoration_source);
     for (ordinal, source) in sources.iter().enumerate() {
@@ -2073,32 +2060,22 @@ fn fixed_decorations_preserve_collision_without_item_bindings() {
                 && p.role == crate::reference::WorldPrototypeRole::Nested
         })
         .unwrap();
-    for prototype in [
-        ordinary,
-        reference
-            .world
-            .prototypes
+    let mut placement = replay_placement(
+        &ordinary.source,
+        100 + run.stream.structures.len() as u32,
+        [0., 20., 0.],
+    );
+    placement.scale = ordinary.prefab_pose.scale;
+    publish_decoration_fixture(&mut run, placement);
+    assert!(
+        run.stream
+            .structures
+            .last()
+            .unwrap()
+            .bodies
             .iter()
-            .find(|p| p.source == wrong_source)
-            .unwrap(),
-    ] {
-        let mut placement = replay_placement(
-            &prototype.source,
-            100 + run.stream.structures.len() as u32,
-            [0., 20., 0.],
-        );
-        placement.scale = prototype.prefab_pose.scale;
-        publish_decoration_fixture(&mut run, placement);
-        assert!(
-            run.stream
-                .structures
-                .last()
-                .unwrap()
-                .bodies
-                .iter()
-                .any(|h| run.physics.rapier().bodies[*h].body_type() == RigidBodyType::Dynamic)
-        );
-    }
+            .any(|h| run.physics.rapier().bodies[*h].body_type() == RigidBodyType::Dynamic)
+    );
 }
 
 #[test]

@@ -452,6 +452,56 @@ fn tp_w11_shovel_swings_hits_and_pushes() {
     assert!(moved > 0.05, "the hit pushes the item: {moved} m");
 }
 
+/// Swings weapon `w`, item `item` in the hand, at a buried shovel copy. True when the copy comes up.
+fn digs_up(
+    run: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    w: &crate::reference::MeleeWeaponReference,
+    item: crate::reference::ItemId,
+) -> bool {
+    use crate::world::stream::tests::melee::{SWING_FRAMES, place, spawn, swing_frame, trigger};
+    let target = spawn(run, reference, reference.melee.shovel(reference).unwrap());
+    seconds(run, reference, 1.);
+    crate::interaction::buried::bury(target, &mut run.area.items, &mut run.physics);
+    for i in 0..4 * SWING_FRAMES {
+        let at = trigger(run, reference, w, item).translation;
+        place(run, target, at);
+        swing_frame(run, reference, i);
+        frame(run, reference);
+        if !run.area.items.get(target).unwrap().buried {
+            return true;
+        }
+    }
+    false
+}
+
+/// W12. Source `meleeweaponscript.Update`: only a weapon with `shovelSpeed` lifts a buried item.
+/// The shovel digs a buried shovel copy up. A crowbar hit leaves it buried.
+#[test]
+#[ignore = "requires the installed source export"]
+fn tp_w12_a_crowbar_hit_does_not_dig_up_a_buried_item() {
+    use crate::world::stream::tests::melee::{equip, weapon};
+    let (reference, mut run) = load_garage();
+    seconds(&mut run, &reference, 1.);
+    let shovel = reference.melee.shovel(&reference).unwrap();
+    let item = equip(&mut run, &reference, shovel);
+    assert!(
+        digs_up(&mut run, &reference, shovel, item),
+        "the shovel digs"
+    );
+    super::weapons::drop_hand(&mut run);
+    seconds(&mut run, &reference, 0.2);
+    // The crowbar is a world prototype only. The sandbox places it.
+    let crowbar = weapon(&reference, &["crowbar", "feszito"]);
+    assert_eq!(crowbar.shovel_speed, 0.);
+    let item = super::weapons::spawn(&mut run, &reference, "crowbar");
+    super::weapons::hold(&mut run, &reference, item);
+    assert!(
+        !digs_up(&mut run, &reference, crowbar, item),
+        "the crowbar does not dig"
+    );
+}
+
 /// W12. Source `tosaveitemscript.UpdBuried`, `IsBuriedRay`, `UnBury`; `pickupable.CanPickup`
 /// refuses `IsBuried`. The save keeps `buried`.
 #[test]

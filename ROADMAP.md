@@ -54,7 +54,7 @@ Known failures on master e927770 (2026-10-31 headless run, export ee6554d), fix 
 - K2 (browser): Looking down shows hollow shirt sleeves, floating hands and hollow pant legs. It also shows at normal pitch while walking.
 - K4 (browser): First page load can stall at the start of object loading with dependency staging full (7.7/7.8 MiB). A reload clears it.
 - K5 (browser): In game, pause > Load > Load last once stayed on "Loading..." for over 6 minutes, with no console messages. The simulation and the save bridge finish the load (`tp_k5_s1_a_stored_save_starts_the_session_and_its_restore_finishes`), so the hang is in the browser.
-- 32 of 169 ignored simulation tests fail in release. Debug overflows the stack. The lines below name each one.
+- 32 of 169 ignored simulation tests failed in release. Debug overflows the stack. #KF removed 8 old tests that `roadmap_tests` covers, and changed 4 without a run. The lines below name each open one.
 - MC2 on the road: `tp_sa1_fill_start_drive_return_save_reload`. The Lada on the road, engine running in gear 2 at 2427 rpm, moves 0 m. MC2 is not only the garage floor.
 - W15: `w02_long_trip_keeps_far_edits` is flaky. In 2 of 3 runs, 1 or 2 of 52 revisited building items moved.
 - WD19: `tp_wd19_cactus_breaks_once_and_stays`. A car hit, a shot and a blast break cacti once, with one gib each, and they stay. After an 8 km move the broken cactus is still bound, so its area does not stream in again.
@@ -66,11 +66,13 @@ Known failures on master e927770 (2026-10-31 headless run, export ee6554d), fix 
 - WD20: `tp_wd20_a_hard_hit_breaks_a_tumbleweed_with_its_gib_and_it_stays_gone`. The tumbleweed gib prototype holds only a particle system: no body, pickup or renderer. So the gib spawns no item, and the test finds none. The export has no gib particle data. `tumbleweed_breaks_on_a_hard_drop_and_leaves_the_spawned_list` fails the same way.
 - MC2, older tests: `garage_start_car_drives_in_automatic`, `car07_drives_in_forced_automatic`, `start_cars_drive_save_and_load`, `two_ladas_drive_save_and_load`, `lada_tows_the_trailer_and_the_hitch_saves`. The car or trailer does not move.
 - BL, older test: `start_car_driver_exits_in_garage` finds no clear exit.
-- Stale test data: these tests do not find their fixture near the start (bottle, lamp trigger, buried item, natural item, bike prototype): `bottle_breaks_on_a_hard_drop_once_and_stays_removed_after_reload`, `shovel_broken_lamp_stays_broken_after_reload`, `revolver_shot_breaks_a_bottle`, `katana_swing_breaks_a_bottle`, `shotgun_pellets_push_an_item`, `x02_leftovers_smg_unload_drops_the_magazine`, `crowbar_hit_does_not_lift_a_buried_item`, `roadside_possession_survives_owner_retirement_without_duplicate_spawn`, `bike03_pedals_then_kick_starts`.
-- `bike01_kick_starts_and_rides_upright`: panic "validated neutral" at `simulation/drivetrain.rs:149`.
-- `a_blast_sets_off_a_second_tank`: the second tank is not removed. `a_shot_tank_explodes_and_breaks_a_nearby_bottle`: the blast does not break the bottle. The `tp_wd14` and `tp_cc14` tests with the full 20 L can pass.
+- Changed without a run, because the cloud has no export. Run them in the next test pass:
+  - `bike01_kick_starts_and_rides_upright`: automatic gears in a gearbox without neutral now keep the gear. Before: panic "validated neutral".
+  - `bike03_pedals_then_kick_starts`: it now takes any vehicle with pedals. Before: no bike prototype.
+  - `tp_w12_a_crowbar_hit_does_not_dig_up_a_buried_item`: it replaces `crowbar_hit_does_not_lift_a_buried_item` and uses the world prototype crowbar.
+  - `fixed_decorations_preserve_collision_without_item_bindings`: the wrong-file prototype is gone. It had no source rule.
+- Stale test data: `roadside_possession_survives_owner_retirement_without_duplicate_spawn` finds no natural right-hand item at the building.
 - `fixed_decoration_possessions_restore_on_item_path`: the restored item is not an interaction part.
-- `fixed_decorations_preserve_collision_without_item_bindings`: "Missing source rule wrong.assets:84448".
 - `road_building_cable_is_in_building_appearance`: no building cables.
 - `required_publication_reaches_ready_and_withholds_dependencies`: the world is not supported.
 
