@@ -1450,7 +1450,8 @@ impl CleaningTools {
             signal.pose = from_rapier(&Pose::from_parts(emitter, rotation));
             signal.color = color;
             signal.doing_work = spray.painted;
-            signal.playing = emitting && b.voice.is_some();
+            // A fixed spray plays its voice. A loot spray plays its prototype `sound` loop.
+            signal.playing = emitting;
             signal.voice_gain = if emitting {
                 state.valve * b.max_volume
             } else {

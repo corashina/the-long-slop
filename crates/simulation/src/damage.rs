@@ -113,7 +113,7 @@ pub struct Breakables {
     /// Lamp and prop colliders and their target.
     colliders: Vec<(ColliderHandle, usize)>,
     queue: VecDeque<usize>,
-    scan: Option<[u64; 4]>,
+    scan: Option<[u64; 5]>,
     /// UnityEngine.Random draws of breakablescript.Break.
     random: UnityRandom,
 }
@@ -304,7 +304,7 @@ impl Breakables {
         &mut self.random
     }
     /// Stores the binding scan. False when it did not change.
-    pub fn rescan(&mut self, scan: [u64; 4]) -> bool {
+    pub fn rescan(&mut self, scan: [u64; 5]) -> bool {
         if self.scan == Some(scan) {
             return false;
         }
