@@ -26,7 +26,6 @@ The starting area, car parts, world and more cars sections are done. Only their 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X03 | Creatures | XL | Ground UFO, EMP and green-eyed evil rabbits, human monster (attacks hurt the player), breakablescript `DamageFrom` for AI. Rabbits do not yet sense the player hum. |
-| MC2 | Garage car does not move | M | The runtime drive tests never released the parked handbrake (source `carscript.BhandBrake`). The rear wheels at 3 rpm with the engine at 2427 rpm point to its rear wheel lock. Fixed in code (#MC2): the tests press the handbrake key first. Not run yet. If a test still does not move, `garage_start_car_drives_in_automatic` names each chassis collider and marks a solid one below the wheels. |
 | X06c | Building reflection probes | S | Car probes are live. Check the original building prefabs for realtime `ReflectionProbe`s. Export any as prototype probes. The live probe slots then take them. |
 
 ### Multiplayer
@@ -53,18 +52,14 @@ Known failures on master e927770 (2026-10-31 headless run, export ee6554d), fix 
 - K4 (browser): First page load can stall at the start of object loading with dependency staging full (7.7/7.8 MiB). A reload clears it.
 - K5 (browser): In game, pause > Load > Load last once stayed on "Loading..." for over 6 minutes, with no console messages. The simulation and the save bridge finish the load (`tp_k5_s1_a_stored_save_starts_the_session_and_its_restore_finishes`), so the hang is in the browser.
 - 32 of 169 ignored simulation tests failed in release. Debug overflows the stack. #KF removed 8 old tests that `roadmap_tests` covers, and changed 4 without a run. The lines below name each open one.
-- MC2 on the road: `tp_sa1_fill_start_drive_return_save_reload`. The Lada on the road, engine running in gear 2 at 2427 rpm, moved 0 m. The test did not release the handbrake. Fixed in code (#MC2): the test releases it. Not run yet: run it after the next export.
 - W15: `w02_long_trip_keeps_far_edits` is flaky. In 2 of 3 runs, 1 or 2 of 52 revisited building items moved.
 - WD19: `tp_wd19_cactus_breaks_once_and_stays`. A car hit, a shot and a blast break cacti once, with one gib each, and they stay. After an 8 km move the broken cactus stayed bound, because a structure unload did not rescan the breakables. Fixed in code (#WD): the rescan now follows structure changes. Not run yet: run it after the next export.
 - CP15: `tp_cp13_cp16_loot_tools_work_from_the_hand`. The loot spray played no sound: its signal waited for a fixed-tool `voice`, which a prototype tool does not have. Fixed in code (#WD): an emitting spray plays its prototype `sound` loop. Not run yet: run it after the next export.
 - WD2: `tp_wd2_shovel_breaks_a_building_lamp`. The shovel breaks the lamps and they stay dark. Save and load at the Mansion: the restore stays pending.
-- CP5, CP6: `r05_cargo_locks_in_trunk`. The driver cannot exit the Lada in the garage (BL), so the cargo checks do not run.
-- CP7: `tp_cp7_turned_wheels_stay_after_save_and_load`. The steer was 0 because the test waited 1 s with the driver seated, and a seated driver without steer keys centers the wheels. Fixed in code (#MC2): the player leaves the seat before the wait. Not run yet: run it after the next export.
 - WD3: `tp_wd3_each_melee_weapon_swings_with_each_key_and_breaks_a_bottle`. The export has melee weapon records only for the crowbar and the shovel. The katana, fly swatter and leg have none. The exporter skips a `meleeweaponscript` without a pickupable (the leg kick), and finds weapons only in selected world prototypes. Check the katana and fly swatter exclusion reasons in the export catalog.
 - WD20: `tp_wd20_a_hard_hit_breaks_a_tumbleweed_with_its_gib_and_it_stays_gone`. The tumbleweed gib prototype holds only a particle system: no body, pickup or renderer. So the gib spawns no item, and the test finds none. The export has no gib particle data. `tumbleweed_breaks_on_a_hard_drop_and_leaves_the_spawned_list` fails the same way.
 - No test yet (needs an export to write and run): CP2 loot radiator fan, PB6 doors and push from a seat, PB8 rub and wash, WD8 reload from carried ammo.
-- MC2, older tests: `garage_start_car_drives_in_automatic`, `car07_drives_in_forced_automatic` and `start_cars_drive_save_and_load` now release the handbrake (#MC2). Not run yet. `two_ladas_drive_save_and_load` and `lada_tows_the_trailer_and_the_hitch_saves` apply torque with no handbrake, so the handbrake does not explain them. If they still fail, read the chassis collider names from `garage_start_car_drives_in_automatic`.
-- BL, older test: `start_car_driver_exits_in_garage` finds no clear exit.
+- MC2, older tests: `garage_start_car_drives_in_automatic`, `car07_drives_in_forced_automatic` and `two_ladas_drive_save_and_load` pass (#MC2). `start_cars_drive_save_and_load`: StartCar01 (Car01Full) stalls in first gear with full gas: the rpm falls from 600 to 0 at torque 8 Nm. `lada_tows_the_trailer_and_the_hitch_saves`: the Lada now tows the trailer on a deck, but the load of the hitched trailer never gets ready (one structure replay stays pending).
 - Changed without a run, because the cloud has no export. Run them in the next test pass:
   - `bike01_kick_starts_and_rides_upright`: automatic gears in a gearbox without neutral now keep the gear. Before: panic "validated neutral".
   - `bike03_pedals_then_kick_starts`: it now takes any vehicle with pedals. Before: no bike prototype.
@@ -79,8 +74,6 @@ Blocked checks. Each waits for the fix of its bug. Run them in the next build's 
 
 #### MC2: the Lada does not drive
 
-- SA1: Play the garage loop in the browser: repair, fill, start, drive out, return, save, reload.
-- SA10: Drive the Lada and check that parked cars and dropped items still settle and sleep.
 - CP4: Siphon hose: first check the garage hose spawns clear of the walls. Attach it to the Lada tank and a can. Siphon by height, drain with LMB, coil with R, store it, tear it off by driving.
 - W15: Drop an item, drive about 10 km out and back, save and reload. The item stays where it was dropped.
 
