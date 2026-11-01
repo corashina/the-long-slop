@@ -139,6 +139,26 @@ pub(crate) fn hold(
     false
 }
 
+/// The seated driver releases the handbrake with its key, as a player does before driving.
+/// Source `carscript.BhandBrake`: a parked car can start with the handbrake on.
+pub(crate) fn release_handbrake(
+    run: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    key: &ObjectKey,
+) {
+    if run.vehicles[key].handbrake {
+        frame_with(
+            run,
+            reference,
+            FrameInput {
+                player_pressed: player_keys::HANDBRAKE,
+                ..FrameInput::default()
+            },
+        );
+    }
+    assert!(!run.vehicles[key].handbrake, "the handbrake is off");
+}
+
 /// Moves the start car onto a deck `DECK_HEIGHT` above its start pose.
 /// Returns the absolute deck center.
 fn insert_deck(run: &mut GarageRuntime, key: &ObjectKey) -> [f64; 3] {
@@ -221,6 +241,7 @@ fn start_car_drives_saves_and_loads(reference: &ReferenceManifest, field: &str) 
     );
     seconds(&mut run, reference, 1.);
     assert!(running(&run, &key), "{field}: engine idles");
+    release_handbrake(&mut run, reference, &key);
 
     // First gear, then throttle for about 10 m.
     hold(&mut run, reference, 0, 0, keys::GEAR_1, 0.2, |_| false);
@@ -399,6 +420,7 @@ fn car07_drives_in_forced_automatic() {
     };
     frame_with(&mut run, &reference, released);
     seconds(&mut run, &reference, 1.);
+    release_handbrake(&mut run, &reference, &key);
 
     // Gears R, N, 2.5, 1.68, 1.0: throttle alone selects first and shifts up.
     let ratios =
@@ -454,6 +476,7 @@ fn garage_start_car_drives_in_automatic() {
     };
     frame_with(&mut run, &reference, released);
     seconds(&mut run, &reference, 1.);
+    release_handbrake(&mut run, &reference, &key);
     let state = |run: &GarageRuntime| {
         let wheels: Vec<_> = (0..run.physics.wheel_contacts(&key).count())
             .map(|i| run.physics.wheel_motion(&key, i))
@@ -570,8 +593,56 @@ fn garage_start_car_drives_in_automatic() {
                 );
             }
         }
+        // MC2: name each chassis collider. A solid one below the wheel bottoms drags on the ground.
+        let wheel_bottom = run
+            .physics
+            .wheel_centers(&key)
+            .unwrap()
+            .map(|center| center.y)
+            .fold(f32::MAX, f32::min)
+            - 0.3;
         for &handle in body.colliders() {
             let c = &world.colliders[handle];
+            let local = c
+                .position_wrt_parent()
+                .copied()
+                .unwrap_or(rapier3d::math::Pose::IDENTITY);
+            let body_aabb = c.shape().compute_aabb(&local);
+            let origin = run.stream.structures.iter().find_map(|instance| {
+                let (source, _) = instance.colliders.iter().find(|(_, h)| *h == handle)?;
+                let prototype = reference
+                    .world
+                    .prototypes
+                    .iter()
+                    .find(|p| p.source == instance.placement.prototype)?;
+                let record = prototype.colliders.iter().find(|r| &r.source == source)?;
+                let node = &prototype.nodes[record.node as usize];
+                Some(format!(
+                    "prototype {:?} collider {}:{} node {} layer {} body {:?}",
+                    instance.placement.id,
+                    source.file,
+                    source.path_id,
+                    node.name,
+                    node.layer,
+                    record.body,
+                ))
+            });
+            let item = ((c.user_data & u32::MAX as u128) as u32)
+                .checked_sub(1)
+                .map(ItemId)
+                .map(|id| format!("item {id:?} {:?}", run.area.items.name(id)));
+            eprintln!(
+                "chassis collider {handle:?} {} {}: body aabb {:?}..{:?}{}",
+                origin.as_deref().unwrap_or("no prototype collider"),
+                item.as_deref().unwrap_or("no item"),
+                body_aabb.mins,
+                body_aabb.maxs,
+                if !c.is_sensor() && c.is_enabled() && body_aabb.mins.y < wheel_bottom {
+                    " BELOW THE WHEELS"
+                } else {
+                    ""
+                },
+            );
             let aabb = c.compute_aabb();
             eprintln!(
                 "chassis collider {handle:?} sensor {} enabled {} groups {:#x}/{:#x} solver {:#x}/{:#x} user {:#x} aabb {:?}..{:?} shape {:?}",
