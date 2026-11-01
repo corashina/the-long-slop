@@ -349,13 +349,10 @@ fn tp_cp7_turned_wheels_stay_after_save_and_load() {
     use crate::simulation::{FrameInput, keys};
     let (reference, mut run) = load_garage();
     seconds(&mut run, &reference, 1.);
+    let on_foot = run.area.player.body_pose(&run.physics);
     act(&mut run, &reference, r#"{"action":"seat","seat":"driver"}"#);
     let key = run.vehicle.clone().unwrap();
-    // MC2: the parked garage chassis sleeps and a sleeping chassis does not steer. Wake it, as
-    // a car out of the garage would be.
-    let chassis = run.physics.chassis_handle(&key);
     for _ in 0..100 {
-        run.physics.edit_body(chassis, |b| b.wake_up(true));
         frame_with(
             &mut run,
             &reference,
@@ -366,9 +363,13 @@ fn tp_cp7_turned_wheels_stay_after_save_and_load() {
             },
         );
     }
-    seconds(&mut run, &reference, 1.);
     let steer = run.vehicles[&key].steer;
     assert!(steer.abs() > 0.5, "wheels turned: {steer}");
+    // A seated driver without steer keys centers the wheels. Nobody drives now: the steer stays.
+    // The closed doors block the exit (BL), so the player goes back to the spot on foot.
+    run.area.player.recover(on_foot, &mut run.physics);
+    seconds(&mut run, &reference, 1.);
+    assert_eq!(run.vehicles[&key].steer, steer, "wheels stay turned");
     let mut loaded = save_load(&run, &reference);
     seconds(&mut loaded, &reference, 1.);
     let key = loaded

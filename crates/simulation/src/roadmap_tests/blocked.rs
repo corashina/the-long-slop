@@ -5,7 +5,9 @@ use crate::simulation::{FIXED_DT, FrameInput, keys, player_keys};
 use crate::starting_area::GarageRuntime;
 use crate::vehicle::to_rapier;
 use crate::world::ObjectKey;
-use crate::world::stream::tests::car_types::{absolute, fill_fluids, hold, running};
+use crate::world::stream::tests::car_types::{
+    absolute, fill_fluids, hold, release_handbrake, running,
+};
 use crate::world::stream::tests::drive_out::{enter, park, place_car, road_points};
 use crate::world::stream::tests::kit::*;
 use rapier3d::math::Vector;
@@ -49,6 +51,7 @@ pub(super) fn road_lada(run: &mut GarageRuntime, reference: &ReferenceManifest) 
     );
     seconds(run, reference, 1.);
     assert!(running(run, &key), "the engine idles");
+    release_handbrake(run, reference, &key);
     key
 }
 
