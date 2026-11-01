@@ -394,6 +394,16 @@ impl InteractionState {
                 ActionMask::PUSH
             };
             a.context = FeedbackContext::Push;
+        } else if player.seated()
+            && self.held().is_none()
+            && use_target.is_none()
+            && grab_target.is_none()
+            && filling_target.is_none()
+            && installation_target.is_none()
+            && self.push.seat_push_hit(player, items, physics).is_some()
+        {
+            a.actions.0 |= ActionMask::PUSH;
+            a.context = FeedbackContext::Push;
         }
         let drink_guard = self.held().is_some_and(|held| {
             self.tank_rules

@@ -323,3 +323,208 @@ fn tp_pb6_f_on_a_push_grip_pushes_the_car_on_foot() {
     assert!(gripping > 100, "F holds the grip");
     assert!(moved > 0.5, "W pushes the car: {moved} m");
 }
+
+/// E held on a door or handle with mouse drag, in each direction until it moves.
+/// Source `fpscontroller.UseUsable`. Returns the change of its open value (0 to 1).
+fn drag_open(run: &mut GarageRuntime, reference: &ReferenceManifest, item: ItemId) -> f32 {
+    use crate::simulation::keys;
+    let value = |run: &GarageRuntime| run.area.interaction.mechanisms.value(item, false).unwrap();
+    let before = value(run);
+    let key = |held, pressed, released, mouse| FrameInput {
+        held,
+        pressed,
+        released,
+        mouse,
+        ..FrameInput::default()
+    };
+    input(run, reference, key(keys::USE, keys::USE, 0, [0.; 2]));
+    for mouse in [[6., 0.], [-6., 0.], [0., -6.], [0., 6.]] {
+        for _ in 0..30 {
+            input(run, reference, key(keys::USE, 0, 0, mouse));
+        }
+        if (value(run) - before).abs() > 0.05 {
+            break;
+        }
+    }
+    input(run, reference, key(0, 0, keys::USE, [0.; 2]));
+    (value(run) - before).abs()
+}
+
+/// PB6. Source `fpscontroller` seat push: seated, held F at a surface of another root pushes
+/// the seat body back from the camera with `seatPushForce`. The closed doors are the own car,
+/// so the player first opens the driver door from the seat with E.
+#[test]
+#[ignore = "requires the installed source export"]
+fn tp_pb6_f_from_a_seat_pushes_the_car_off_the_ground() {
+    use crate::interaction::feedback::ActionMask;
+    use crate::simulation::keys;
+    let (reference, mut run) = super::creatures::outdoors();
+    act(&mut run, &reference, r#"{"action":"seat","seat":"driver"}"#);
+    seconds(&mut run, &reference, 0.5);
+    assert!(run.area.player.seated());
+    assert_eq!(
+        run.area.player.seat_push_modifier(),
+        Some(1.),
+        "the Lada driver seat pushes with the full force"
+    );
+    let key = run.vehicle.clone().unwrap();
+    run.vehicles.get_mut(&key).unwrap().handbrake = false;
+    let car = run.area.player.seat_body().unwrap();
+    // The driver door is on the left: E drags it open from the seat.
+    look(&mut run, -90., -30.);
+    frame(&mut run, &reference);
+    let door = run.aim.use_target.map(|t| t.item).expect("the driver door");
+    assert!(run.area.interaction.mechanisms.contains(door));
+    let opened = drag_open(&mut run, &reference, door);
+    assert!(
+        opened > 0.1,
+        "E opens the driver door from the seat: {opened}"
+    );
+    seconds(&mut run, &reference, 0.5);
+    // Look out of the open door down at the ground.
+    let push_shown = |run: &GarageRuntime| {
+        let actions = run.area.interaction.available_actions(
+            &run.aim,
+            &run.area.player,
+            &run.area.items,
+            &run.physics,
+            run.needs_output(),
+        );
+        actions.actions.0 & ActionMask::PUSH != 0
+    };
+    let mut aim = None;
+    'search: for yaw in [-90.0f32, -75., -105., -60., -120.] {
+        for pitch in [-60.0f32, -50., -70., -80., -40.] {
+            look(&mut run, yaw, pitch);
+            frame(&mut run, &reference);
+            if push_shown(&run) {
+                aim = Some((yaw, pitch));
+                break 'search;
+            }
+        }
+    }
+    let (yaw, pitch) = aim.expect("the HUD shows push at the ground out of the open door");
+    eprintln!("push aim yaw {yaw} pitch {pitch}");
+    // The parked car stays without input.
+    let start = run.physics.rapier().bodies[car].translation();
+    for _ in 0..(1. / FIXED_DT) as usize {
+        look(&mut run, yaw, pitch);
+        input(&mut run, &reference, FrameInput::default());
+    }
+    let drift = (run.physics.rapier().bodies[car].translation() - start).length();
+    assert!(drift < 0.01, "the car stays without F: {drift} m");
+    let start = run.physics.rapier().bodies[car].translation();
+    for _ in 0..(3. / FIXED_DT) as usize {
+        look(&mut run, yaw, pitch);
+        input(
+            &mut run,
+            &reference,
+            FrameInput {
+                held: keys::GRAB,
+                ..FrameInput::default()
+            },
+        );
+    }
+    let moved = (run.physics.rapier().bodies[car].translation() - start).length();
+    eprintln!("the car moves {moved} m");
+    assert!(run.area.player.seated(), "the player stays seated");
+    assert!(moved > 0.3, "F from the seat pushes the car: {moved} m");
+}
+
+/// PB6. Source `usablescript` doors and handles of the garage: the use ray takes each one, and
+/// E with the mouse opens it. Car doors from outside are K3.
+#[test]
+#[ignore = "requires the installed source export"]
+fn tp_pb6_e_opens_the_garage_doors_and_handles() {
+    use rapier3d::parry::bounding_volume::Aabb;
+    let (reference, mut run) = load_garage();
+    settle(&mut run, &reference);
+    let home = run.area.player.body_pose(&run.physics);
+    let head = run.area.player.view(&run.physics).head_pose.position[1];
+    let controls: Vec<ItemId> = reference
+        .mechanisms
+        .iter()
+        .filter(|m| m.turn.is_none() && (m.rotation.is_some() || m.slide.is_some()))
+        .map(|m| m.item)
+        .collect();
+    assert!(controls.len() >= 10, "the garage doors and the tap handle");
+    let mut failed = Vec::new();
+    for item in controls {
+        // Aim points: the colliders of the item body nearest to the item pose, at head height
+        // where the collider reaches it.
+        let at = Vector::from_array(run.area.items.get(item).unwrap().pose.position);
+        let rapier = run.physics.rapier();
+        let mut boxes: Vec<_> = run
+            .area
+            .items
+            .get(item)
+            .and_then(|s| s.body)
+            .map(|b| {
+                rapier.bodies[b]
+                    .colliders()
+                    .iter()
+                    .map(|c| rapier.colliders[*c].compute_aabb())
+                    .collect()
+            })
+            .unwrap_or_default();
+        boxes.sort_by(|a: &Aabb, b: &Aabb| {
+            (a.center() - at)
+                .length()
+                .total_cmp(&(b.center() - at).length())
+        });
+        let floor = home.position[1];
+        // A collider above the head stands on an upper floor at its bottom.
+        let rise = boxes
+            .first()
+            .filter(|b| b.mins.y > head)
+            .map_or(0., |b| b.mins.y - (head - 1.6));
+        let mut points = vec![at];
+        for aabb in boxes.iter().take(3) {
+            let c = aabb.center();
+            let y = (head + rise).clamp(aabb.mins.y, aabb.maxs.y);
+            points.push(Vector::new(c.x, y, c.z));
+        }
+        // Stand on a ring around each point, on the home floor or at the floor of the item.
+        let mut aimed = false;
+        'search: for point in points {
+            for y in [floor, floor + rise] {
+                for radius in [0.7f32, 1.0, 0.4] {
+                    for k in 0..12 {
+                        let angle = k as f32 * std::f32::consts::TAU / 12.;
+                        let mut pose = home;
+                        pose.position = [
+                            point.x + radius * angle.cos(),
+                            y + 0.05,
+                            point.z + radius * angle.sin(),
+                        ];
+                        run.area.player.recover(pose, &mut run.physics);
+                        let hit = |run: &mut GarageRuntime| {
+                            run.area.player.look_at(point.to_array(), &run.physics);
+                            frame(run, &reference);
+                            run.aim.use_target.is_some_and(|t| t.item == item)
+                        };
+                        if (0..3).any(|_| hit(&mut run)) {
+                            // The player settles on the spot, then aims again.
+                            seconds(&mut run, &reference, 0.5);
+                            if (0..5).any(|_| hit(&mut run)) {
+                                aimed = true;
+                                break 'search;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let name = run.area.items.name(item).unwrap_or("").to_string();
+        let opened = if aimed {
+            drag_open(&mut run, &reference, item)
+        } else {
+            0.
+        };
+        eprintln!("{item:?} {name}: aimed {aimed}, opens {opened}");
+        if opened <= 0.1 {
+            failed.push((item, name, aimed));
+        }
+    }
+    assert!(failed.is_empty(), "E does not open: {failed:?}");
+}

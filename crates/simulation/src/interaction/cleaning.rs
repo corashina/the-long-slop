@@ -942,7 +942,8 @@ impl CleaningTools {
         }
     }
     /// Source `fpscontroller.pointKefe.Use` while the point input is held. `player` is the
-    /// player pose. The brush has no item: it ignores the item brush checks.
+    /// `pointAt` pose that carries the brush. The brush has no item: it ignores the item
+    /// brush checks.
     #[allow(clippy::too_many_arguments)]
     pub fn advance_player(
         &mut self,

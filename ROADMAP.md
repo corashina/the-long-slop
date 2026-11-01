@@ -64,7 +64,8 @@ Known failures on master e927770 (2026-10-31 headless run, export ee6554d), fix 
 - CP7: `tp_cp7_turned_wheels_stay_after_save_and_load`. The steer was 0 because the test waited 1 s with the driver seated, and a seated driver without steer keys centers the wheels. Fixed in code (#MC2): the player leaves the seat before the wait. Not run yet: run it after the next export.
 - WD3: `tp_wd3_each_melee_weapon_swings_with_each_key_and_breaks_a_bottle`. The export has melee weapon records only for the crowbar and the shovel. The katana, fly swatter and leg have none. The exporter skips a `meleeweaponscript` without a pickupable (the leg kick), and finds weapons only in selected world prototypes. Check the katana and fly swatter exclusion reasons in the export catalog.
 - WD20: `tp_wd20_a_hard_hit_breaks_a_tumbleweed_with_its_gib_and_it_stays_gone`. The tumbleweed gib prototype holds only a particle system: no body, pickup or renderer. So the gib spawns no item, and the test finds none. The export has no gib particle data. `tumbleweed_breaks_on_a_hard_drop_and_leaves_the_spawned_list` fails the same way.
-- No test yet (needs an export to write and run): CP2 loot radiator fan, PB6 doors and push from a seat, PB8 rub and wash, WD8 reload from carried ammo.
+- No test yet (needs an export to write and run): CP2 loot radiator fan, WD8 reload from carried ammo.
+- Export field added (#PB): `player.seat_push_force` (source `fpscontroller.seatPushForce`). Export ee6554d lacks it, so re-export before the next run.
 - MC2, older tests: `garage_start_car_drives_in_automatic`, `car07_drives_in_forced_automatic` and `start_cars_drive_save_and_load` now release the handbrake (#MC2). Not run yet. `two_ladas_drive_save_and_load` and `lada_tows_the_trailer_and_the_hitch_saves` apply torque with no handbrake, so the handbrake does not explain them. If they still fail, read the chassis collider names from `garage_start_car_drives_in_automatic`.
 - BL, older test: `start_car_driver_exits_in_garage` finds no clear exit.
 - Changed without a run, because the cloud has no export. Run them in the next test pass:
@@ -101,11 +102,6 @@ Prepare once:
 6. Save and load with the hose attached and with cargo locked.
 7. Park the Lada with the wheels turned. Save and load: the wheels stay turned.
 15. Paint a car part with loot spray paint. The can shows its color, sprays particles with sound, and runs out.
-
-### Player body and outfit
-
-6. Use doors and handles. Push a car from a seat.
-8. Hold Left Alt to rub dirt off a car and to wash a wash trigger.
 
 ### Weapons and damage
 

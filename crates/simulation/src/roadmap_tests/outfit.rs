@@ -1,7 +1,7 @@
 //! ROADMAP test pass: Player body and outfit rows on hands and glasses (PB7, PB8, PB23, PB25, PB26).
 use crate::boundary::{GlassesState, SimFrame};
 use crate::reference::{ItemId, ReferenceManifest};
-use crate::simulation::{FrameInput, player_keys};
+use crate::simulation::{FIXED_DT, FrameInput, player_keys};
 use crate::starting_area::GarageRuntime;
 use crate::world::stream::tests::kit::*;
 
@@ -276,4 +276,74 @@ fn tp_pb8_left_alt_points_the_hand_at_the_surface() {
         run.area.player.point().value < 0.1,
         "the release lowers the hand"
     );
+}
+
+/// PB8. Source `fpscontroller.pointKefe.Use` while Left Alt is held: the hand brush scrubs a
+/// garage cobweb (`washtriggerscript`, `CleanProperty` dust) until it is gone. The car blood is
+/// `CleanProperty` blood: the source table gives the hand (cleaning type 6) no wash, so only a
+/// sponge cleans it.
+#[test]
+#[ignore = "requires the installed source export"]
+fn tp_pb8_left_alt_rubs_a_cobweb_off_and_not_the_car_blood() {
+    use rapier3d::math::Vector;
+    let (reference, mut run) = load_garage();
+    settle(&mut run, &reference);
+    let c = &reference.conditions;
+    let hand = c.player_brush.tool.cleaning_type as usize;
+    for p in reference.world.prototypes.iter() {
+        if let Some(blood) = p.vehicle.as_ref().and_then(|v| v.blood.as_ref()) {
+            assert!(
+                !c.clean_tables[blood.permission as usize][hand],
+                "the hand does not wash car blood"
+            );
+        }
+    }
+    let home = run.area.player.body_pose(&run.physics);
+    // Visible cobwebs with their collider centers.
+    let webs: Vec<_> =
+        c.washes
+            .iter()
+            .filter(|w| run.area.interaction.conditions.wash(w.id).visible())
+            .filter_map(|w| {
+                let id = *w.colliders.first()?;
+                let (_, collider) =
+                    run.physics.rapier().colliders.iter().find(|(_, col)| {
+                        (col.user_data >> 64) as u32 == id.0 && col.is_enabled()
+                    })?;
+                Some((w.id, collider.compute_aabb().center()))
+            })
+            .collect();
+    assert!(!webs.is_empty(), "the garage has visible cobwebs");
+    let point = FrameInput {
+        player_held: player_keys::POINT,
+        ..FrameInput::default()
+    };
+    let step = |run: &mut GarageRuntime, input| super::weapons::input(run, &reference, input);
+    for (web, at) in webs {
+        // Stand 0.6 m away on the home floor (the point range is 1 m), and scrub with small
+        // look moves around the web.
+        let mut pose = home;
+        let away = (Vector::from_array(home.position) - at)
+            .with_y(0.)
+            .normalize_or_zero();
+        let stand = at + away * 0.6;
+        pose.position = [stand.x, home.position[1], stand.z];
+        run.area.player.recover(pose, &mut run.physics);
+        seconds(&mut run, &reference, 0.3);
+        for i in 0..(6. / FIXED_DT) as usize {
+            let wobble = if i % 2 == 0 { 0.03 } else { -0.03 };
+            let target = at + Vector::new(wobble, 0., -wobble);
+            run.area.player.look_at(target.to_array(), &run.physics);
+            step(&mut run, point);
+            if !run.area.interaction.conditions.wash(web).visible() {
+                eprintln!("{web:?} is gone after {:.2} s", i as f32 * FIXED_DT);
+                return;
+            }
+        }
+        eprintln!(
+            "{web:?} stays: progress {}",
+            run.area.interaction.conditions.wash(web).repair_progress
+        );
+    }
+    panic!("Left Alt rubs no cobweb off");
 }

@@ -119,6 +119,10 @@ pub struct SeatValues {
     pub driver: bool,
     pub driving2: bool,
     pub show_sleep_text: bool,
+    /// Source `seatscript.cantPushFromSeat`.
+    pub cant_push_from_seat: bool,
+    /// Source `seatscript.pushForce` when `usePushForceModifier` is set, else 1.
+    pub push_force_modifier: f32,
     pub exit: ExitReference,
 }
 
@@ -138,6 +142,8 @@ impl SeatValues {
             driver: seat.driver,
             driving2: seat.driving2,
             show_sleep_text: seat.show_sleep_text,
+            cant_push_from_seat: seat.cant_push_from_seat,
+            push_force_modifier: seat.push_force_modifier,
             exit: ExitReference::new(player, player.exit_distance, seat.min_exit_angle_degrees),
         }
     }
@@ -1190,6 +1196,14 @@ impl PlayerState {
         self.occupancy
             .as_ref()
             .is_some_and(|seat| seat.values.show_sleep_text)
+    }
+    /// The seat push force modifier, or `None` when the player does not sit or the seat
+    /// has `cantPushFromSeat`.
+    pub fn seat_push_modifier(&self) -> Option<f32> {
+        self.occupancy
+            .as_ref()
+            .filter(|seat| !seat.values.cant_push_from_seat)
+            .map(|seat| seat.values.push_force_modifier)
     }
     pub fn mode(&self) -> PlayerMode {
         if self.occupancy.is_some() {
